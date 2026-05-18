@@ -14,7 +14,7 @@ const SOURCES: ReadonlyArray<{
   description: string
   Icon: typeof Monitor
 }> = [
-  { id: 'screen', label: 'Écran complet', description: 'Capture tout l\'écran', Icon: Monitor },
+  { id: 'screen', label: 'Écran complet', description: "Capture tout l'écran", Icon: Monitor },
   { id: 'region', label: 'Région', description: 'Sélection rectangulaire', Icon: Square },
   { id: 'window', label: 'Fenêtre', description: 'Une application précise', Icon: AppWindow }
 ]
@@ -29,24 +29,50 @@ export function SourceSelector({ selected, onSelect }: SourceSelectorProps) {
             key={id}
             type="button"
             onClick={() => onSelect(id)}
-            className={`flex flex-col items-start gap-3 rounded-xl border p-5 text-left transition-all ${
-              isActive
-                ? 'border-otter-500 bg-slate-800 ring-2 ring-otter-500/40'
-                : 'border-slate-700 bg-slate-800/60 hover:border-slate-500 hover:bg-slate-800'
-            }`}
             aria-pressed={isActive}
+            className={`group relative overflow-hidden rounded-2xl p-5 text-left transition-all duration-300 ease-out
+              ${isActive
+                ? 'bg-gradient-to-br from-otter-500/20 to-otter-700/10 border border-otter-400/50 shadow-glow-otter ring-1 ring-otter-300/30'
+                : 'glass glass-interactive hover:-translate-y-0.5'}
+            `}
           >
-            <div
-              className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                isActive ? 'bg-otter-500/20 text-otter-500' : 'bg-slate-700 text-slate-300'
-              }`}
-            >
-              <Icon className="h-5 w-5" />
+            {/* Top highlight shine */}
+            <span
+              className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/40 to-transparent pointer-events-none"
+              aria-hidden
+            />
+
+            <div className="flex flex-col items-start gap-3.5">
+              <div
+                className={`relative flex h-12 w-12 items-center justify-center rounded-xl transition-all duration-300
+                  ${isActive
+                    ? 'bg-gradient-to-br from-otter-400 to-otter-600 shadow-glow-otter text-white ring-1 ring-otter-300/40'
+                    : 'bg-white/[0.06] border border-white/[0.1] text-otter-200 group-hover:bg-white/[0.1] group-hover:text-otter-100'}
+                `}
+              >
+                <Icon className="h-5.5 w-5.5" strokeWidth={1.75} />
+                {isActive && (
+                  <span
+                    className="absolute inset-0 rounded-xl bg-gradient-to-tr from-white/30 to-transparent pointer-events-none"
+                    aria-hidden
+                  />
+                )}
+              </div>
+              <div>
+                <p className={`text-base font-semibold ${isActive ? 'text-otter-50' : 'text-otter-100'}`}>
+                  {label}
+                </p>
+                <p className="mt-0.5 text-sm text-otter-200/60">{description}</p>
+              </div>
             </div>
-            <div>
-              <p className="text-base font-semibold text-slate-100">{label}</p>
-              <p className="text-sm text-slate-400">{description}</p>
-            </div>
+
+            {/* Active glow underline */}
+            {isActive && (
+              <span
+                className="absolute inset-x-5 bottom-0 h-px bg-gradient-to-r from-transparent via-otter-300/80 to-transparent"
+                aria-hidden
+              />
+            )}
           </button>
         )
       })}

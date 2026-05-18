@@ -46,25 +46,40 @@ export function Recording() {
     navigate('preview')
   }
 
+  const statusLabel = isPaused ? 'En pause' : isRecording ? 'Enregistrement' : 'Inactif'
+
   return (
-    <section className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-8">
-      <header className="flex items-center justify-between">
+    <section className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-8 lg:p-12">
+      {/* Status bar — glass panel with live indicator and timer */}
+      <header className="glass glass-shine flex items-center justify-between rounded-2xl px-5 py-4">
         <div className="flex items-center gap-3">
-          <motion.span
-            className="inline-block h-3 w-3 rounded-full bg-red-500"
-            animate={
-              isRecording && !isPaused
-                ? { opacity: [1, 0.3, 1], scale: [1, 1.2, 1] }
-                : { opacity: 0.5, scale: 1 }
-            }
-            transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
-            aria-hidden
-          />
-          <span className="text-sm font-medium uppercase tracking-wider text-slate-300">
-            {isPaused ? 'En pause' : isRecording ? 'Enregistrement' : 'Inactif'}
+          <span className="relative inline-flex h-3 w-3">
+            {isRecording && !isPaused && (
+              <motion.span
+                className="absolute inset-0 rounded-full bg-red-500"
+                animate={{ scale: [1, 1.8], opacity: [0.7, 0] }}
+                transition={{ duration: 1.4, repeat: Infinity, ease: 'easeOut' }}
+                aria-hidden
+              />
+            )}
+            <span
+              className={`relative h-3 w-3 rounded-full ${
+                isRecording && !isPaused
+                  ? 'bg-red-500 shadow-glow-red'
+                  : isPaused
+                    ? 'bg-fur-400'
+                    : 'bg-otter-700'
+              }`}
+            />
+          </span>
+          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-otter-200">
+            {statusLabel}
           </span>
         </div>
-        <div className="font-mono text-3xl text-slate-100 tabular-nums" aria-live="polite">
+        <div
+          className="font-mono text-3xl font-semibold text-otter-50 tabular-nums tracking-tight"
+          aria-live="polite"
+        >
           {formatElapsed(elapsed)}
         </div>
       </header>
@@ -73,13 +88,10 @@ export function Recording() {
 
       <AnnotationToolbar />
 
-      <div className="flex items-center justify-center gap-3">
+      {/* Action bar */}
+      <div className="flex items-center justify-center gap-3 pt-2">
         {isPaused ? (
-          <button
-            type="button"
-            onClick={handleResume}
-            className="flex items-center gap-2 rounded-lg bg-otter-600 px-4 py-2 text-sm font-medium text-white hover:bg-otter-500"
-          >
+          <button type="button" onClick={handleResume} className="btn-otter">
             <Play className="h-4 w-4" />
             <span>Reprendre</span>
           </button>
@@ -88,7 +100,7 @@ export function Recording() {
             type="button"
             onClick={handlePause}
             disabled={!isRecording}
-            className="flex items-center gap-2 rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600 disabled:opacity-50"
+            className="btn-glass"
           >
             <Pause className="h-4 w-4" />
             <span>Pause</span>
@@ -99,17 +111,13 @@ export function Recording() {
           type="button"
           onClick={handleBookmark}
           disabled={!isRecording}
-          className="flex items-center gap-2 rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600 disabled:opacity-50"
+          className="btn-glass"
         >
           <Bookmark className="h-4 w-4" />
           <span>Bookmark</span>
         </button>
 
-        <button
-          type="button"
-          onClick={handleStop}
-          className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500"
-        >
+        <button type="button" onClick={handleStop} className="btn-danger">
           <Square className="h-4 w-4" fill="currentColor" />
           <span>Arrêter</span>
         </button>

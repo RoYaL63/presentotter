@@ -25,20 +25,22 @@ export function AnnotationToolbar() {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/80 p-3">
+    <div className="glass glass-shine flex flex-wrap items-center gap-2 rounded-2xl p-3">
       <button
         type="button"
         onClick={() => setMode('off')}
         aria-pressed={mode === 'off'}
-        className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${
-          mode === 'off' ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:bg-slate-700/60 hover:text-slate-100'
+        className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200 ${
+          mode === 'off'
+            ? 'bg-white/[0.1] text-otter-50 shadow-glass-sm ring-1 ring-otter-400/30'
+            : 'text-otter-200/70 hover:bg-white/[0.06] hover:text-otter-50'
         }`}
       >
-        <MousePointer2 className="h-4 w-4" />
+        <MousePointer2 className="h-4 w-4" strokeWidth={1.75} />
         <span>Aucun</span>
       </button>
 
-      <div className="h-6 w-px bg-slate-700" aria-hidden />
+      <div className="h-7 w-px bg-white/[0.08]" aria-hidden />
 
       {TOOLS.map(({ id, label, Icon }) => {
         const active = mode === id
@@ -49,30 +51,38 @@ export function AnnotationToolbar() {
             onClick={() => handleModeClick(id)}
             aria-pressed={active}
             title={label}
-            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-              active ? 'bg-otter-500 text-white' : 'text-slate-300 hover:bg-slate-700'
+            className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-200 ${
+              active
+                ? 'bg-gradient-to-br from-otter-400 to-otter-600 text-white shadow-glow-otter ring-1 ring-otter-300/40'
+                : 'text-otter-200/80 hover:bg-white/[0.06] hover:text-otter-50'
             }`}
           >
-            <Icon className="h-4 w-4" />
+            {active && (
+              <span
+                className="absolute inset-0 rounded-xl bg-gradient-to-tr from-white/30 to-transparent pointer-events-none"
+                aria-hidden
+              />
+            )}
+            <Icon className="relative h-4 w-4" strokeWidth={2} />
           </button>
         )
       })}
 
-      <div className="h-6 w-px bg-slate-700" aria-hidden />
+      <div className="h-7 w-px bg-white/[0.08]" aria-hidden />
 
-      <label className="flex items-center gap-2 text-sm text-slate-300">
-        <span>Couleur</span>
+      <label className="flex items-center gap-2.5 text-sm text-otter-200/80">
+        <span className="text-xs uppercase tracking-wider">Couleur</span>
         <input
           type="color"
           value={color}
           onChange={(e) => setColor(e.target.value)}
           aria-label="Couleur d'annotation"
-          className="h-8 w-10 cursor-pointer rounded border border-slate-600 bg-transparent"
+          className="h-8 w-10 cursor-pointer rounded-lg border border-white/[0.15] bg-transparent shadow-glass-sm"
         />
       </label>
 
-      <label className="flex items-center gap-2 text-sm text-slate-300">
-        <span>Opacité</span>
+      <label className="flex items-center gap-2.5 text-sm text-otter-200/80">
+        <span className="text-xs uppercase tracking-wider">Opacité</span>
         <input
           type="range"
           min={0}
@@ -81,9 +91,11 @@ export function AnnotationToolbar() {
           value={opacity}
           onChange={(e) => setOpacity(Number(e.target.value))}
           aria-label="Opacité d'annotation"
-          className="h-1 w-24 cursor-pointer accent-otter-500"
+          className="h-1.5 w-28 cursor-pointer accent-otter-400"
         />
-        <span className="w-8 text-right text-xs text-slate-400">{Math.round(opacity * 100)}%</span>
+        <span className="w-10 text-right text-xs font-medium text-otter-300 tabular-nums">
+          {Math.round(opacity * 100)}%
+        </span>
       </label>
     </div>
   )

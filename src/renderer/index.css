@@ -2,21 +2,157 @@
 @tailwind components;
 @tailwind utilities;
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    width: 100%;
+  }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color: theme('colors.otter.50');
+    background-color: theme('colors.deep.950');
+    overflow: hidden;
+  }
+
+  /* Custom scrollbar — discrete, otter-themed */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(34, 211, 238, 0.15);
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(34, 211, 238, 0.3);
+    background-clip: content-box;
+  }
+
+  /* Selection — otter teal */
+  ::selection {
+    background: rgba(34, 211, 238, 0.3);
+    color: theme('colors.otter.50');
+  }
+
+  /* Focus outline — otter ring */
+  :focus-visible {
+    outline: 2px solid theme('colors.otter.400');
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  button:focus-visible,
+  a:focus-visible {
+    outline-offset: 4px;
+  }
 }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+@layer components {
+  /* ============================================================
+     LIQUID GLASS — reusable glassmorphism primitives
+     ============================================================ */
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  /* Base panel — frosted glass with subtle border + inner light */
+  .glass {
+    @apply relative bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] shadow-glass;
+  }
+
+  /* Strong glass — used for floating modals / record button */
+  .glass-strong {
+    @apply relative bg-white/[0.07] backdrop-blur-2xl border border-white/[0.12] shadow-glass-lg;
+  }
+
+  /* Subtle glass — sidebars, secondary surfaces */
+  .glass-subtle {
+    @apply relative bg-white/[0.025] backdrop-blur-xl border border-white/[0.06] shadow-glass-sm;
+  }
+
+  /* Hover lift state — adds otter-tinted glow on hover */
+  .glass-interactive {
+    @apply transition-all duration-300 ease-out hover:bg-white/[0.07] hover:border-otter-400/30 hover:shadow-glow-otter;
+  }
+
+  /* Glass shine — top highlight gradient overlay (use as ::before via this class) */
+  .glass-shine::before {
+    content: '';
+    @apply absolute inset-x-0 top-0 h-px pointer-events-none rounded-t-[inherit];
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.4) 50%,
+      transparent 100%
+    );
+  }
+
+  /* Liquid background — animated floating orbs container */
+  .liquid-bg {
+    @apply fixed inset-0 -z-10 overflow-hidden pointer-events-none;
+    background: radial-gradient(
+        ellipse at top left,
+        rgba(14, 116, 144, 0.25) 0%,
+        transparent 50%
+      ),
+      radial-gradient(
+        ellipse at bottom right,
+        rgba(187, 133, 76, 0.18) 0%,
+        transparent 50%
+      ),
+      linear-gradient(180deg, theme('colors.deep.950') 0%, theme('colors.deep.900') 100%);
+  }
+
+  .liquid-orb {
+    @apply absolute rounded-full opacity-30 blur-3xl;
+  }
+
+  /* Otter-themed primary button (filled) */
+  .btn-otter {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-medium
+           bg-gradient-to-br from-otter-400 to-otter-600 text-white
+           shadow-glow-otter ring-1 ring-otter-300/40
+           transition-all duration-200 ease-out
+           hover:shadow-glow-otter-lg hover:from-otter-300 hover:to-otter-500 hover:-translate-y-0.5
+           active:translate-y-0 active:shadow-glow-otter
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0;
+  }
+
+  /* Glass button (transparent, subtle) */
+  .btn-glass {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium
+           text-otter-100
+           bg-white/[0.05] backdrop-blur-xl border border-white/[0.1]
+           transition-all duration-200 ease-out
+           hover:bg-white/[0.1] hover:border-otter-400/40 hover:text-otter-50
+           active:bg-white/[0.08]
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  /* Danger / stop button */
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-medium
+           bg-gradient-to-br from-red-500 to-red-700 text-white
+           shadow-glow-red ring-1 ring-red-400/40
+           transition-all duration-200 ease-out
+           hover:from-red-400 hover:to-red-600 hover:-translate-y-0.5
+           active:translate-y-0;
+  }
 }
