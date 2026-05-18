@@ -1,0 +1,28 @@
+name: Feature Request 💡
+description: Proposer une nouvelle fonctionnalité
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Quel problème ça résout ?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Solution proposée
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Quel agent est concerné ?
+      options:
+        - Capture (Plongeon)
+        - Annotations (Pinceau)
+        - Sanitizer (Gardien)
+        - UI (Vitrine)
+        - Export (Castor)
+        - Library (Archive)
+        - Nouveau domaine

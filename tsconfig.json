@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "exactOptionalPropertyTypes": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@interfaces": ["./interfaces.ts"],
+      "@event-bus": ["./event-bus.ts"]
+    }
+  },
+  "include": ["src/renderer/**/*", "interfaces.ts", "event-bus.ts"],
+  "exclude": ["node_modules", "dist"]
+}

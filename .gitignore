@@ -1,0 +1,25 @@
+node_modules/
+dist/
+release/
+coverage/
+.DS_Store
+*.log
+*.swp
+*.swo
+*~
+.env
+.env.local
+.env.*.local
+.vscode/
+.idea/
+*.iml
+.cache/
+.turbo/
+
+# Private bootstrap / planning docs (contains secrets, local context)
+BOOTSTRAP_CLAUDE_CODE.md
+OTTERCAST_BMAD.md
+OTTERCAST_PRD.md
+PRESENTOTTER_CLAUDE_SKILLS.md
+.claude/settings.local.json
+

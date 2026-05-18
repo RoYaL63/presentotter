@@ -1,0 +1,43 @@
+name: Bug Report 🐛
+description: Quelque chose ne fonctionne pas
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Merci de remplir ce formulaire pour nous aider à reproduire le bug."
+  - type: input
+    id: version
+    attributes:
+      label: Version PresentOtter
+      placeholder: "ex: 0.1.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Système d'exploitation
+      options:
+        - Windows 11
+        - Windows 10
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Étapes pour reproduire
+      placeholder: "1. J'ouvre PresentOtter\n2. Je clique sur..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Comportement attendu
+  - type: textarea
+    id: actual
+    attributes:
+      label: Comportement observé
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (Ctrl+Shift+I dans PresentOtter)
+      render: shell

@@ -1,0 +1,32 @@
+appId: fr.otterwise.presentotter
+productName: PresentOtter
+copyright: "Copyright © 2025 OTTERWISE Solutions"
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - resources/**/*
+  - node_modules/**/*
+  - "!node_modules/.cache"
+extraResources:
+  - from: resources/ffmpeg
+    to: ffmpeg
+  - from: resources/tesseract
+    to: tesseract
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: build/installer.ico
+  installerHeaderIcon: build/installer.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: PresentOtter
+publish:
+  provider: github
+  releaseType: draft
