@@ -23,3 +23,18 @@ OTTERCAST_PRD.md
 PRESENTOTTER_CLAUDE_SKILLS.md
 .claude/settings.local.json
 
+# Defense-in-depth — files that historically tend to contain credentials.
+# Note: this does NOT replace a proper secrets manager. Never store live
+# tokens in a file even with gitignore; use Windows Credential Manager (see
+# SECURITY.md, "Provisioning a GitHub PAT" section).
+*.token
+*.pat
+*.pem
+*.key
+credentials.txt
+credentials.json
+secrets.json
+auth.json
+.netrc
+fake-secret-test.txt
+

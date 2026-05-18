@@ -52,6 +52,76 @@ git config --global credential.helper manager
 This stores PATs in Windows Credential Manager (encrypted at rest) instead
 of having them appear in shell history, transcripts or remote URLs.
 
+### Provisioning a GitHub PAT (Windows, PowerShell)
+
+**Never paste your live token into a chat (with any AI assistant or anyone
+else), a file, a URL, or a script.** Any token that has appeared in those
+places should be considered compromised — rotate it immediately at
+https://github.com/settings/tokens.
+
+The proper one-time provisioning flow:
+
+1. **Generate the token** on https://github.com/settings/tokens/new
+   - Note: descriptive (e.g. `PresentOtter dev — laptop`)
+   - Expiration: 30 to 90 days (never "no expiration")
+   - Scopes: `repo` (push/pull), `workflow` (only if you'll edit `.github/workflows/`)
+   - Click **Generate** and **copy** it to the clipboard. Do not paste it
+     anywhere yet.
+
+2. **Store it in Windows Credential Manager** via a single PowerShell
+   command. `Read-Host -AsSecureString` keeps the value out of the
+   command history; the here-string is piped directly into
+   `git credential approve` which writes to the credential manager:
+
+   ```powershell
+   $token = Read-Host "Paste your GitHub PAT (input will be hidden)" -AsSecureString
+   $plain = [System.Net.NetworkCredential]::new("", $token).Password
+   @"
+   protocol=https
+   host=github.com
+   username=YOUR_GITHUB_USERNAME
+   password=$plain
+   "@ | git credential approve
+   $plain = $null
+   Remove-Variable token, plain
+   ```
+
+   When prompted, paste your token (Ctrl+V) — PowerShell will show nothing,
+   that's intentional. Press Enter to confirm.
+
+3. **Verify** by pushing a small change:
+
+   ```bash
+   git push
+   ```
+
+   No password prompt should appear. If you see `fatal: could not read
+   Username for 'https://github.com'`, set the username once:
+
+   ```bash
+   git config --global user.name "YOUR_GITHUB_USERNAME"
+   git config --global credential.https://github.com.username YOUR_GITHUB_USERNAME
+   ```
+
+4. **Remove any token still embedded in a remote URL**:
+
+   ```bash
+   git remote set-url origin https://github.com/USER/REPO.git
+   ```
+
+### What to do if a token leaks
+
+1. **Revoke first, debug later.** Go to https://github.com/settings/tokens
+   and delete the leaked token. GitHub will reject any further use of it
+   within seconds.
+2. **Audit recent activity** on https://github.com/settings/security-log
+   — look for pushes, PRs, or releases you didn't make.
+3. **If the leaked token had `repo` scope and was active for a while**,
+   assume any private code it could see may have been read. Check for
+   unexpected commits on your branches.
+4. **Generate a new one** following the proper flow above. Never reuse a
+   revoked value.
+
 ### Rotate tokens after pair-programming sessions
 
 If you used a PAT during a debugging session — especially one shared with an
