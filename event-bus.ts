@@ -1,4 +1,4 @@
-import { Subject, Observable, filter } from 'rxjs'
+import { Subject, Observable, filter, map } from 'rxjs'
 import type {
   CaptureConfig,
   VideoFrame,
@@ -57,8 +57,9 @@ class EventBus {
 
   on<K extends keyof EventMap>(type: K): Observable<EventMap[K]> {
     return this.subject.pipe(
-      filter(e => e.type === type)
-    ) as Observable<EventMap[K]>
+      filter(e => e.type === type),
+      map(e => e.payload as EventMap[K])
+    )
   }
 }
 

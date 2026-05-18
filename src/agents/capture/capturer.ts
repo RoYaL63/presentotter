@@ -20,14 +20,16 @@ export class ScreenCapturer {
   private pausedDurationMs = 0
   private frames: VideoFrame[] = []
   private bookmarks = new BookmarkTracker()
-  private audio = new AudioCapturer({
-    system: this.config.audioInputs.system,
-    microphone: this.config.audioInputs.microphone
-  })
+  private audio: AudioCapturer
   private tickHandle: ReturnType<typeof setInterval> | null = null
   private frameIndex = 0
 
-  constructor(private readonly config: CaptureConfig) {}
+  constructor(private readonly config: CaptureConfig) {
+    this.audio = new AudioCapturer({
+      system: config.audioInputs.system,
+      microphone: config.audioInputs.microphone
+    })
+  }
 
   async start(): Promise<string> {
     if (this.status !== 'idle') {
