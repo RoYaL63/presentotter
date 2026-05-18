@@ -2,8 +2,8 @@ import { useState } from 'react'
 import type { CaptureConfig } from '@interfaces'
 import { RecordButton } from '../components/RecordButton'
 import { SourceSelector } from '../components/SourceSelector'
-import { useRecordingStore } from '../stores/useRecordingStore'
 import { useNavStore } from '../stores/useNavStore'
+import { orchestrator } from '../orchestrator'
 
 const DEFAULT_CONFIG: CaptureConfig = {
   source: 'screen',
@@ -18,13 +18,16 @@ const DEFAULT_CONFIG: CaptureConfig = {
 
 export function Home() {
   const [source, setSource] = useState<CaptureConfig['source']>('screen')
-  const startRecording = useRecordingStore((s) => s.startRecording)
   const navigate = useNavStore((s) => s.navigate)
 
-  const handleStart = () => {
+  const handleStart = async () => {
     const config: CaptureConfig = { ...DEFAULT_CONFIG, source }
-    startRecording(config)
-    navigate('recording')
+    try {
+      await orchestrator.startCapture(config)
+      navigate('recording')
+    } catch {
+      // l'event bus 'capture:error' sera capté ailleurs ; pas de UI feedback P0
+    }
   }
 
   return (

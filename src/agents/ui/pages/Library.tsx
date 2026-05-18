@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Pencil, Trash2 } from 'lucide-react'
-import { eventBus } from '@event-bus'
 import { useLibraryStore } from '../stores/useLibraryStore'
+import { orchestrator } from '../orchestrator'
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000)
@@ -26,10 +26,17 @@ function formatDate(date: Date): string {
 
 export function Library() {
   const recordings = useLibraryStore((s) => s.recordings)
-  const removeRecording = useLibraryStore((s) => s.removeRecording)
-  const renameRecording = useLibraryStore((s) => s.renameRecording)
+  const addRecording = useLibraryStore((s) => s.addRecording)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draftName, setDraftName] = useState('')
+
+  // Hydrate le store depuis la DB de l'orchestrator au montage
+  useEffect(() => {
+    const entries = orchestrator.getLibraryEntries()
+    for (const entry of entries) {
+      addRecording(entry)
+    }
+  }, [addRecording])
 
   const startRename = (id: string, currentName: string) => {
     setEditingId(id)
@@ -39,16 +46,14 @@ export function Library() {
   const commitRename = (id: string) => {
     const trimmed = draftName.trim()
     if (trimmed.length > 0) {
-      renameRecording(id, trimmed)
-      eventBus.emit('library:recording-renamed', { id, newName: trimmed })
+      orchestrator.renameLibraryEntry(id, trimmed)
     }
     setEditingId(null)
     setDraftName('')
   }
 
   const handleDelete = (id: string) => {
-    removeRecording(id)
-    eventBus.emit('library:recording-deleted', { id })
+    orchestrator.deleteLibraryEntry(id)
   }
 
   return (

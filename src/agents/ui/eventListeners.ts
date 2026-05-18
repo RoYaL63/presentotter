@@ -2,6 +2,7 @@ import type { Subscription } from 'rxjs'
 import { eventBus } from '@event-bus'
 import { useRecordingStore } from './stores/useRecordingStore'
 import { useLibraryStore } from './stores/useLibraryStore'
+import { useExportStore } from './stores/useExportStore'
 
 /**
  * Wire up the UI stores to the event bus so they reflect events emitted by
@@ -52,6 +53,30 @@ export function registerUIEventListeners(): () => void {
   subscriptions.push(
     eventBus.on('library:recording-tagged').subscribe(({ id, tags }) => {
       useLibraryStore.getState().setTags(id, tags)
+    })
+  )
+
+  subscriptions.push(
+    eventBus.on('export:started').subscribe(() => {
+      useExportStore.getState().setStarted()
+    })
+  )
+
+  subscriptions.push(
+    eventBus.on('export:progress').subscribe(({ percent, currentFrame, eta }) => {
+      useExportStore.getState().setProgress(percent, currentFrame, eta)
+    })
+  )
+
+  subscriptions.push(
+    eventBus.on('export:complete').subscribe(({ outputPath }) => {
+      useExportStore.getState().setComplete(outputPath)
+    })
+  )
+
+  subscriptions.push(
+    eventBus.on('export:error').subscribe(({ message }) => {
+      useExportStore.getState().setError(message)
     })
   )
 

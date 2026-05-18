@@ -1,11 +1,11 @@
 import { useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Bookmark, Pause, Play, Square } from 'lucide-react'
-import { eventBus } from '@event-bus'
 import { useRecordingStore } from '../stores/useRecordingStore'
 import { useNavStore } from '../stores/useNavStore'
 import { AnnotationToolbar } from '../components/AnnotationToolbar'
 import { VideoPreview } from '../components/VideoPreview'
+import { orchestrator } from '../orchestrator'
 
 function formatElapsed(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000)
@@ -21,11 +21,11 @@ export function Recording() {
   const isPaused = useRecordingStore((s) => s.isPaused)
   const elapsed = useRecordingStore((s) => s.elapsed)
   const sessionId = useRecordingStore((s) => s.sessionId)
-  const pauseRecording = useRecordingStore((s) => s.pauseRecording)
-  const resumeRecording = useRecordingStore((s) => s.resumeRecording)
-  const stopRecording = useRecordingStore((s) => s.stopRecording)
   const tick = useRecordingStore((s) => s.tick)
   const navigate = useNavStore((s) => s.navigate)
+
+  const handlePause = () => orchestrator.pauseCapture()
+  const handleResume = () => orchestrator.resumeCapture()
 
   useEffect(() => {
     if (!isRecording || isPaused) return
@@ -38,15 +38,11 @@ export function Recording() {
 
   const handleBookmark = () => {
     if (!sessionId) return
-    eventBus.emit('capture:bookmark', {
-      frameIndex: 0,
-      timestamp: Date.now(),
-      label: `Bookmark @ ${formatElapsed(elapsed)}`
-    })
+    orchestrator.addBookmark(`Bookmark @ ${formatElapsed(elapsed)}`)
   }
 
-  const handleStop = () => {
-    stopRecording()
+  const handleStop = async () => {
+    await orchestrator.stopCapture()
     navigate('preview')
   }
 
@@ -81,7 +77,7 @@ export function Recording() {
         {isPaused ? (
           <button
             type="button"
-            onClick={resumeRecording}
+            onClick={handleResume}
             className="flex items-center gap-2 rounded-lg bg-otter-600 px-4 py-2 text-sm font-medium text-white hover:bg-otter-500"
           >
             <Play className="h-4 w-4" />
@@ -90,7 +86,7 @@ export function Recording() {
         ) : (
           <button
             type="button"
-            onClick={pauseRecording}
+            onClick={handlePause}
             disabled={!isRecording}
             className="flex items-center gap-2 rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600 disabled:opacity-50"
           >

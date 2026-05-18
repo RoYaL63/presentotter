@@ -12,6 +12,10 @@ export {
 } from './stores/useAnnotationStore'
 export { useLibraryStore, type LibraryState } from './stores/useLibraryStore'
 export { useNavStore, type NavState, type PageName } from './stores/useNavStore'
+export { useExportStore } from './stores/useExportStore'
+
+// Integration
+export { UIOrchestrator, orchestrator } from './orchestrator'
 
 // Pages
 export { Home } from './pages/Home'
