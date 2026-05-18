@@ -8,6 +8,7 @@ import {
   Minus,
   MousePointer2,
   Pencil,
+  Radar,
   ShieldCheck,
   Square,
   Sun,
@@ -16,6 +17,7 @@ import {
   X
 } from 'lucide-react'
 import { SanitizerPopup } from './SanitizerPopup'
+import { SanitizerLiveEngine, type ScanResult } from './sanitizer-live'
 
 const TOOLS = [
   { id: 'select', label: 'Sélection · passe-through', shortcut: 'Alt+S', Icon: MousePointer2 },
@@ -46,7 +48,11 @@ export function Toolbar() {
   const [opacity] = useState<number>(1)
   const [minimized, setMinimized] = useState(false)
   const [sanitizerOpen, setSanitizerOpen] = useState(false)
+  const [liveOn, setLiveOn] = useState(false)
+  const [liveStatus, setLiveStatus] = useState<{ count: number; ms: number } | null>(null)
+  const [liveError, setLiveError] = useState<string | null>(null)
   const apiRef = useRef<PresentOtterAPI | undefined>(window.api)
+  const engineRef = useRef<SanitizerLiveEngine | null>(null)
 
   /** Push the current tool selection to the overlay & toggle click-through. */
   const sendTool = useCallback((next: ToolId) => {
@@ -96,6 +102,54 @@ export function Toolbar() {
   const handleUndo = () => apiRef.current?.undoOverlay()
   const handleConsole = () => apiRef.current?.openConsole()
   const handleClose = () => apiRef.current?.toolbarClose()
+
+  const handleScanResult = useCallback((result: ScanResult) => {
+    setLiveStatus({ count: result.masks.length, ms: result.scanDurationMs })
+    setLiveError(null)
+    apiRef.current?.setLiveMasks(result.masks)
+  }, [])
+
+  const handleToggleLive = useCallback(async () => {
+    const api = apiRef.current
+    if (!api) return
+    if (liveOn) {
+      // Stop
+      setLiveOn(false)
+      setLiveStatus(null)
+      api.clearLiveMasks()
+      if (engineRef.current) {
+        await engineRef.current.stop()
+        engineRef.current = null
+      }
+      return
+    }
+    // Start
+    try {
+      setLiveError(null)
+      setLiveOn(true)
+      const engine = new SanitizerLiveEngine()
+      engineRef.current = engine
+      await engine.start(2000, handleScanResult)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setLiveError(message)
+      setLiveOn(false)
+      if (engineRef.current) {
+        void engineRef.current.stop()
+        engineRef.current = null
+      }
+    }
+  }, [liveOn, handleScanResult])
+
+  // Tear down the engine when the toolbar unmounts (app quit)
+  useEffect(() => {
+    return () => {
+      if (engineRef.current !== null) {
+        void engineRef.current.stop()
+        engineRef.current = null
+      }
+    }
+  }, [])
 
   const handleMinimize = () => {
     setMinimized(true)
@@ -265,11 +319,41 @@ export function Toolbar() {
 
           <div className="mx-1 h-7 w-px bg-white/[0.08]" aria-hidden />
 
+          {/* LIVE Sanitizer toggle — scans the screen with OCR and masks secrets
+              on the overlay in real time. Visible to anyone watching your
+              screen share. */}
+          <button
+            type="button"
+            onClick={handleToggleLive}
+            aria-pressed={liveOn}
+            title={
+              liveOn
+                ? `Sanitizer LIVE actif · masque en direct${liveStatus ? ` · ${liveStatus.count} zone(s) en ${liveStatus.ms}ms` : ''}`
+                : 'Activer le Sanitizer LIVE · scan continu de l\'écran'
+            }
+            aria-label="Sanitizer LIVE"
+            className={`relative flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-200 ${
+              liveOn
+                ? 'bg-gradient-to-br from-otter-400 to-otter-600 text-white shadow-glow-otter ring-1 ring-otter-300/40'
+                : 'text-otter-300 hover:bg-otter-500/15 hover:text-otter-200'
+            }`}
+          >
+            <Radar className={`relative h-4 w-4 ${liveOn ? 'animate-pulse' : ''}`} strokeWidth={2} />
+            {liveOn && liveStatus !== null && liveStatus.count > 0 && (
+              <span
+                className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white tabular-nums shadow-glow-red"
+                aria-label={`${liveStatus.count} secret(s) détecté(s)`}
+              >
+                {liveStatus.count}
+              </span>
+            )}
+          </button>
+
           <button
             type="button"
             onClick={() => setSanitizerOpen(true)}
-            title="Sanitizer · vérifier un texte / une clé"
-            aria-label="Ouvrir le sanitizer"
+            title="Sanitizer · vérifier un texte collé"
+            aria-label="Ouvrir le sanitizer manuel"
             className="flex h-9 w-9 items-center justify-center rounded-xl text-otter-300 transition-all hover:bg-otter-500/15 hover:text-otter-200"
           >
             <ShieldCheck className="h-4 w-4" strokeWidth={2} />
@@ -311,6 +395,23 @@ export function Toolbar() {
       </div>
 
       {sanitizerOpen && <SanitizerPopup onClose={() => setSanitizerOpen(false)} />}
+
+      {liveError !== null && (
+        <div
+          role="alert"
+          className="pointer-events-auto absolute top-24 left-1/2 -translate-x-1/2 rounded-xl border border-red-400/40 bg-red-950/80 backdrop-blur-xl px-4 py-2 text-xs text-red-100 shadow-glass animate-fade-in-up"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          <strong className="font-semibold">Sanitizer LIVE indisponible :</strong> {liveError}
+          <button
+            type="button"
+            onClick={() => setLiveError(null)}
+            className="ml-3 text-red-200/70 hover:text-red-100"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   )
 }

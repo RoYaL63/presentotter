@@ -33,6 +33,29 @@ const api = {
   clearOverlay: () => ipcRenderer.send('overlay:clear'),
   undoOverlay: () => ipcRenderer.send('overlay:undo'),
 
+  // ---------- Live sanitizer ----------
+
+  /** Push a fresh set of live-mask rectangles to the overlay. */
+  setLiveMasks: (zones: Array<{ x: number; y: number; width: number; height: number; label: string }>) =>
+    ipcRenderer.send('overlay:set-live-masks', zones),
+  clearLiveMasks: () => ipcRenderer.send('overlay:clear-live-masks'),
+
+  onSetLiveMasks: (
+    cb: (zones: Array<{ x: number; y: number; width: number; height: number; label: string }>) => void
+  ) => {
+    const handler = (
+      _e: unknown,
+      zones: Array<{ x: number; y: number; width: number; height: number; label: string }>
+    ) => cb(zones)
+    ipcRenderer.on('overlay:set-live-masks', handler)
+    return () => ipcRenderer.off('overlay:set-live-masks', handler)
+  },
+  onClearLiveMasks: (cb: () => void) => {
+    const handler = () => cb()
+    ipcRenderer.on('overlay:clear-live-masks', handler)
+    return () => ipcRenderer.off('overlay:clear-live-masks', handler)
+  },
+
   /** Toggle whether the overlay catches pointer events (false = click-through). */
   setOverlayInteractive: (interactive: boolean) =>
     ipcRenderer.send('overlay:set-interactive', interactive),

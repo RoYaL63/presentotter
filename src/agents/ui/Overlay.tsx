@@ -35,6 +35,7 @@ export function Overlay() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const shapesRef = useRef<Shape[]>([])
   const draftRef = useRef<Shape | null>(null)
+  const liveMasksRef = useRef<LiveMask[]>([])
   const idCounter = useRef(0)
 
   const [tool, setTool] = useState<ToolId>('select')
@@ -59,6 +60,14 @@ export function Overlay() {
       shapesRef.current.pop()
       redraw()
     })
+    const off7 = api.onSetLiveMasks((zones) => {
+      liveMasksRef.current = zones
+      redraw()
+    })
+    const off8 = api.onClearLiveMasks(() => {
+      liveMasksRef.current = []
+      redraw()
+    })
     return () => {
       off1()
       off2()
@@ -66,6 +75,8 @@ export function Overlay() {
       off4()
       off5()
       off6()
+      off7()
+      off8()
     }
   }, [])
 
@@ -98,6 +109,13 @@ export function Overlay() {
     const h = window.innerHeight
     ctx.clearRect(0, 0, w, h)
 
+    // 1. Live sanitizer masks — drawn FIRST so any manual annotation can sit
+    //    on top. Filled black with a thin red border + tiny pattern label.
+    for (const mask of liveMasksRef.current) {
+      drawLiveMask(ctx, mask)
+    }
+
+    // 2. Manual annotations
     for (const shape of shapesRef.current) {
       drawShape(ctx, shape, w, h)
     }
@@ -280,6 +298,28 @@ function drawShape(
     }
   }
 
+  ctx.restore()
+}
+
+function drawLiveMask(ctx: CanvasRenderingContext2D, mask: LiveMask): void {
+  ctx.save()
+  // Solid black panel — completely covers the underlying pixels
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.96)'
+  ctx.fillRect(mask.x, mask.y, mask.width, mask.height)
+  // Red dashed border so the user notices the masked zone
+  ctx.strokeStyle = 'rgba(239, 68, 68, 0.9)'
+  ctx.lineWidth = 1.5
+  ctx.setLineDash([4, 4])
+  ctx.strokeRect(mask.x + 0.5, mask.y + 0.5, mask.width - 1, mask.height - 1)
+  ctx.setLineDash([])
+  // Pattern label baked top-left
+  const fontSize = Math.min(11, Math.max(9, Math.floor(mask.height * 0.55)))
+  if (mask.height >= 14) {
+    ctx.font = `600 ${fontSize}px Inter, system-ui, sans-serif`
+    ctx.textBaseline = 'top'
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.95)'
+    ctx.fillText(`🛡 ${mask.label}`, mask.x + 4, mask.y + 2)
+  }
   ctx.restore()
 }
 

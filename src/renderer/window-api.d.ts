@@ -15,6 +15,14 @@ declare global {
     | 'text'
     | 'spotlight'
 
+  interface LiveMask {
+    x: number
+    y: number
+    width: number
+    height: number
+    label: string
+  }
+
   interface PresentOtterAPI {
     getRole(): Promise<'toolbar' | 'overlay' | 'console'>
     appVersion(): Promise<string>
@@ -27,6 +35,11 @@ declare global {
     undoOverlay(): void
     setOverlayInteractive(interactive: boolean): void
     setOverlayVisible(visible: boolean): void
+
+    setLiveMasks(zones: LiveMask[]): void
+    clearLiveMasks(): void
+    onSetLiveMasks(cb: (zones: LiveMask[]) => void): () => void
+    onClearLiveMasks(cb: () => void): () => void
 
     onSetTool(cb: (tool: ToolName) => void): () => void
     onSetColor(cb: (hex: string) => void): () => void

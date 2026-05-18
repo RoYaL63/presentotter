@@ -1,4 +1,13 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, screen, type WebContents } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  desktopCapturer,
+  globalShortcut,
+  ipcMain,
+  screen,
+  session,
+  type WebContents
+} from 'electron'
 import path from 'path'
 
 /**
@@ -199,6 +208,15 @@ function registerIpcHandlers(): void {
     }
   })
 
+  // Live sanitizer: forward bounding-box masks from the toolbar (which runs
+  // the OCR + Gardien scan) to the overlay (which draws them on top).
+  ipcMain.on('overlay:set-live-masks', (_e, zones: unknown) => {
+    forwardToOverlay('overlay:set-live-masks', zones)
+  })
+  ipcMain.on('overlay:clear-live-masks', () => {
+    forwardToOverlay('overlay:clear-live-masks')
+  })
+
   // Console (full app) — opens the multi-page UI from the toolbar
   ipcMain.on('console:open', () => {
     const win = new BrowserWindow({
@@ -293,7 +311,33 @@ function registerGlobalShortcuts(): void {
   }
 }
 
+/**
+ * Wire navigator.mediaDevices.getDisplayMedia() in the renderer to the
+ * primary screen source. This lets the toolbar capture frames for the live
+ * sanitizer scan without any user prompt (it stays inside the Electron app).
+ */
+function configureDisplayMedia(): void {
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    desktopCapturer
+      .getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } })
+      .then((sources) => {
+        const primary = sources[0]
+        if (primary) {
+          callback({ video: primary })
+        } else {
+          // The runtime tolerates an empty object meaning "user denied".
+          callback({})
+        }
+      })
+      .catch((err: unknown) => {
+        console.error('[main] desktopCapturer.getSources failed:', err)
+        callback({})
+      })
+  })
+}
+
 app.whenReady().then(() => {
+  configureDisplayMedia()
   registerIpcHandlers()
   overlayWindow = createOverlayWindow()
   toolbarWindow = createToolbarWindow()
