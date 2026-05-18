@@ -18,6 +18,11 @@
       "@event-bus": ["./event-bus.ts"]
     }
   },
-  "include": ["src/renderer/**/*", "src/agents/ui/**/*", "interfaces.ts", "event-bus.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "src/renderer/**/*",
+    "src/agents/**/*",
+    "interfaces.ts",
+    "event-bus.ts"
+  ],
+  "exclude": ["node_modules", "dist", "src/agents/**/__tests__/**"]
 }
