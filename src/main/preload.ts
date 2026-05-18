@@ -74,6 +74,13 @@ const api = {
     return () => ipcRenderer.off('overlay:undo', handler)
   },
 
+  /** Toolbar-side: tool change emitted by a global shortcut (Alt+P etc). */
+  onToolbarToolChanged: (cb: (tool: ToolName) => void) => {
+    const handler = (_e: unknown, tool: ToolName) => cb(tool)
+    ipcRenderer.on('toolbar:tool-changed', handler)
+    return () => ipcRenderer.off('toolbar:tool-changed', handler)
+  },
+
   // ---------- Window controls ----------
 
   toolbarMinimize: () => ipcRenderer.send('toolbar:minimize'),

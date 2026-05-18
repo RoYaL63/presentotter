@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen, type WebContents } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, screen, type WebContents } from 'electron'
 import path from 'path'
 
 /**
@@ -220,12 +220,90 @@ function registerIpcHandlers(): void {
   })
 }
 
+/**
+ * Selects a tool on the overlay AND flips overlay interactivity.
+ * 'select' stays click-through (so the user can interact with apps below);
+ * any drawing tool captures pointer events on the overlay.
+ */
+function selectToolFromShortcut(tool: string): void {
+  forwardToOverlay('overlay:set-tool', tool)
+  if (overlayWindow === null || overlayWindow.isDestroyed()) return
+  if (tool === 'select') {
+    overlayWindow.setIgnoreMouseEvents(true, { forward: true })
+    overlayWindow.setFocusable(false)
+  } else {
+    overlayWindow.setIgnoreMouseEvents(false)
+    overlayWindow.setFocusable(true)
+  }
+  // Also tell the toolbar so its UI stays in sync
+  if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
+    toolbarWindow.webContents.send('toolbar:tool-changed', tool)
+  }
+}
+
+/**
+ * Register OS-level shortcuts that work even when another app has focus
+ * (Google Meet tab, Zoom window, terminal, etc.). These are the user's
+ * primary entry point during a screen share.
+ *
+ * Conventions: Alt+<letter> to avoid colliding with the app under focus
+ * (Ctrl+Z is used by every editor).
+ */
+function registerGlobalShortcuts(): void {
+  const bindings: Array<{ accel: string; fn: () => void; label: string }> = [
+    { accel: 'Alt+S', fn: () => selectToolFromShortcut('select'), label: 'Select' },
+    { accel: 'Alt+P', fn: () => selectToolFromShortcut('pencil'), label: 'Pencil' },
+    { accel: 'Alt+R', fn: () => selectToolFromShortcut('rectangle'), label: 'Rectangle' },
+    { accel: 'Alt+O', fn: () => selectToolFromShortcut('circle'), label: 'Circle (oval)' },
+    { accel: 'Alt+A', fn: () => selectToolFromShortcut('arrow'), label: 'Arrow' },
+    { accel: 'Alt+T', fn: () => selectToolFromShortcut('text'), label: 'Text' },
+    { accel: 'Alt+L', fn: () => selectToolFromShortcut('spotlight'), label: 'Spotlight' },
+    { accel: 'Alt+Z', fn: () => forwardToOverlay('overlay:undo'), label: 'Undo' },
+    { accel: 'Alt+Shift+C', fn: () => forwardToOverlay('overlay:clear'), label: 'Clear all' },
+    {
+      accel: 'Alt+H',
+      fn: () => {
+        if (overlayWindow === null || overlayWindow.isDestroyed()) return
+        if (overlayWindow.isVisible()) overlayWindow.hide()
+        else overlayWindow.showInactive()
+      },
+      label: 'Hide / show overlay'
+    },
+    {
+      accel: 'Alt+B',
+      fn: () => {
+        if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
+        if (toolbarWindow.isVisible()) toolbarWindow.hide()
+        else toolbarWindow.show()
+      },
+      label: 'Hide / show toolbar'
+    },
+    {
+      accel: 'Escape',
+      fn: () => selectToolFromShortcut('select'),
+      label: 'Exit drawing (back to select)'
+    }
+  ]
+
+  for (const { accel, fn, label } of bindings) {
+    const ok = globalShortcut.register(accel, fn)
+    if (!ok) {
+      console.warn(`[shortcuts] Failed to register ${accel} (${label}) — likely already bound by the OS or another app.`)
+    }
+  }
+}
+
 app.whenReady().then(() => {
   registerIpcHandlers()
   overlayWindow = createOverlayWindow()
   toolbarWindow = createToolbarWindow()
+  registerGlobalShortcuts()
 }).catch((err: unknown) => {
   console.error('[main] startup failed:', err)
+})
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
 })
 
 app.on('window-all-closed', () => {

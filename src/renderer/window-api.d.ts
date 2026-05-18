@@ -34,6 +34,7 @@ declare global {
     onSetStrokeWidth(cb: (width: number) => void): () => void
     onClear(cb: () => void): () => void
     onUndo(cb: () => void): () => void
+    onToolbarToolChanged(cb: (tool: ToolName) => void): () => void
 
     toolbarMinimize(): void
     toolbarRestore(): void

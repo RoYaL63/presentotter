@@ -8,21 +8,23 @@ import {
   Minus,
   MousePointer2,
   Pencil,
+  ShieldCheck,
   Square,
   Sun,
   Type,
   Undo2,
   X
 } from 'lucide-react'
+import { SanitizerPopup } from './SanitizerPopup'
 
 const TOOLS = [
-  { id: 'select', label: 'Sélection (passe-through)', Icon: MousePointer2 },
-  { id: 'pencil', label: 'Crayon', Icon: Pencil },
-  { id: 'rectangle', label: 'Rectangle', Icon: Square },
-  { id: 'circle', label: 'Cercle', Icon: Circle },
-  { id: 'arrow', label: 'Flèche', Icon: ArrowUpRight },
-  { id: 'text', label: 'Texte', Icon: Type },
-  { id: 'spotlight', label: 'Spotlight', Icon: Sun }
+  { id: 'select', label: 'Sélection · passe-through', shortcut: 'Alt+S', Icon: MousePointer2 },
+  { id: 'pencil', label: 'Crayon', shortcut: 'Alt+P', Icon: Pencil },
+  { id: 'rectangle', label: 'Rectangle', shortcut: 'Alt+R', Icon: Square },
+  { id: 'circle', label: 'Cercle', shortcut: 'Alt+O', Icon: Circle },
+  { id: 'arrow', label: 'Flèche', shortcut: 'Alt+A', Icon: ArrowUpRight },
+  { id: 'text', label: 'Texte', shortcut: 'Alt+T', Icon: Type },
+  { id: 'spotlight', label: 'Spotlight', shortcut: 'Alt+L', Icon: Sun }
 ] as const
 
 type ToolId = (typeof TOOLS)[number]['id']
@@ -43,6 +45,7 @@ export function Toolbar() {
   const [strokeWidth, setStrokeWidth] = useState<number>(4)
   const [opacity] = useState<number>(1)
   const [minimized, setMinimized] = useState(false)
+  const [sanitizerOpen, setSanitizerOpen] = useState(false)
   const apiRef = useRef<PresentOtterAPI | undefined>(window.api)
 
   /** Push the current tool selection to the overlay & toggle click-through. */
@@ -74,7 +77,19 @@ export function Toolbar() {
     api.setTool(tool)
     api.setOverlayInteractive(tool !== 'select')
     // intentionally run once
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Listen to global keyboard shortcuts (Alt+P, Alt+R, Escape, ...) so the
+  // toolbar UI stays in sync when the user triggers tools without focus.
+  useEffect(() => {
+    const api = apiRef.current
+    if (!api) return
+    const off = api.onToolbarToolChanged((next) => {
+      // Narrow the IPC payload to our local ToolId set
+      const known = TOOLS.find((t) => t.id === next)
+      if (known) setTool(known.id)
+    })
+    return off
   }, [])
 
   const handleClear = () => apiRef.current?.clearOverlay()
@@ -142,7 +157,7 @@ export function Toolbar() {
           className="flex items-center gap-1"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          {TOOLS.map(({ id, label, Icon }) => {
+          {TOOLS.map(({ id, label, shortcut, Icon }) => {
             const active = tool === id
             return (
               <button
@@ -150,8 +165,8 @@ export function Toolbar() {
                 type="button"
                 onClick={() => sendTool(id)}
                 aria-pressed={active}
-                aria-label={label}
-                title={label}
+                aria-label={`${label} (${shortcut})`}
+                title={`${label} — ${shortcut}`}
                 className={`relative flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-200 ${
                   active
                     ? 'bg-gradient-to-br from-otter-400 to-otter-600 text-white shadow-glow-otter ring-1 ring-otter-300/40'
@@ -232,7 +247,7 @@ export function Toolbar() {
           <button
             type="button"
             onClick={handleUndo}
-            title="Annuler (dernier trait)"
+            title="Annuler le dernier trait — Alt+Z"
             aria-label="Annuler"
             className="flex h-9 w-9 items-center justify-center rounded-xl text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
           >
@@ -241,7 +256,7 @@ export function Toolbar() {
           <button
             type="button"
             onClick={handleClear}
-            title="Tout effacer"
+            title="Tout effacer — Alt+Shift+C"
             aria-label="Tout effacer"
             className="flex h-9 w-9 items-center justify-center rounded-xl text-otter-200/80 transition-all hover:bg-red-500/15 hover:text-red-200"
           >
@@ -252,8 +267,18 @@ export function Toolbar() {
 
           <button
             type="button"
+            onClick={() => setSanitizerOpen(true)}
+            title="Sanitizer · vérifier un texte / une clé"
+            aria-label="Ouvrir le sanitizer"
+            className="flex h-9 w-9 items-center justify-center rounded-xl text-otter-300 transition-all hover:bg-otter-500/15 hover:text-otter-200"
+          >
+            <ShieldCheck className="h-4 w-4" strokeWidth={2} />
+          </button>
+
+          <button
+            type="button"
             onClick={handleConsole}
-            title="Ouvrir la console (bibliothèque, paramètres)"
+            title="Ouvrir la console · bibliothèque, paramètres"
             aria-label="Ouvrir la console"
             className="flex h-9 w-9 items-center justify-center rounded-xl text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
           >
@@ -262,7 +287,7 @@ export function Toolbar() {
           <button
             type="button"
             onClick={handleMinimize}
-            title="Réduire en bulle"
+            title="Réduire en bulle · Alt+B masque la toolbar"
             aria-label="Réduire"
             className="flex h-9 w-9 items-center justify-center rounded-xl text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
           >
@@ -284,6 +309,8 @@ export function Toolbar() {
       <div className="sr-only" aria-hidden>
         Opacité: {opacity}
       </div>
+
+      {sanitizerOpen && <SanitizerPopup onClose={() => setSanitizerOpen(false)} />}
     </div>
   )
 }

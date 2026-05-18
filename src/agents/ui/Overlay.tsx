@@ -67,7 +67,6 @@ export function Overlay() {
       off5()
       off6()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ----- Canvas sizing -----
@@ -87,7 +86,6 @@ export function Overlay() {
     resize()
     window.addEventListener('resize', resize)
     return () => window.removeEventListener('resize', resize)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ----- Rendering -----
