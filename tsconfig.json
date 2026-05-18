@@ -21,8 +21,9 @@
   "include": [
     "src/renderer/**/*",
     "src/agents/**/*",
+    "integration-tests/**/*",
     "interfaces.ts",
     "event-bus.ts"
   ],
-  "exclude": ["node_modules", "dist", "src/agents/**/__tests__/**"]
+  "exclude": ["node_modules", "dist", "release"]
 }

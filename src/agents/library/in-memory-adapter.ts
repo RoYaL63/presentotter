@@ -72,10 +72,9 @@ export class InMemoryAdapter implements DatabaseAdapter {
 
   prepare(sql: string): PreparedStatement {
     const parsed = parseSql(sql)
-    const self = this
 
     return {
-      run(...params: unknown[]): PreparedStatementRunResult {
+      run: (...params: unknown[]): PreparedStatementRunResult => {
         switch (parsed.kind) {
           case 'insert': {
             const cols = parsed.columns ?? []
@@ -90,14 +89,14 @@ export class InMemoryAdapter implements DatabaseAdapter {
             if (id.length === 0) {
               return { changes: 0, lastInsertRowid: 0 }
             }
-            self.rows.set(id, row)
-            self.insertCounter += 1
-            return { changes: 1, lastInsertRowid: self.insertCounter }
+            this.rows.set(id, row)
+            this.insertCounter += 1
+            return { changes: 1, lastInsertRowid: this.insertCounter }
           }
           case 'updateById': {
             const setCols = parsed.setColumns ?? []
             const id = String(params[params.length - 1] ?? '')
-            const row = self.rows.get(id)
+            const row = this.rows.get(id)
             if (!row) {
               return { changes: 0, lastInsertRowid: 0 }
             }
@@ -107,28 +106,28 @@ export class InMemoryAdapter implements DatabaseAdapter {
                 row[key] = params[i] ?? null
               }
             }
-            self.rows.set(id, row)
+            this.rows.set(id, row)
             return { changes: 1, lastInsertRowid: 0 }
           }
           case 'deleteById': {
             const id = String(params[0] ?? '')
-            const existed = self.rows.delete(id)
+            const existed = this.rows.delete(id)
             return { changes: existed ? 1 : 0, lastInsertRowid: 0 }
           }
           default:
             return { changes: 0, lastInsertRowid: 0 }
         }
       },
-      get(...params: unknown[]): unknown {
+      get: (...params: unknown[]): unknown => {
         if (parsed.kind === 'selectById') {
           const id = String(params[0] ?? '')
-          return self.rows.get(id) ?? undefined
+          return this.rows.get(id) ?? undefined
         }
         return undefined
       },
-      all(..._params: unknown[]): unknown[] {
+      all: (..._params: unknown[]): unknown[] => {
         if (parsed.kind === 'selectAll') {
-          return Array.from(self.rows.values())
+          return Array.from(this.rows.values())
         }
         return []
       }

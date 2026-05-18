@@ -7,11 +7,19 @@ export default defineConfig({
     globals: true,
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      // 'json-summary' produit coverage/coverage-summary.json consommé par le CI.
+      reporter: ['text', 'json', 'json-summary', 'html'],
       exclude: [
         'node_modules/',
         'dist/',
-        'integration-tests/'
+        'release/',
+        'integration-tests/',
+        'src/main/',
+        'src/renderer/main.tsx',
+        'src/renderer/index.css',
+        'eslint.config.js',
+        'vite.config.ts',
+        'vitest.config.ts'
       ]
     }
   },

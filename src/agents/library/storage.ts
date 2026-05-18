@@ -18,9 +18,45 @@ export interface FileSystemAdapter {
   readFileSync(path: string): Buffer
 }
 
+/**
+ * Adapter no-op qui jette PresentOtterError sur toute opération.
+ *
+ * Renvoyé par `createNodeFsAdapter()` quand le runtime n'a pas accès à
+ * `node:fs` (renderer Electron sans `nodeIntegration`, navigateur, etc.).
+ * Cela évite un ReferenceError au module-load et offre un diagnostic clair
+ * si du code essaie quand même de toucher au filesystem côté renderer.
+ */
+function createUnavailableFsAdapter(): FileSystemAdapter {
+  const fail = (op: string): never => {
+    throw new Error(
+      `[PresentOtter] node:fs is unavailable in this runtime (renderer process? browser?). ` +
+        `Operation "${op}" must be routed through the main process via IPC.`
+    )
+  }
+  return {
+    existsSync: () => false,
+    unlinkSync: () => fail('unlinkSync'),
+    renameSync: () => fail('renameSync'),
+    mkdirSync: () => fail('mkdirSync'),
+    writeFileSync: () => fail('writeFileSync'),
+    readFileSync: () => fail('readFileSync')
+  }
+}
+
 export function createNodeFsAdapter(): FileSystemAdapter {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const fs = require('node:fs') as {
+  // `require` n'existe pas en renderer Electron avec nodeIntegration:false.
+  // On retourne un adapter no-op à la place — l'erreur sera explicite si
+  // quelqu'un essaie quand même de toucher au FS, plutôt qu'un crash silencieux.
+  type ReqFn = (id: string) => unknown
+  const req =
+    typeof globalThis !== 'undefined' &&
+    typeof (globalThis as { require?: ReqFn }).require === 'function'
+      ? (globalThis as { require: ReqFn }).require
+      : null
+  if (req === null) {
+    return createUnavailableFsAdapter()
+  }
+  const fs = req('node:fs') as {
     existsSync(p: string): boolean
     unlinkSync(p: string): void
     renameSync(from: string, to: string): void

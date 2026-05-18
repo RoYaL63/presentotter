@@ -148,5 +148,40 @@ export class UIOrchestrator {
   }
 }
 
-/** Singleton P0 — sera revu en Phase 4 si on veut isoler des instances par fenêtre. */
-export const orchestrator = new UIOrchestrator()
+/**
+ * Lazy singleton accessor.
+ *
+ * Pourquoi pas `export const orchestrator = new UIOrchestrator()` ?
+ * Le constructeur d'`UIOrchestrator` appelle `createNodeFsAdapter()` qui fait
+ * `require('node:fs')`. En renderer Electron (`nodeIntegration: false`),
+ * `require` n'existe pas → l'eager singleton crashait le bundle prod au
+ * chargement. En lazy, l'instanciation est différée jusqu'au 1er appel UI
+ * réel (et reste skippable côté renderer si la résolution main/renderer
+ * se fait via IPC en Phase 5).
+ */
+let _instance: UIOrchestrator | null = null
+
+export function getOrchestrator(): UIOrchestrator {
+  if (_instance === null) {
+    _instance = new UIOrchestrator()
+  }
+  return _instance
+}
+
+export function resetOrchestrator(): void {
+  if (_instance !== null) {
+    _instance.dispose()
+    _instance = null
+  }
+}
+
+/**
+ * @deprecated Utilise `getOrchestrator()` à la place. Conservé temporairement
+ * pour ne pas casser les imports des pages UI — sera retiré en Phase 5 quand
+ * l'IPC bridge remplacera l'accès direct aux agents depuis le renderer.
+ */
+export const orchestrator = new Proxy({} as UIOrchestrator, {
+  get(_target, prop: string | symbol) {
+    return Reflect.get(getOrchestrator(), prop)
+  }
+})
