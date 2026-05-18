@@ -49,6 +49,10 @@ export function Overlay() {
   const cursorEnabledRef = useRef(false)
   const cursorOnThisDisplayRef = useRef(false)
   const cursorColorRef = useRef<string>('#22d3ee')
+  // Live sanitizer masks render as DOM nodes (CSS backdrop-filter blur of the
+  // pixels behind the overlay) rather than canvas fills — gives a real
+  // frosted-glass blur on the secret, not an opaque black rectangle.
+  const [liveMasks, setLiveMasks] = useState<LiveMask[]>([])
   const overlayOriginRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
   const idCounter = useRef(0)
   const animationRef = useRef<number | null>(null)
@@ -78,11 +82,11 @@ export function Overlay() {
     })
     const off7 = api.onSetLiveMasks((zones) => {
       liveMasksRef.current = zones
-      redraw()
+      setLiveMasks(zones)
     })
     const off8 = api.onClearLiveMasks(() => {
       liveMasksRef.current = []
-      redraw()
+      setLiveMasks([])
     })
     const off9 = api.onCursorHighlight((enabled) => {
       cursorEnabledRef.current = enabled
@@ -188,25 +192,9 @@ export function Overlay() {
     const h = window.innerHeight
     ctx.clearRect(0, 0, w, h)
 
-    // 1. Live sanitizer masks — drawn FIRST so any manual annotation can sit
-    //    on top. Coordinates arrive in absolute screen-pixel space (the
-    //    sanitizer captures the primary display, whose top-left is the
-    //    desktop's 0,0); each overlay translates to its own local frame
-    //    via overlayOriginRef and only draws masks that intersect.
-    const origin = overlayOriginRef.current
-    for (const mask of liveMasksRef.current) {
-      const localX = mask.x - origin.x
-      const localY = mask.y - origin.y
-      if (
-        localX + mask.width < 0 ||
-        localY + mask.height < 0 ||
-        localX > w ||
-        localY > h
-      ) {
-        continue
-      }
-      drawLiveMask(ctx, { ...mask, x: localX, y: localY })
-    }
+    // Live sanitizer masks are rendered as DOM elements (see JSX below) with
+    // backdrop-filter blur, not canvas fills — so the masked pixels behind
+    // the overlay are actually frosted, not hidden under a black rectangle.
 
     // 2. Manual annotations
     for (const shape of shapesRef.current) {
@@ -324,6 +312,62 @@ export function Overlay() {
         onPointerCancel={onPointerUp}
         style={{ display: 'block', width: '100%', height: '100%' }}
       />
+
+      {/* Live sanitizer masks — DOM layer with real backdrop-filter blur.
+          Translated from absolute screen coords (captured display = 0,0) to
+          this overlay's local frame via overlayOriginRef. */}
+      {liveMasks.map((mask, idx) => {
+        const localX = mask.x - overlayOriginRef.current.x
+        const localY = mask.y - overlayOriginRef.current.y
+        // Clip masks that don't intersect this overlay's display
+        if (
+          localX + mask.width < 0 ||
+          localY + mask.height < 0 ||
+          localX > window.innerWidth ||
+          localY > window.innerHeight
+        ) {
+          return null
+        }
+        return (
+          <div
+            key={`live-mask-${idx}-${mask.x}-${mask.y}`}
+            style={{
+              position: 'absolute',
+              left: localX,
+              top: localY,
+              width: mask.width,
+              height: mask.height,
+              backdropFilter: 'blur(14px) saturate(1.3) brightness(0.85)',
+              WebkitBackdropFilter: 'blur(14px) saturate(1.3) brightness(0.85)',
+              background: 'rgba(239, 68, 68, 0.06)',
+              border: '1.5px dashed rgba(239, 68, 68, 0.75)',
+              borderRadius: 6,
+              boxShadow: '0 0 0 1px rgba(0, 0, 0, 0.4), 0 4px 14px rgba(0, 0, 0, 0.25)',
+              pointerEvents: 'none',
+              overflow: 'hidden'
+            }}
+            aria-label={`Zone masquée : ${mask.label}`}
+          >
+            {mask.height >= 20 && (
+              <span
+                style={{
+                  position: 'absolute',
+                  top: 2,
+                  left: 4,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: 'rgba(254, 226, 226, 0.95)',
+                  textShadow: '0 1px 2px rgba(0, 0, 0, 0.8)',
+                  letterSpacing: 0.3,
+                  pointerEvents: 'none'
+                }}
+              >
+                🛡 {mask.label}
+              </span>
+            )}
+          </div>
+        )
+      })}
 
       {textInput !== null && (
         <input
@@ -522,28 +566,6 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
     g: parseInt(clean.slice(2, 4), 16) || 0,
     b: parseInt(clean.slice(4, 6), 16) || 0
   }
-}
-
-function drawLiveMask(ctx: CanvasRenderingContext2D, mask: LiveMask): void {
-  ctx.save()
-  // Solid black panel — completely covers the underlying pixels
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.96)'
-  ctx.fillRect(mask.x, mask.y, mask.width, mask.height)
-  // Red dashed border so the user notices the masked zone
-  ctx.strokeStyle = 'rgba(239, 68, 68, 0.9)'
-  ctx.lineWidth = 1.5
-  ctx.setLineDash([4, 4])
-  ctx.strokeRect(mask.x + 0.5, mask.y + 0.5, mask.width - 1, mask.height - 1)
-  ctx.setLineDash([])
-  // Pattern label baked top-left
-  const fontSize = Math.min(11, Math.max(9, Math.floor(mask.height * 0.55)))
-  if (mask.height >= 14) {
-    ctx.font = `600 ${fontSize}px Inter, system-ui, sans-serif`
-    ctx.textBaseline = 'top'
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.95)'
-    ctx.fillText(`🛡 ${mask.label}`, mask.x + 4, mask.y + 2)
-  }
-  ctx.restore()
 }
 
 function drawArrow(

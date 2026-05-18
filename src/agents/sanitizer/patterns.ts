@@ -22,17 +22,53 @@ export interface SanitizePatternWithType extends SanitizePattern {
  */
 export const PATTERNS: SanitizePatternWithType[] = [
   {
-    name: 'openai-api-key',
-    regex: /sk-[a-zA-Z0-9]{20,}/g,
-    replacement: '[REDACTED:openai-api-key]',
+    // Anthropic must come BEFORE the generic sk- catch-all so its
+    // more specific match wins the precedence inside our overlap merger.
+    name: 'anthropic-api-key',
+    regex: /\bsk-ant-[a-zA-Z0-9_-]{20,}\b/g,
+    replacement: '[REDACTED:anthropic-api-key]',
     confidence: 0.98,
     zoneType: 'api-key'
   },
   {
-    name: 'anthropic-api-key',
-    regex: /sk-ant-[a-zA-Z0-9_-]{20,}/g,
-    replacement: '[REDACTED:anthropic-api-key]',
+    // Catches OpenAI (`sk-XXX`), Stripe (`sk_live_XXX`, `sk_test_XXX`),
+    // and any other vendor that uses an `sk` prefix followed by `-` or `_`.
+    // 16+ chars after the prefix to avoid matching `sk-foo` in a sentence.
+    name: 'sk-prefixed-key',
+    regex: /\bsk[-_][A-Za-z0-9_]{16,}\b/g,
+    replacement: '[REDACTED:sk-key]',
+    confidence: 0.95,
+    zoneType: 'api-key'
+  },
+  {
+    // Stripe public keys — not strictly a secret but you usually do not
+    // want them on screen during a demo either; lower confidence so the
+    // analyzer can dedupe with sk- if both fire.
+    name: 'stripe-publishable-key',
+    regex: /\bpk[-_](?:live|test)_[A-Za-z0-9]{16,}\b/g,
+    replacement: '[REDACTED:stripe-pk]',
+    confidence: 0.9,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'github-token',
+    regex: /\bgh[oprsu]_[A-Za-z0-9]{30,}\b/g,
+    replacement: '[REDACTED:github-pat]',
     confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'slack-token',
+    regex: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g,
+    replacement: '[REDACTED:slack-token]',
+    confidence: 0.95,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'google-oauth-token',
+    regex: /\bya29\.[A-Za-z0-9_-]{20,}\b/g,
+    replacement: '[REDACTED:google-oauth]',
+    confidence: 0.95,
     zoneType: 'api-key'
   },
   {

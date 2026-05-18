@@ -14,14 +14,35 @@ interface PatternCase {
 
 const CASES: PatternCase[] = [
   {
-    name: 'openai-api-key',
-    positive: 'My key is sk-ABCDEFGHIJ1234567890abcdef end',
+    // sk- (OpenAI) AND sk_ (Stripe, etc.) both covered now.
+    name: 'sk-prefixed-key',
+    positive: 'My key is sk_kichaehioipa8987848a64ef84f89ve4 end',
     negative: 'no secret here, just sk-short'
   },
   {
     name: 'anthropic-api-key',
     positive: 'Token: sk-ant-ABCDEFG_HIJ-1234567890abcdef',
     negative: 'plain text, no anthropic key sk-ant-tiny'
+  },
+  {
+    name: 'stripe-publishable-key',
+    positive: 'PK: pk_test_51HZJ4mLkdIwHfb6oABCDEFG123456 end',
+    negative: 'pk_short'
+  },
+  {
+    name: 'github-token',
+    positive: 'token=ghp_abcdef1234567890ABCDEFGHIJKLmnopqrst end',
+    negative: 'ghp_short'
+  },
+  {
+    name: 'slack-token',
+    positive: 'slack xoxb-12345-67890-abcdefGHIJ end',
+    negative: 'xoxb-short'
+  },
+  {
+    name: 'google-oauth-token',
+    positive: 'auth=ya29.A0AbCdEfGhIjKlMnOpQrStUvWxYz end',
+    negative: 'ya29.short'
   },
   {
     name: 'aws-access-key',
