@@ -26,6 +26,32 @@
     overflow: hidden;
   }
 
+  /* ------------------------------------------------------------------
+     Transparency contract for floating windows.
+     The toolbar and overlay BrowserWindows are created with transparent:true
+     so the OS lets the desktop show through. But Electron only honours that
+     if the HTML root nodes are themselves transparent — any opaque body bg
+     defeats it. We rely on data-mode set in src/renderer/main.tsx.
+     ------------------------------------------------------------------ */
+  html[data-mode='toolbar'],
+  html[data-mode='toolbar'] body,
+  html[data-mode='toolbar'] #root,
+  html[data-mode='overlay'],
+  html[data-mode='overlay'] body,
+  html[data-mode='overlay'] #root {
+    background: transparent !important;
+    background-color: transparent !important;
+  }
+  html[data-mode='overlay'] body {
+    /* Overlay must never block clicks at the body level; child elements
+       opt back in (the canvas re-enables pointer-events on its own). */
+    pointer-events: none;
+  }
+  html[data-mode='overlay'] #root,
+  html[data-mode='overlay'] canvas {
+    pointer-events: auto;
+  }
+
   /* Custom scrollbar — discrete, otter-themed */
   ::-webkit-scrollbar {
     width: 10px;

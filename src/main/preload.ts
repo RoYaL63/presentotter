@@ -104,6 +104,39 @@ const api = {
     return () => ipcRenderer.off('toolbar:tool-changed', handler)
   },
 
+  // ---------- Cursor highlight ----------
+
+  setCursorHighlight: (enabled: boolean) => ipcRenderer.send('cursor:set-highlight', enabled),
+
+  onCursorHighlight: (cb: (enabled: boolean) => void) => {
+    const handler = (_e: unknown, enabled: boolean) => cb(enabled)
+    ipcRenderer.on('cursor:set-highlight', handler)
+    return () => ipcRenderer.off('cursor:set-highlight', handler)
+  },
+
+  onCursorPosition: (
+    cb: (pos: {
+      screenX: number
+      screenY: number
+      onDisplayId: number
+      displayBounds: { x: number; y: number; width: number; height: number }
+      timestamp: number
+    }) => void
+  ) => {
+    const handler = (
+      _e: unknown,
+      pos: {
+        screenX: number
+        screenY: number
+        onDisplayId: number
+        displayBounds: { x: number; y: number; width: number; height: number }
+        timestamp: number
+      }
+    ) => cb(pos)
+    ipcRenderer.on('cursor:position', handler)
+    return () => ipcRenderer.off('cursor:position', handler)
+  },
+
   // ---------- Window controls ----------
 
   toolbarMinimize: () => ipcRenderer.send('toolbar:minimize'),

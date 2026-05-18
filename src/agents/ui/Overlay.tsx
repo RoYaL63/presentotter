@@ -31,12 +31,26 @@ type Shape =
  * `setIgnoreMouseEvents(false)` (the toolbar does that when a draw tool is
  * picked). Otherwise the overlay is fully click-through.
  */
+interface CursorSample {
+  x: number
+  y: number
+  t: number
+}
+
+const CURSOR_TRAIL_MS = 600
+const CURSOR_TRAIL_MAX = 60
+
 export function Overlay() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const shapesRef = useRef<Shape[]>([])
   const draftRef = useRef<Shape | null>(null)
   const liveMasksRef = useRef<LiveMask[]>([])
+  const cursorTrailRef = useRef<CursorSample[]>([])
+  const cursorEnabledRef = useRef(false)
+  const cursorOnThisDisplayRef = useRef(false)
+  const overlayOriginRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
   const idCounter = useRef(0)
+  const animationRef = useRef<number | null>(null)
 
   const [tool, setTool] = useState<ToolId>('select')
   const [color, setColor] = useState<string>('#ef4444')
@@ -68,6 +82,30 @@ export function Overlay() {
       liveMasksRef.current = []
       redraw()
     })
+    const off9 = api.onCursorHighlight((enabled) => {
+      cursorEnabledRef.current = enabled
+      if (!enabled) {
+        cursorTrailRef.current = []
+        redraw()
+      }
+    })
+    const off10 = api.onCursorPosition((pos) => {
+      if (!cursorEnabledRef.current) return
+      const origin = overlayOriginRef.current
+      // Translate global screen coords → this overlay's local (CSS) frame.
+      const localX = pos.screenX - origin.x
+      const localY = pos.screenY - origin.y
+      const w = window.innerWidth
+      const h = window.innerHeight
+      const onThisDisplay = localX >= 0 && localX <= w && localY >= 0 && localY <= h
+      cursorOnThisDisplayRef.current = onThisDisplay
+      if (onThisDisplay) {
+        cursorTrailRef.current.push({ x: localX, y: localY, t: pos.timestamp })
+        if (cursorTrailRef.current.length > CURSOR_TRAIL_MAX) {
+          cursorTrailRef.current.shift()
+        }
+      }
+    })
     return () => {
       off1()
       off2()
@@ -77,6 +115,41 @@ export function Overlay() {
       off6()
       off7()
       off8()
+      off9()
+      off10()
+    }
+  }, [])
+
+  // Each overlay needs to know its display origin to translate global cursor
+  // coordinates into its own local frame. We infer that from window.screenX/Y.
+  useEffect(() => {
+    const update = () => {
+      overlayOriginRef.current = { x: window.screenX, y: window.screenY }
+    }
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
+
+  // Continuous redraw loop when cursor highlight is on (trail decays over time)
+  useEffect(() => {
+    const loop = () => {
+      if (cursorEnabledRef.current) {
+        // Trim expired samples
+        const now = Date.now()
+        cursorTrailRef.current = cursorTrailRef.current.filter(
+          (s) => now - s.t < CURSOR_TRAIL_MS
+        )
+        redraw()
+      }
+      animationRef.current = window.requestAnimationFrame(loop)
+    }
+    animationRef.current = window.requestAnimationFrame(loop)
+    return () => {
+      if (animationRef.current !== null) {
+        window.cancelAnimationFrame(animationRef.current)
+        animationRef.current = null
+      }
     }
   }, [])
 
@@ -121,6 +194,11 @@ export function Overlay() {
     }
     if (draftRef.current) {
       drawShape(ctx, draftRef.current, w, h)
+    }
+
+    // 3. Cursor highlight (trail + halo) drawn on top
+    if (cursorEnabledRef.current && cursorOnThisDisplayRef.current) {
+      drawCursorHighlight(ctx, cursorTrailRef.current)
     }
   }
 
@@ -297,6 +375,54 @@ function drawShape(
       break
     }
   }
+
+  ctx.restore()
+}
+
+function drawCursorHighlight(
+  ctx: CanvasRenderingContext2D,
+  trail: CursorSample[]
+): void {
+  if (trail.length === 0) return
+  const last = trail[trail.length - 1]
+  if (!last) return
+  ctx.save()
+
+  // Smooth fading trail (older samples are more transparent + thinner)
+  if (trail.length >= 2) {
+    const now = Date.now()
+    for (let i = 1; i < trail.length; i++) {
+      const a = trail[i - 1]
+      const b = trail[i]
+      if (!a || !b) continue
+      const age = now - b.t
+      const t = Math.max(0, 1 - age / CURSOR_TRAIL_MS)
+      ctx.strokeStyle = `rgba(34, 211, 238, ${0.6 * t})`
+      ctx.lineWidth = 2 + 4 * t
+      ctx.lineCap = 'round'
+      ctx.beginPath()
+      ctx.moveTo(a.x, a.y)
+      ctx.lineTo(b.x, b.y)
+      ctx.stroke()
+    }
+  }
+
+  // Big glowing halo around the current cursor point
+  const grd = ctx.createRadialGradient(last.x, last.y, 4, last.x, last.y, 36)
+  grd.addColorStop(0, 'rgba(34, 211, 238, 0.55)')
+  grd.addColorStop(0.4, 'rgba(34, 211, 238, 0.25)')
+  grd.addColorStop(1, 'rgba(34, 211, 238, 0)')
+  ctx.fillStyle = grd
+  ctx.beginPath()
+  ctx.arc(last.x, last.y, 36, 0, Math.PI * 2)
+  ctx.fill()
+
+  // Crisp inner ring
+  ctx.strokeStyle = 'rgba(34, 211, 238, 0.95)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.arc(last.x, last.y, 10, 0, Math.PI * 2)
+  ctx.stroke()
 
   ctx.restore()
 }

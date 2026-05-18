@@ -6,35 +6,37 @@ import {
   ipcMain,
   screen,
   session,
+  type Display,
   type WebContents
 } from 'electron'
 import path from 'path'
 
 /**
- * PresentOtter main process.
+ * PresentOtter main process — multi-monitor edition.
  *
- * Spawns two coordinated windows:
+ * Windows spawned at startup:
  *
- * 1. **Toolbar** — small, frameless, transparent, always-on-top. Hosts the
- *    annotation tools and the recording controls. Visible on top of any other
- *    app (Google Meet, Zoom, Teams) so the user can drive PresentOtter while
- *    sharing their screen elsewhere.
+ * 1. **Toolbar** (1 instance) — small, frameless, transparent, always-on-top.
+ *    Hosts annotation tools, color swatches, live sanitizer toggle, cursor
+ *    highlight toggle, console launcher, minimize and quit.
  *
- * 2. **Overlay** — fullscreen, frameless, transparent, always-on-top. Acts as
- *    a click-through drawing canvas: it captures pointer events only when the
- *    toolbar selects a drawing tool ("interactive mode"); otherwise it lets
- *    clicks fall through to whatever is below. Anything drawn on it is part
- *    of the screen pixels — therefore captured by any screen-share tool.
+ * 2. **Overlays** (1 per Display) — fullscreen, frameless, transparent,
+ *    always-on-top, click-through by default. The toolbar issues IPC commands;
+ *    the main process forwards them to *every* overlay so annotations follow
+ *    the cursor across screens. New monitors plugged in at runtime spawn
+ *    a fresh overlay; unplugged ones are torn down.
  *
- * The toolbar issues IPC commands; the main process forwards them to the
- * overlay's WebContents.
+ * 3. **Console** (on demand) — the multi-page UI (Home/Library/Settings...)
+ *    opened by the Layout button in the toolbar.
  */
 
 let toolbarWindow: BrowserWindow | null = null
-let overlayWindow: BrowserWindow | null = null
+const overlayWindows = new Map<number, BrowserWindow>() // keyed by Display.id
+let cursorInterval: ReturnType<typeof setInterval> | null = null
 
 const isDev = !app.isPackaged
 const DEV_URL = 'http://localhost:5173'
+const CURSOR_POLL_MS = 16 // ~60 Hz
 
 function rendererUrl(hash: 'toolbar' | 'overlay' | 'console'): string {
   if (isDev) {
@@ -46,13 +48,14 @@ function rendererUrl(hash: 'toolbar' | 'overlay' | 'console'): string {
 
 function getWindowRole(wc: WebContents): 'toolbar' | 'overlay' | 'console' {
   if (toolbarWindow && wc.id === toolbarWindow.webContents.id) return 'toolbar'
-  if (overlayWindow && wc.id === overlayWindow.webContents.id) return 'overlay'
+  for (const w of overlayWindows.values()) {
+    if (w.webContents.id === wc.id) return 'overlay'
+  }
   return 'console'
 }
 
-function createOverlayWindow(): BrowserWindow {
-  const primary = screen.getPrimaryDisplay()
-  const { x, y, width, height } = primary.workArea
+function createOverlayWindow(display: Display): BrowserWindow {
+  const { x, y, width, height } = display.bounds
 
   const win = new BrowserWindow({
     x,
@@ -71,6 +74,7 @@ function createOverlayWindow(): BrowserWindow {
     alwaysOnTop: true,
     hasShadow: false,
     show: false,
+    backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -91,17 +95,25 @@ function createOverlayWindow(): BrowserWindow {
 
   win.once('ready-to-show', () => win.showInactive())
   win.on('closed', () => {
-    overlayWindow = null
+    overlayWindows.delete(display.id)
   })
 
   return win
 }
 
+function spawnOverlayForAllDisplays(): void {
+  for (const display of screen.getAllDisplays()) {
+    if (!overlayWindows.has(display.id)) {
+      overlayWindows.set(display.id, createOverlayWindow(display))
+    }
+  }
+}
+
 function createToolbarWindow(): BrowserWindow {
   const primary = screen.getPrimaryDisplay()
   const { x, width } = primary.workArea
-  const TOOLBAR_W = 720
-  const TOOLBAR_H = 88
+  const TOOLBAR_W = 760
+  const TOOLBAR_H = 96
 
   const win = new BrowserWindow({
     x: x + Math.floor((width - TOOLBAR_W) / 2),
@@ -128,15 +140,17 @@ function createToolbarWindow(): BrowserWindow {
   })
 
   win.setAlwaysOnTop(true, 'screen-saver')
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 
   void win.loadURL(rendererUrl('toolbar'))
 
   win.once('ready-to-show', () => win.show())
   win.on('closed', () => {
     toolbarWindow = null
-    if (overlayWindow !== null) {
-      overlayWindow.close()
+    for (const w of overlayWindows.values()) {
+      if (!w.isDestroyed()) w.close()
     }
+    overlayWindows.clear()
   })
 
   if (isDev) {
@@ -146,61 +160,99 @@ function createToolbarWindow(): BrowserWindow {
   return win
 }
 
-function forwardToOverlay<T>(channel: string, payload?: T): void {
-  if (overlayWindow === null || overlayWindow.isDestroyed()) return
-  overlayWindow.webContents.send(channel, payload)
+/** Send an event to every alive overlay window. */
+function forwardToOverlays<T>(channel: string, payload?: T): void {
+  for (const w of overlayWindows.values()) {
+    if (!w.isDestroyed()) w.webContents.send(channel, payload)
+  }
+}
+
+function setOverlaysInteractive(interactive: boolean): void {
+  for (const w of overlayWindows.values()) {
+    if (w.isDestroyed()) continue
+    if (interactive) {
+      w.setIgnoreMouseEvents(false)
+      w.setFocusable(true)
+    } else {
+      w.setIgnoreMouseEvents(true, { forward: true })
+      w.setFocusable(false)
+    }
+  }
+}
+
+function setOverlaysVisible(visible: boolean): void {
+  for (const w of overlayWindows.values()) {
+    if (w.isDestroyed()) continue
+    if (visible) w.showInactive()
+    else w.hide()
+  }
+}
+
+/**
+ * Start a 60 Hz poll of the OS cursor position and broadcast it to every
+ * overlay. Each overlay decides whether the cursor is on its display (via
+ * its own bounds, sent in payload). The renderer paints a halo + trail
+ * when cursor highlight is enabled by the user.
+ */
+function startCursorTracking(): void {
+  if (cursorInterval !== null) return
+  cursorInterval = setInterval(() => {
+    if (overlayWindows.size === 0) return
+    const pt = screen.getCursorScreenPoint()
+    // Identify which display the cursor is on so the overlay can map
+    // global screen coordinates to its own local frame.
+    const onDisplay = screen.getDisplayNearestPoint(pt)
+    forwardToOverlays('cursor:position', {
+      screenX: pt.x,
+      screenY: pt.y,
+      onDisplayId: onDisplay.id,
+      displayBounds: onDisplay.bounds,
+      timestamp: Date.now()
+    })
+  }, CURSOR_POLL_MS)
+}
+
+function stopCursorTracking(): void {
+  if (cursorInterval !== null) {
+    clearInterval(cursorInterval)
+    cursorInterval = null
+  }
 }
 
 function registerIpcHandlers(): void {
-  // Identify the calling window's role
   ipcMain.handle('window:get-role', (event) => getWindowRole(event.sender))
-
-  // App version (kept simple — no extra package import)
   ipcMain.handle('app:version', () => app.getVersion())
 
-  // Toolbar → Overlay : tool / color / opacity / stroke / clear / undo
+  // Toolbar → Overlay(s)
   ipcMain.on('overlay:set-tool', (_e, tool: string) =>
-    forwardToOverlay('overlay:set-tool', tool)
+    forwardToOverlays('overlay:set-tool', tool)
   )
   ipcMain.on('overlay:set-color', (_e, hex: string) =>
-    forwardToOverlay('overlay:set-color', hex)
+    forwardToOverlays('overlay:set-color', hex)
   )
   ipcMain.on('overlay:set-opacity', (_e, value: number) =>
-    forwardToOverlay('overlay:set-opacity', value)
+    forwardToOverlays('overlay:set-opacity', value)
   )
   ipcMain.on('overlay:set-stroke', (_e, width: number) =>
-    forwardToOverlay('overlay:set-stroke', width)
+    forwardToOverlays('overlay:set-stroke', width)
   )
-  ipcMain.on('overlay:clear', () => forwardToOverlay('overlay:clear'))
-  ipcMain.on('overlay:undo', () => forwardToOverlay('overlay:undo'))
+  ipcMain.on('overlay:clear', () => forwardToOverlays('overlay:clear'))
+  ipcMain.on('overlay:undo', () => forwardToOverlays('overlay:undo'))
 
-  // Overlay interactivity (toggle click-through)
-  ipcMain.on('overlay:set-interactive', (_e, interactive: boolean) => {
-    if (overlayWindow === null || overlayWindow.isDestroyed()) return
-    if (interactive) {
-      overlayWindow.setIgnoreMouseEvents(false)
-      overlayWindow.setFocusable(true)
-    } else {
-      overlayWindow.setIgnoreMouseEvents(true, { forward: true })
-      overlayWindow.setFocusable(false)
-    }
-  })
+  ipcMain.on('overlay:set-interactive', (_e, interactive: boolean) =>
+    setOverlaysInteractive(interactive)
+  )
+  ipcMain.on('overlay:set-visible', (_e, visible: boolean) =>
+    setOverlaysVisible(visible)
+  )
 
-  // Overlay visibility
-  ipcMain.on('overlay:set-visible', (_e, visible: boolean) => {
-    if (overlayWindow === null || overlayWindow.isDestroyed()) return
-    if (visible) overlayWindow.showInactive()
-    else overlayWindow.hide()
-  })
-
-  // Toolbar window controls
   ipcMain.on('toolbar:minimize', () => {
     if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
     toolbarWindow.setSize(72, 72, true)
   })
   ipcMain.on('toolbar:restore', () => {
     if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
-    toolbarWindow.setSize(720, 88, true)
+    toolbarWindow.setSize(760, 96, true)
   })
   ipcMain.on('toolbar:close', () => {
     if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
@@ -208,16 +260,22 @@ function registerIpcHandlers(): void {
     }
   })
 
-  // Live sanitizer: forward bounding-box masks from the toolbar (which runs
-  // the OCR + Gardien scan) to the overlay (which draws them on top).
+  // Live sanitizer masks (toolbar runs OCR, overlays render the rectangles)
   ipcMain.on('overlay:set-live-masks', (_e, zones: unknown) => {
-    forwardToOverlay('overlay:set-live-masks', zones)
+    forwardToOverlays('overlay:set-live-masks', zones)
   })
   ipcMain.on('overlay:clear-live-masks', () => {
-    forwardToOverlay('overlay:clear-live-masks')
+    forwardToOverlays('overlay:clear-live-masks')
   })
 
-  // Console (full app) — opens the multi-page UI from the toolbar
+  // Cursor highlight on/off
+  ipcMain.on('cursor:set-highlight', (_e, enabled: boolean) => {
+    forwardToOverlays('cursor:set-highlight', enabled)
+    if (enabled) startCursorTracking()
+    else stopCursorTracking()
+  })
+
+  // Console launcher
   ipcMain.on('console:open', () => {
     const win = new BrowserWindow({
       width: 1280,
@@ -238,35 +296,14 @@ function registerIpcHandlers(): void {
   })
 }
 
-/**
- * Selects a tool on the overlay AND flips overlay interactivity.
- * 'select' stays click-through (so the user can interact with apps below);
- * any drawing tool captures pointer events on the overlay.
- */
 function selectToolFromShortcut(tool: string): void {
-  forwardToOverlay('overlay:set-tool', tool)
-  if (overlayWindow === null || overlayWindow.isDestroyed()) return
-  if (tool === 'select') {
-    overlayWindow.setIgnoreMouseEvents(true, { forward: true })
-    overlayWindow.setFocusable(false)
-  } else {
-    overlayWindow.setIgnoreMouseEvents(false)
-    overlayWindow.setFocusable(true)
-  }
-  // Also tell the toolbar so its UI stays in sync
+  forwardToOverlays('overlay:set-tool', tool)
+  setOverlaysInteractive(tool !== 'select')
   if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
     toolbarWindow.webContents.send('toolbar:tool-changed', tool)
   }
 }
 
-/**
- * Register OS-level shortcuts that work even when another app has focus
- * (Google Meet tab, Zoom window, terminal, etc.). These are the user's
- * primary entry point during a screen share.
- *
- * Conventions: Alt+<letter> to avoid colliding with the app under focus
- * (Ctrl+Z is used by every editor).
- */
 function registerGlobalShortcuts(): void {
   const bindings: Array<{ accel: string; fn: () => void; label: string }> = [
     { accel: 'Alt+S', fn: () => selectToolFromShortcut('select'), label: 'Select' },
@@ -276,14 +313,15 @@ function registerGlobalShortcuts(): void {
     { accel: 'Alt+A', fn: () => selectToolFromShortcut('arrow'), label: 'Arrow' },
     { accel: 'Alt+T', fn: () => selectToolFromShortcut('text'), label: 'Text' },
     { accel: 'Alt+L', fn: () => selectToolFromShortcut('spotlight'), label: 'Spotlight' },
-    { accel: 'Alt+Z', fn: () => forwardToOverlay('overlay:undo'), label: 'Undo' },
-    { accel: 'Alt+Shift+C', fn: () => forwardToOverlay('overlay:clear'), label: 'Clear all' },
+    { accel: 'Alt+Z', fn: () => forwardToOverlays('overlay:undo'), label: 'Undo' },
+    { accel: 'Alt+Shift+C', fn: () => forwardToOverlays('overlay:clear'), label: 'Clear all' },
     {
       accel: 'Alt+H',
       fn: () => {
-        if (overlayWindow === null || overlayWindow.isDestroyed()) return
-        if (overlayWindow.isVisible()) overlayWindow.hide()
-        else overlayWindow.showInactive()
+        const anyVisible = [...overlayWindows.values()].some(
+          (w) => !w.isDestroyed() && w.isVisible()
+        )
+        setOverlaysVisible(!anyVisible)
       },
       label: 'Hide / show overlay'
     },
@@ -306,28 +344,19 @@ function registerGlobalShortcuts(): void {
   for (const { accel, fn, label } of bindings) {
     const ok = globalShortcut.register(accel, fn)
     if (!ok) {
-      console.warn(`[shortcuts] Failed to register ${accel} (${label}) — likely already bound by the OS or another app.`)
+      console.warn(`[shortcuts] Failed to register ${accel} (${label})`)
     }
   }
 }
 
-/**
- * Wire navigator.mediaDevices.getDisplayMedia() in the renderer to the
- * primary screen source. This lets the toolbar capture frames for the live
- * sanitizer scan without any user prompt (it stays inside the Electron app).
- */
 function configureDisplayMedia(): void {
   session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
     desktopCapturer
       .getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } })
       .then((sources) => {
         const primary = sources[0]
-        if (primary) {
-          callback({ video: primary })
-        } else {
-          // The runtime tolerates an empty object meaning "user denied".
-          callback({})
-        }
+        if (primary) callback({ video: primary })
+        else callback({})
       })
       .catch((err: unknown) => {
         console.error('[main] desktopCapturer.getSources failed:', err)
@@ -336,17 +365,47 @@ function configureDisplayMedia(): void {
   })
 }
 
-app.whenReady().then(() => {
-  configureDisplayMedia()
-  registerIpcHandlers()
-  overlayWindow = createOverlayWindow()
-  toolbarWindow = createToolbarWindow()
-  registerGlobalShortcuts()
-}).catch((err: unknown) => {
-  console.error('[main] startup failed:', err)
-})
+function setupDisplayHotPlug(): void {
+  // New monitor plugged in → spawn an overlay for it.
+  screen.on('display-added', (_e, display) => {
+    if (!overlayWindows.has(display.id)) {
+      overlayWindows.set(display.id, createOverlayWindow(display))
+    }
+  })
+  // Monitor unplugged → close its overlay.
+  screen.on('display-removed', (_e, display) => {
+    const w = overlayWindows.get(display.id)
+    if (w !== undefined && !w.isDestroyed()) {
+      w.close()
+    }
+    overlayWindows.delete(display.id)
+  })
+  // Resolution / position changed → reposition the existing overlay.
+  screen.on('display-metrics-changed', (_e, display) => {
+    const w = overlayWindows.get(display.id)
+    if (w !== undefined && !w.isDestroyed()) {
+      const { x, y, width, height } = display.bounds
+      w.setBounds({ x, y, width, height })
+    }
+  })
+}
+
+app
+  .whenReady()
+  .then(() => {
+    configureDisplayMedia()
+    registerIpcHandlers()
+    spawnOverlayForAllDisplays()
+    toolbarWindow = createToolbarWindow()
+    registerGlobalShortcuts()
+    setupDisplayHotPlug()
+  })
+  .catch((err: unknown) => {
+    console.error('[main] startup failed:', err)
+  })
 
 app.on('will-quit', () => {
+  stopCursorTracking()
   globalShortcut.unregisterAll()
 })
 
@@ -358,7 +417,7 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    overlayWindow = createOverlayWindow()
+    spawnOverlayForAllDisplays()
     toolbarWindow = createToolbarWindow()
   }
 })

@@ -41,6 +41,18 @@ declare global {
     onSetLiveMasks(cb: (zones: LiveMask[]) => void): () => void
     onClearLiveMasks(cb: () => void): () => void
 
+    setCursorHighlight(enabled: boolean): void
+    onCursorHighlight(cb: (enabled: boolean) => void): () => void
+    onCursorPosition(
+      cb: (pos: {
+        screenX: number
+        screenY: number
+        onDisplayId: number
+        displayBounds: { x: number; y: number; width: number; height: number }
+        timestamp: number
+      }) => void
+    ): () => void
+
     onSetTool(cb: (tool: ToolName) => void): () => void
     onSetColor(cb: (hex: string) => void): () => void
     onSetOpacity(cb: (value: number) => void): () => void
