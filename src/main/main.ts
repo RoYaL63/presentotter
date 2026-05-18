@@ -12,33 +12,39 @@ import {
 import path from 'path'
 
 /**
- * PresentOtter main process — multi-monitor edition.
+ * PresentOtter main process.
  *
- * Windows spawned at startup:
+ * Window model:
  *
- * 1. **Toolbar** (1 instance) — small, frameless, transparent, always-on-top.
- *    Hosts annotation tools, color swatches, live sanitizer toggle, cursor
- *    highlight toggle, console launcher, minimize and quit.
+ * 1. **Home** — primary, framed, classic app window. Always shown at startup.
+ *    Hosts a landing page where the user toggles the floating toolbar on/off,
+ *    accesses settings, library, manual sanitizer, etc. Closing the Home
+ *    window quits the app. Minimizing it keeps everything else (toolbar +
+ *    overlays) alive in the background.
  *
- * 2. **Overlays** (1 per Display) — fullscreen, frameless, transparent,
- *    always-on-top, click-through by default. The toolbar issues IPC commands;
- *    the main process forwards them to *every* overlay so annotations follow
- *    the cursor across screens. New monitors plugged in at runtime spawn
- *    a fresh overlay; unplugged ones are torn down.
+ * 2. **Toolbar** — small, frameless, transparent, always-on-top. Created on
+ *    demand from the Home page (or via IPC). Hosts the annotation tools and
+ *    triggers the overlays. Closing it with the ✕ destroys it AND the
+ *    overlays, but the Home stays — the user can re-enable from there.
  *
- * 3. **Console** (on demand) — the multi-page UI (Home/Library/Settings...)
- *    opened by the Layout button in the toolbar.
+ * 3. **Overlays** — one per Display, fullscreen, transparent, click-through.
+ *    Created together with the toolbar; destroyed when the toolbar closes.
+ *
+ * 4. **Console** — secondary window for Library / Preview / Settings. Opened
+ *    on demand from anywhere. Multiple are tolerated but only one at a time
+ *    is typical.
  */
 
+let homeWindow: BrowserWindow | null = null
 let toolbarWindow: BrowserWindow | null = null
 const overlayWindows = new Map<number, BrowserWindow>() // keyed by Display.id
 let cursorInterval: ReturnType<typeof setInterval> | null = null
 
 const isDev = !app.isPackaged
 const DEV_URL = 'http://localhost:5173'
-const CURSOR_POLL_MS = 16 // ~60 Hz
+const CURSOR_POLL_MS = 16
 
-function rendererUrl(hash: 'toolbar' | 'overlay' | 'console'): string {
+function rendererUrl(hash: 'home' | 'toolbar' | 'overlay' | 'console'): string {
   if (isDev) {
     return `${DEV_URL}/#${hash}`
   }
@@ -46,13 +52,55 @@ function rendererUrl(hash: 'toolbar' | 'overlay' | 'console'): string {
   return `file://${filePath}#${hash}`
 }
 
-function getWindowRole(wc: WebContents): 'toolbar' | 'overlay' | 'console' {
+function getWindowRole(wc: WebContents): 'home' | 'toolbar' | 'overlay' | 'console' {
+  if (homeWindow && wc.id === homeWindow.webContents.id) return 'home'
   if (toolbarWindow && wc.id === toolbarWindow.webContents.id) return 'toolbar'
   for (const w of overlayWindows.values()) {
     if (w.webContents.id === wc.id) return 'overlay'
   }
   return 'console'
 }
+
+// ============================================================================
+// Home window — primary entry
+// ============================================================================
+
+function createHomeWindow(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 980,
+    height: 700,
+    minWidth: 840,
+    minHeight: 560,
+    backgroundColor: '#050a14',
+    title: 'PresentOtter',
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  })
+
+  void win.loadURL(rendererUrl('home'))
+
+  win.once('ready-to-show', () => win.show())
+  win.on('closed', () => {
+    homeWindow = null
+    // Closing Home tears everything down.
+    closeToolbarAndOverlays()
+  })
+
+  if (isDev) {
+    win.webContents.openDevTools({ mode: 'detach' })
+  }
+
+  return win
+}
+
+// ============================================================================
+// Toolbar + Overlays — lazy
+// ============================================================================
 
 function createOverlayWindow(display: Display): BrowserWindow {
   const { x, y, width, height } = display.bounds
@@ -84,11 +132,8 @@ function createOverlayWindow(display: Display): BrowserWindow {
     }
   })
 
-  // Float above almost everything (above screen-saver level on Windows).
   win.setAlwaysOnTop(true, 'screen-saver')
-  // Click-through by default; the toolbar will flip this when a tool is picked.
   win.setIgnoreMouseEvents(true, { forward: true })
-  // Visible across virtual desktops / Spaces (no-op on Windows, useful on macOS).
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 
   void win.loadURL(rendererUrl('overlay'))
@@ -112,8 +157,8 @@ function spawnOverlayForAllDisplays(): void {
 function createToolbarWindow(): BrowserWindow {
   const primary = screen.getPrimaryDisplay()
   const { x, width } = primary.workArea
-  const TOOLBAR_W = 760
-  const TOOLBAR_H = 96
+  const TOOLBAR_W = 1040
+  const TOOLBAR_H = 100
 
   const win = new BrowserWindow({
     x: x + Math.floor((width - TOOLBAR_W) / 2),
@@ -126,7 +171,7 @@ function createToolbarWindow(): BrowserWindow {
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
-    skipTaskbar: false,
+    skipTaskbar: true,
     alwaysOnTop: true,
     hasShadow: false,
     show: false,
@@ -147,20 +192,57 @@ function createToolbarWindow(): BrowserWindow {
   win.once('ready-to-show', () => win.show())
   win.on('closed', () => {
     toolbarWindow = null
+    // Closing the toolbar tears down overlays + cursor poll, but NOT the Home.
     for (const w of overlayWindows.values()) {
       if (!w.isDestroyed()) w.close()
     }
     overlayWindows.clear()
+    stopCursorTracking()
+    notifyHomeStatus()
   })
-
-  if (isDev) {
-    win.webContents.openDevTools({ mode: 'detach' })
-  }
 
   return win
 }
 
-/** Send an event to every alive overlay window. */
+function enableToolbar(): void {
+  if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
+    toolbarWindow.show()
+    toolbarWindow.focus()
+    notifyHomeStatus()
+    return
+  }
+  spawnOverlayForAllDisplays()
+  toolbarWindow = createToolbarWindow()
+  notifyHomeStatus()
+}
+
+function disableToolbar(): void {
+  closeToolbarAndOverlays()
+  notifyHomeStatus()
+}
+
+function closeToolbarAndOverlays(): void {
+  if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
+    toolbarWindow.close()
+  }
+  for (const w of overlayWindows.values()) {
+    if (!w.isDestroyed()) w.close()
+  }
+  overlayWindows.clear()
+  stopCursorTracking()
+}
+
+function notifyHomeStatus(): void {
+  if (homeWindow === null || homeWindow.isDestroyed()) return
+  homeWindow.webContents.send('home:toolbar-status', {
+    enabled: toolbarWindow !== null && !toolbarWindow.isDestroyed()
+  })
+}
+
+// ============================================================================
+// Fan-out helpers — IPC reaches every alive overlay
+// ============================================================================
+
 function forwardToOverlays<T>(channel: string, payload?: T): void {
   for (const w of overlayWindows.values()) {
     if (!w.isDestroyed()) w.webContents.send(channel, payload)
@@ -188,19 +270,15 @@ function setOverlaysVisible(visible: boolean): void {
   }
 }
 
-/**
- * Start a 60 Hz poll of the OS cursor position and broadcast it to every
- * overlay. Each overlay decides whether the cursor is on its display (via
- * its own bounds, sent in payload). The renderer paints a halo + trail
- * when cursor highlight is enabled by the user.
- */
+// ============================================================================
+// Cursor highlight
+// ============================================================================
+
 function startCursorTracking(): void {
   if (cursorInterval !== null) return
   cursorInterval = setInterval(() => {
     if (overlayWindows.size === 0) return
     const pt = screen.getCursorScreenPoint()
-    // Identify which display the cursor is on so the overlay can map
-    // global screen coordinates to its own local frame.
     const onDisplay = screen.getDisplayNearestPoint(pt)
     forwardToOverlays('cursor:position', {
       screenX: pt.x,
@@ -219,9 +297,29 @@ function stopCursorTracking(): void {
   }
 }
 
+// ============================================================================
+// IPC
+// ============================================================================
+
 function registerIpcHandlers(): void {
   ipcMain.handle('window:get-role', (event) => getWindowRole(event.sender))
   ipcMain.handle('app:version', () => app.getVersion())
+  ipcMain.handle('toolbar:is-enabled', () => toolbarWindow !== null && !toolbarWindow.isDestroyed())
+
+  // Home → main: toggle toolbar
+  ipcMain.on('toolbar:enable', () => enableToolbar())
+  ipcMain.on('toolbar:disable', () => disableToolbar())
+
+  // Toolbar → main: close (just the toolbar, not the app)
+  ipcMain.on('toolbar:close', () => disableToolbar())
+  ipcMain.on('toolbar:minimize', () => {
+    if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
+    toolbarWindow.setSize(72, 72, true)
+  })
+  ipcMain.on('toolbar:restore', () => {
+    if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
+    toolbarWindow.setSize(1040, 100, true)
+  })
 
   // Toolbar → Overlay(s)
   ipcMain.on('overlay:set-tool', (_e, tool: string) =>
@@ -246,21 +344,6 @@ function registerIpcHandlers(): void {
     setOverlaysVisible(visible)
   )
 
-  ipcMain.on('toolbar:minimize', () => {
-    if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
-    toolbarWindow.setSize(72, 72, true)
-  })
-  ipcMain.on('toolbar:restore', () => {
-    if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
-    toolbarWindow.setSize(760, 96, true)
-  })
-  ipcMain.on('toolbar:close', () => {
-    if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
-      toolbarWindow.close()
-    }
-  })
-
-  // Live sanitizer masks (toolbar runs OCR, overlays render the rectangles)
   ipcMain.on('overlay:set-live-masks', (_e, zones: unknown) => {
     forwardToOverlays('overlay:set-live-masks', zones)
   })
@@ -268,14 +351,12 @@ function registerIpcHandlers(): void {
     forwardToOverlays('overlay:clear-live-masks')
   })
 
-  // Cursor highlight on/off
   ipcMain.on('cursor:set-highlight', (_e, enabled: boolean) => {
     forwardToOverlays('cursor:set-highlight', enabled)
     if (enabled) startCursorTracking()
     else stopCursorTracking()
   })
 
-  // Console launcher
   ipcMain.on('console:open', () => {
     const win = new BrowserWindow({
       width: 1280,
@@ -296,25 +377,28 @@ function registerIpcHandlers(): void {
   })
 }
 
+// ============================================================================
+// Global shortcuts (only meaningful when toolbar is up)
+// ============================================================================
+
 function selectToolFromShortcut(tool: string): void {
+  if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
   forwardToOverlays('overlay:set-tool', tool)
   setOverlaysInteractive(tool !== 'select')
-  if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
-    toolbarWindow.webContents.send('toolbar:tool-changed', tool)
-  }
+  toolbarWindow.webContents.send('toolbar:tool-changed', tool)
 }
 
 function registerGlobalShortcuts(): void {
-  const bindings: Array<{ accel: string; fn: () => void; label: string }> = [
-    { accel: 'Alt+S', fn: () => selectToolFromShortcut('select'), label: 'Select' },
-    { accel: 'Alt+P', fn: () => selectToolFromShortcut('pencil'), label: 'Pencil' },
-    { accel: 'Alt+R', fn: () => selectToolFromShortcut('rectangle'), label: 'Rectangle' },
-    { accel: 'Alt+O', fn: () => selectToolFromShortcut('circle'), label: 'Circle (oval)' },
-    { accel: 'Alt+A', fn: () => selectToolFromShortcut('arrow'), label: 'Arrow' },
-    { accel: 'Alt+T', fn: () => selectToolFromShortcut('text'), label: 'Text' },
-    { accel: 'Alt+L', fn: () => selectToolFromShortcut('spotlight'), label: 'Spotlight' },
-    { accel: 'Alt+Z', fn: () => forwardToOverlays('overlay:undo'), label: 'Undo' },
-    { accel: 'Alt+Shift+C', fn: () => forwardToOverlays('overlay:clear'), label: 'Clear all' },
+  const bindings: Array<{ accel: string; fn: () => void }> = [
+    { accel: 'Alt+S', fn: () => selectToolFromShortcut('select') },
+    { accel: 'Alt+P', fn: () => selectToolFromShortcut('pencil') },
+    { accel: 'Alt+R', fn: () => selectToolFromShortcut('rectangle') },
+    { accel: 'Alt+O', fn: () => selectToolFromShortcut('circle') },
+    { accel: 'Alt+A', fn: () => selectToolFromShortcut('arrow') },
+    { accel: 'Alt+T', fn: () => selectToolFromShortcut('text') },
+    { accel: 'Alt+L', fn: () => selectToolFromShortcut('spotlight') },
+    { accel: 'Alt+Z', fn: () => forwardToOverlays('overlay:undo') },
+    { accel: 'Alt+Shift+C', fn: () => forwardToOverlays('overlay:clear') },
     {
       accel: 'Alt+H',
       fn: () => {
@@ -322,8 +406,7 @@ function registerGlobalShortcuts(): void {
           (w) => !w.isDestroyed() && w.isVisible()
         )
         setOverlaysVisible(!anyVisible)
-      },
-      label: 'Hide / show overlay'
+      }
     },
     {
       accel: 'Alt+B',
@@ -331,21 +414,13 @@ function registerGlobalShortcuts(): void {
         if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
         if (toolbarWindow.isVisible()) toolbarWindow.hide()
         else toolbarWindow.show()
-      },
-      label: 'Hide / show toolbar'
+      }
     },
-    {
-      accel: 'Escape',
-      fn: () => selectToolFromShortcut('select'),
-      label: 'Exit drawing (back to select)'
-    }
+    { accel: 'Escape', fn: () => selectToolFromShortcut('select') }
   ]
 
-  for (const { accel, fn, label } of bindings) {
-    const ok = globalShortcut.register(accel, fn)
-    if (!ok) {
-      console.warn(`[shortcuts] Failed to register ${accel} (${label})`)
-    }
+  for (const { accel, fn } of bindings) {
+    globalShortcut.register(accel, fn)
   }
 }
 
@@ -366,21 +441,17 @@ function configureDisplayMedia(): void {
 }
 
 function setupDisplayHotPlug(): void {
-  // New monitor plugged in → spawn an overlay for it.
   screen.on('display-added', (_e, display) => {
+    if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
     if (!overlayWindows.has(display.id)) {
       overlayWindows.set(display.id, createOverlayWindow(display))
     }
   })
-  // Monitor unplugged → close its overlay.
   screen.on('display-removed', (_e, display) => {
     const w = overlayWindows.get(display.id)
-    if (w !== undefined && !w.isDestroyed()) {
-      w.close()
-    }
+    if (w !== undefined && !w.isDestroyed()) w.close()
     overlayWindows.delete(display.id)
   })
-  // Resolution / position changed → reposition the existing overlay.
   screen.on('display-metrics-changed', (_e, display) => {
     const w = overlayWindows.get(display.id)
     if (w !== undefined && !w.isDestroyed()) {
@@ -390,13 +461,16 @@ function setupDisplayHotPlug(): void {
   })
 }
 
+// ============================================================================
+// Lifecycle
+// ============================================================================
+
 app
   .whenReady()
   .then(() => {
     configureDisplayMedia()
     registerIpcHandlers()
-    spawnOverlayForAllDisplays()
-    toolbarWindow = createToolbarWindow()
+    homeWindow = createHomeWindow()
     registerGlobalShortcuts()
     setupDisplayHotPlug()
   })
@@ -416,8 +490,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    spawnOverlayForAllDisplays()
-    toolbarWindow = createToolbarWindow()
+  if (homeWindow === null) {
+    homeWindow = createHomeWindow()
   }
 })

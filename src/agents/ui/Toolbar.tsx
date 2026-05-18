@@ -204,15 +204,15 @@ export function Toolbar() {
       >
         {/* Drag handle (visual cue) */}
         <div
-          className="flex h-9 w-5 items-center justify-center text-otter-200/40 cursor-grab active:cursor-grabbing"
+          className="flex h-8 w-4 items-center justify-center text-otter-200/40 cursor-grab active:cursor-grabbing"
           title="Glisser pour déplacer"
           aria-hidden
         >
-          <GripVertical className="h-4 w-4" strokeWidth={1.5} />
+          <GripVertical className="h-3.5 w-3.5" strokeWidth={1.5} />
         </div>
 
         {/* Logo */}
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-otter-400 to-otter-600 text-lg shadow-glow-otter ring-1 ring-otter-300/40 mr-1" aria-hidden>
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-otter-400 to-otter-600 text-base shadow-glow-otter ring-1 ring-otter-300/40 mr-0.5" aria-hidden>
           🦦
         </div>
 
@@ -233,7 +233,7 @@ export function Toolbar() {
                 aria-pressed={active}
                 aria-label={`${label} (${shortcut})`}
                 title={`${label} — ${shortcut}`}
-                className={`relative flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-200 ${
+                className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-200 ${
                   active
                     ? 'bg-gradient-to-br from-otter-400 to-otter-600 text-white shadow-glow-otter ring-1 ring-otter-300/40'
                     : 'text-otter-200/80 hover:bg-white/[0.06] hover:text-otter-50'
@@ -267,7 +267,7 @@ export function Toolbar() {
                 onClick={() => sendColor(hex)}
                 aria-label={`Couleur ${label}`}
                 title={label}
-                className={`relative h-6 w-6 rounded-full transition-all duration-200 ${
+                className={`relative h-5 w-5 rounded-full transition-all duration-200 ${
                   active
                     ? 'ring-2 ring-white/80 ring-offset-2 ring-offset-deep-900 scale-110'
                     : 'ring-1 ring-white/30 hover:scale-105'
@@ -295,7 +295,7 @@ export function Toolbar() {
               value={strokeWidth}
               onChange={(e) => sendStroke(Number(e.target.value))}
               aria-label="Épaisseur"
-              className="h-1 w-16 cursor-pointer accent-otter-400"
+              className="h-1 w-14 cursor-pointer accent-otter-400"
             />
             <span className="w-4 text-right text-[10px] font-medium text-otter-300 tabular-nums">
               {strokeWidth}
@@ -315,7 +315,7 @@ export function Toolbar() {
             onClick={handleUndo}
             title="Annuler le dernier trait — Alt+Z"
             aria-label="Annuler"
-            className="flex h-9 w-9 items-center justify-center rounded-xl text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
           >
             <Undo2 className="h-4 w-4" strokeWidth={2} />
           </button>
@@ -344,7 +344,7 @@ export function Toolbar() {
                 : 'Activer le Sanitizer LIVE · scan continu de l\'écran'
             }
             aria-label="Sanitizer LIVE"
-            className={`relative flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-200 ${
+            className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-200 ${
               liveOn
                 ? 'bg-gradient-to-br from-otter-400 to-otter-600 text-white shadow-glow-otter ring-1 ring-otter-300/40'
                 : 'text-otter-300 hover:bg-otter-500/15 hover:text-otter-200'
@@ -366,7 +366,7 @@ export function Toolbar() {
             onClick={() => setSanitizerOpen(true)}
             title="Sanitizer · vérifier un texte collé"
             aria-label="Ouvrir le sanitizer manuel"
-            className="flex h-9 w-9 items-center justify-center rounded-xl text-otter-300 transition-all hover:bg-otter-500/15 hover:text-otter-200"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-otter-300 transition-all hover:bg-otter-500/15 hover:text-otter-200"
           >
             <ShieldCheck className="h-4 w-4" strokeWidth={2} />
           </button>
@@ -381,7 +381,7 @@ export function Toolbar() {
                 : 'Mettre le curseur en évidence (halo + traînée colorée)'
             }
             aria-label="Cursor highlight"
-            className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-200 ${
+            className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-200 ${
               cursorOn
                 ? 'bg-gradient-to-br from-otter-400 to-otter-600 text-white shadow-glow-otter ring-1 ring-otter-300/40'
                 : 'text-otter-200/80 hover:bg-white/[0.06] hover:text-otter-50'
@@ -395,7 +395,7 @@ export function Toolbar() {
             onClick={handleConsole}
             title="Ouvrir la console · bibliothèque, paramètres"
             aria-label="Ouvrir la console"
-            className="flex h-9 w-9 items-center justify-center rounded-xl text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
           >
             <Layout className="h-4 w-4" strokeWidth={2} />
           </button>
@@ -404,7 +404,7 @@ export function Toolbar() {
             onClick={handleMinimize}
             title="Réduire en bulle · Alt+B masque la toolbar"
             aria-label="Réduire"
-            className="flex h-9 w-9 items-center justify-center rounded-xl text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
           >
             <Minus className="h-4 w-4" strokeWidth={2} />
           </button>
@@ -413,7 +413,7 @@ export function Toolbar() {
             onClick={handleClose}
             title="Quitter"
             aria-label="Quitter"
-            className="flex h-9 w-9 items-center justify-center rounded-xl text-otter-200/80 transition-all hover:bg-red-500/20 hover:text-red-200"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-otter-200/80 transition-all hover:bg-red-500/20 hover:text-red-200"
           >
             <X className="h-4 w-4" strokeWidth={2} />
           </button>

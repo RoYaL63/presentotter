@@ -98,19 +98,32 @@
      LIQUID GLASS — reusable glassmorphism primitives
      ============================================================ */
 
-  /* Base panel — frosted glass with subtle border + inner light */
+  /* Base panel — frosted glass with subtle border + inner light.
+     Background tinted with a touch of deep-blue so the toolbar reads as a
+     single solid surface over a busy desktop without ever turning opaque. */
   .glass {
-    @apply relative bg-white/[0.04] backdrop-blur-2xl border border-white/[0.08] shadow-glass;
+    background: linear-gradient(
+      180deg,
+      rgba(20, 35, 55, 0.55) 0%,
+      rgba(8, 18, 30, 0.55) 100%
+    );
+    @apply relative backdrop-blur-2xl border border-white/[0.1] shadow-glass;
   }
 
   /* Strong glass — used for floating modals / record button */
   .glass-strong {
-    @apply relative bg-white/[0.07] backdrop-blur-2xl border border-white/[0.12] shadow-glass-lg;
+    background: linear-gradient(
+      180deg,
+      rgba(20, 35, 55, 0.7) 0%,
+      rgba(8, 18, 30, 0.7) 100%
+    );
+    @apply relative backdrop-blur-2xl border border-white/[0.14] shadow-glass-lg;
   }
 
   /* Subtle glass — sidebars, secondary surfaces */
   .glass-subtle {
-    @apply relative bg-white/[0.025] backdrop-blur-xl border border-white/[0.06] shadow-glass-sm;
+    background: rgba(20, 35, 55, 0.35);
+    @apply relative backdrop-blur-xl border border-white/[0.06] shadow-glass-sm;
   }
 
   /* Hover lift state — adds otter-tinted glow on hover */

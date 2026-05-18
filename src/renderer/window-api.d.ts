@@ -24,8 +24,13 @@ declare global {
   }
 
   interface PresentOtterAPI {
-    getRole(): Promise<'toolbar' | 'overlay' | 'console'>
+    getRole(): Promise<'home' | 'toolbar' | 'overlay' | 'console'>
     appVersion(): Promise<string>
+
+    enableToolbar(): void
+    disableToolbar(): void
+    isToolbarEnabled(): Promise<boolean>
+    onToolbarStatus(cb: (status: { enabled: boolean }) => void): () => void
 
     setTool(tool: ToolName): void
     setColor(hex: string): void

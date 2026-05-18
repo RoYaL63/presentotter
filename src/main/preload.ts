@@ -21,8 +21,20 @@ export type ToolName =
 
 const api = {
   /** Identify which window this renderer belongs to. */
-  getRole: (): Promise<'toolbar' | 'overlay' | 'console'> =>
+  getRole: (): Promise<'home' | 'toolbar' | 'overlay' | 'console'> =>
     ipcRenderer.invoke('window:get-role'),
+
+  // ---------- Home → toolbar lifecycle ----------
+
+  enableToolbar: () => ipcRenderer.send('toolbar:enable'),
+  disableToolbar: () => ipcRenderer.send('toolbar:disable'),
+  isToolbarEnabled: (): Promise<boolean> => ipcRenderer.invoke('toolbar:is-enabled'),
+
+  onToolbarStatus: (cb: (status: { enabled: boolean }) => void) => {
+    const handler = (_e: unknown, status: { enabled: boolean }) => cb(status)
+    ipcRenderer.on('home:toolbar-status', handler)
+    return () => ipcRenderer.off('home:toolbar-status', handler)
+  },
 
   // ---------- Toolbar → Main → Overlay ----------
 
