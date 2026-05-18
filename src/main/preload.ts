@@ -119,11 +119,18 @@ const api = {
   // ---------- Cursor highlight ----------
 
   setCursorHighlight: (enabled: boolean) => ipcRenderer.send('cursor:set-highlight', enabled),
+  setCursorColor: (hex: string) => ipcRenderer.send('cursor:set-color', hex),
 
   onCursorHighlight: (cb: (enabled: boolean) => void) => {
     const handler = (_e: unknown, enabled: boolean) => cb(enabled)
     ipcRenderer.on('cursor:set-highlight', handler)
     return () => ipcRenderer.off('cursor:set-highlight', handler)
+  },
+
+  onCursorColor: (cb: (hex: string) => void) => {
+    const handler = (_e: unknown, hex: string) => cb(hex)
+    ipcRenderer.on('cursor:set-color', handler)
+    return () => ipcRenderer.off('cursor:set-color', handler)
   },
 
   onCursorPosition: (

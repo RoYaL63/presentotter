@@ -26,7 +26,9 @@ import { PATTERNS } from '../sanitizer'
  */
 
 export interface LiveMask {
+  /** Screen-pixel X coordinate relative to the captured display's origin. */
   x: number
+  /** Screen-pixel Y coordinate relative to the captured display's origin. */
   y: number
   width: number
   height: number
@@ -60,15 +62,25 @@ export class SanitizerLiveEngine {
   }
 
   /** Start the periodic scan loop. Idempotent. */
-  async start(intervalMs: number = DEFAULT_INTERVAL_MS, onScan?: (r: ScanResult) => void): Promise<void> {
+  async start(
+    intervalMs: number = DEFAULT_INTERVAL_MS,
+    onScan?: (r: ScanResult) => void,
+    onStatus?: (s: 'acquiring' | 'loading-ocr' | 'scanning' | 'idle') => void
+  ): Promise<void> {
     if (this.running) return
     this.running = true
+    onStatus?.('acquiring')
+    console.warn('[sanitizer-live] acquireStream...')
     await this.acquireStream()
+    console.warn('[sanitizer-live] stream OK, video size:', this.video?.videoWidth, 'x', this.video?.videoHeight)
+    onStatus?.('loading-ocr')
+    console.warn('[sanitizer-live] ensureWorker (Tesseract)...')
     await this.ensureWorker()
-    // Kick a first scan immediately so the user gets feedback fast
-    void this.scanOnce(onScan)
+    console.warn('[sanitizer-live] worker ready')
+    onStatus?.('scanning')
+    void this.scanOnce(onScan, onStatus)
     this.interval = window.setInterval(() => {
-      void this.scanOnce(onScan)
+      void this.scanOnce(onScan, onStatus)
     }, intervalMs)
   }
 
@@ -140,25 +152,40 @@ export class SanitizerLiveEngine {
     this.worker = await createWorker('eng')
   }
 
-  private async scanOnce(onScan?: (r: ScanResult) => void): Promise<ScanResult | null> {
-    if (this.video === null || this.worker === null) return null
+  private async scanOnce(
+    onScan?: (r: ScanResult) => void,
+    onStatus?: (s: 'acquiring' | 'loading-ocr' | 'scanning' | 'idle') => void
+  ): Promise<ScanResult | null> {
+    if (this.video === null || this.worker === null) {
+      console.warn('[sanitizer-live] scanOnce skipped: no video/worker')
+      return null
+    }
     if (this.scanInFlight) return null
     this.scanInFlight = true
+    onStatus?.('scanning')
     const startedAt = performance.now()
     try {
       const { dataUrl, scaleX, scaleY } = this.captureFrameToDataUrl(this.video)
+      if (dataUrl.length === 0) {
+        console.warn('[sanitizer-live] empty frame capture')
+        return null
+      }
       const result = await this.worker.recognize(dataUrl)
-      // tesseract.js v5 exposes detailed words via `result.data.words` when
-      // requested. We narrow via an unknown cast — the public types are loose.
       const data = result.data as unknown as { text?: string; words?: TesseractWord[] }
       const words = Array.isArray(data.words) ? data.words : []
+      const textPreview = (data.text ?? '').slice(0, 80).replace(/\s+/g, ' ')
       const masks = this.detectMasks(words, scaleX, scaleY)
-      const out: ScanResult = {
-        masks,
-        scanDurationMs: Math.round(performance.now() - startedAt)
-      }
+      const dur = Math.round(performance.now() - startedAt)
+      console.warn(
+        `[sanitizer-live] scan done: ${dur}ms · ${words.length} words · ${masks.length} hits · text="${textPreview}..."`
+      )
+      const out: ScanResult = { masks, scanDurationMs: dur }
       onScan?.(out)
+      onStatus?.('idle')
       return out
+    } catch (err) {
+      console.error('[sanitizer-live] scan failed:', err)
+      throw err
     } finally {
       this.scanInFlight = false
     }

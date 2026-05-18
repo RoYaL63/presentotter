@@ -52,8 +52,16 @@ export function Toolbar() {
   const [sanitizerOpen, setSanitizerOpen] = useState(false)
   const [liveOn, setLiveOn] = useState(false)
   const [liveStatus, setLiveStatus] = useState<{ count: number; ms: number } | null>(null)
+  const [livePhase, setLivePhase] = useState<'acquiring' | 'loading-ocr' | 'scanning' | 'idle' | null>(null)
   const [liveError, setLiveError] = useState<string | null>(null)
   const [cursorOn, setCursorOn] = useState(false)
+  const [cursorColor, setCursorColor] = useState<string>(() => {
+    try {
+      return localStorage.getItem('presentotter:cursor-color') ?? '#22d3ee'
+    } catch {
+      return '#22d3ee'
+    }
+  })
   const [showShareHint, setShowShareHint] = useState(true)
   const apiRef = useRef<PresentOtterAPI | undefined>(window.api)
   const engineRef = useRef<SanitizerLiveEngine | null>(null)
@@ -120,6 +128,7 @@ export function Toolbar() {
       // Stop
       setLiveOn(false)
       setLiveStatus(null)
+      setLivePhase(null)
       api.clearLiveMasks()
       if (engineRef.current) {
         await engineRef.current.stop()
@@ -131,13 +140,16 @@ export function Toolbar() {
     try {
       setLiveError(null)
       setLiveOn(true)
+      setLivePhase('acquiring')
       const engine = new SanitizerLiveEngine()
       engineRef.current = engine
-      await engine.start(2000, handleScanResult)
+      await engine.start(2000, handleScanResult, (phase) => setLivePhase(phase))
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      console.error('[toolbar] live sanitizer failed to start:', err)
       setLiveError(message)
       setLiveOn(false)
+      setLivePhase(null)
       if (engineRef.current) {
         void engineRef.current.stop()
         engineRef.current = null
@@ -162,6 +174,22 @@ export function Toolbar() {
     setCursorOn(next)
     api.setCursorHighlight(next)
   }, [cursorOn])
+
+  // Push the persisted cursor color to overlays as soon as the toolbar mounts
+  // (so the very first time the user enables the highlight it uses the right hue).
+  useEffect(() => {
+    apiRef.current?.setCursorColor(cursorColor)
+  }, [cursorColor])
+
+  const handleCursorColor = useCallback((hex: string) => {
+    setCursorColor(hex)
+    try {
+      localStorage.setItem('presentotter:cursor-color', hex)
+    } catch {
+      // ignore quota / unavailable
+    }
+    apiRef.current?.setCursorColor(hex)
+  }, [])
 
   const handleMinimize = () => {
     setMinimized(true)
@@ -371,24 +399,53 @@ export function Toolbar() {
             <ShieldCheck className="h-4 w-4" strokeWidth={2} />
           </button>
 
-          <button
-            type="button"
-            onClick={handleToggleCursor}
-            aria-pressed={cursorOn}
-            title={
-              cursorOn
-                ? 'Curseur en évidence actif · halo + traînée sur tous les écrans'
-                : 'Mettre le curseur en évidence (halo + traînée colorée)'
-            }
-            aria-label="Cursor highlight"
-            className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-200 ${
-              cursorOn
-                ? 'bg-gradient-to-br from-otter-400 to-otter-600 text-white shadow-glow-otter ring-1 ring-otter-300/40'
-                : 'text-otter-200/80 hover:bg-white/[0.06] hover:text-otter-50'
-            }`}
+          <div
+            className="relative flex items-center"
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           >
-            <Crosshair className="h-4 w-4" strokeWidth={2} />
-          </button>
+            <button
+              type="button"
+              onClick={handleToggleCursor}
+              aria-pressed={cursorOn}
+              title={
+                cursorOn
+                  ? 'Curseur en évidence actif · halo + traînée colorée'
+                  : 'Mettre le curseur en évidence (halo + traînée)'
+              }
+              aria-label="Cursor highlight"
+              className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-200 ${
+                cursorOn
+                  ? 'text-white shadow-glow-otter ring-1 ring-white/30'
+                  : 'text-otter-200/80 hover:bg-white/[0.06] hover:text-otter-50'
+              }`}
+              style={
+                cursorOn
+                  ? {
+                      background: `linear-gradient(135deg, ${cursorColor}, ${cursorColor}cc)`
+                    }
+                  : undefined
+              }
+            >
+              <Crosshair className="h-4 w-4" strokeWidth={2} />
+            </button>
+            <label
+              className="ml-0.5 inline-flex h-8 w-5 items-center justify-center rounded-md cursor-pointer hover:bg-white/[0.05]"
+              title="Couleur du curseur"
+            >
+              <span
+                className="h-3 w-3 rounded-full ring-1 ring-white/40"
+                style={{ backgroundColor: cursorColor }}
+                aria-hidden
+              />
+              <input
+                type="color"
+                value={cursorColor}
+                onChange={(e) => handleCursorColor(e.target.value)}
+                aria-label="Couleur du curseur"
+                className="sr-only"
+              />
+            </label>
+          </div>
 
           <button
             type="button"
@@ -426,6 +483,30 @@ export function Toolbar() {
       </div>
 
       {sanitizerOpen && <SanitizerPopup onClose={() => setSanitizerOpen(false)} />}
+
+      {liveOn && (
+        <div
+          role="status"
+          className="pointer-events-auto absolute top-[110px] left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-full glass px-3 py-1.5 text-[11px] text-otter-100 shadow-glass animate-fade-in-up"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          <span className="relative inline-flex h-2 w-2">
+            <span className="absolute inset-0 rounded-full bg-otter-400 animate-glow-pulse" aria-hidden />
+            <span className="relative h-2 w-2 rounded-full bg-otter-400" aria-hidden />
+          </span>
+          <span className="font-semibold tracking-wide">
+            {livePhase === 'acquiring' && 'Acquisition de l\'écran…'}
+            {livePhase === 'loading-ocr' && 'Chargement OCR (Tesseract)…'}
+            {livePhase === 'scanning' && 'Analyse en cours…'}
+            {livePhase === 'idle' && liveStatus !== null && (
+              liveStatus.count === 0
+                ? `Aucun secret détecté · ${liveStatus.ms}ms`
+                : `${liveStatus.count} secret${liveStatus.count > 1 ? 's' : ''} masqué${liveStatus.count > 1 ? 's' : ''} · ${liveStatus.ms}ms`
+            )}
+            {livePhase === null && 'Sanitizer LIVE actif'}
+          </span>
+        </div>
+      )}
 
       {showShareHint && (
         <div

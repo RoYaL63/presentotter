@@ -47,7 +47,9 @@ declare global {
     onClearLiveMasks(cb: () => void): () => void
 
     setCursorHighlight(enabled: boolean): void
+    setCursorColor(hex: string): void
     onCursorHighlight(cb: (enabled: boolean) => void): () => void
+    onCursorColor(cb: (hex: string) => void): () => void
     onCursorPosition(
       cb: (pos: {
         screenX: number

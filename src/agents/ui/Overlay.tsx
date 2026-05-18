@@ -48,6 +48,7 @@ export function Overlay() {
   const cursorTrailRef = useRef<CursorSample[]>([])
   const cursorEnabledRef = useRef(false)
   const cursorOnThisDisplayRef = useRef(false)
+  const cursorColorRef = useRef<string>('#22d3ee')
   const overlayOriginRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
   const idCounter = useRef(0)
   const animationRef = useRef<number | null>(null)
@@ -56,6 +57,7 @@ export function Overlay() {
   const [color, setColor] = useState<string>('#ef4444')
   const [strokeWidth, setStrokeWidth] = useState<number>(4)
   const [opacity, setOpacity] = useState<number>(1)
+  const [textInput, setTextInput] = useState<{ x: number; y: number; value: string } | null>(null)
 
   // ----- IPC subscriptions from the toolbar -----
   useEffect(() => {
@@ -89,6 +91,9 @@ export function Overlay() {
         redraw()
       }
     })
+    const off10b = api.onCursorColor((hex) => {
+      cursorColorRef.current = hex
+    })
     const off10 = api.onCursorPosition((pos) => {
       if (!cursorEnabledRef.current) return
       const origin = overlayOriginRef.current
@@ -116,6 +121,7 @@ export function Overlay() {
       off7()
       off8()
       off9()
+      off10b()
       off10()
     }
   }, [])
@@ -183,9 +189,23 @@ export function Overlay() {
     ctx.clearRect(0, 0, w, h)
 
     // 1. Live sanitizer masks — drawn FIRST so any manual annotation can sit
-    //    on top. Filled black with a thin red border + tiny pattern label.
+    //    on top. Coordinates arrive in absolute screen-pixel space (the
+    //    sanitizer captures the primary display, whose top-left is the
+    //    desktop's 0,0); each overlay translates to its own local frame
+    //    via overlayOriginRef and only draws masks that intersect.
+    const origin = overlayOriginRef.current
     for (const mask of liveMasksRef.current) {
-      drawLiveMask(ctx, mask)
+      const localX = mask.x - origin.x
+      const localY = mask.y - origin.y
+      if (
+        localX + mask.width < 0 ||
+        localY + mask.height < 0 ||
+        localX > w ||
+        localY > h
+      ) {
+        continue
+      }
+      drawLiveMask(ctx, { ...mask, x: localX, y: localY })
     }
 
     // 2. Manual annotations
@@ -198,7 +218,7 @@ export function Overlay() {
 
     // 3. Cursor highlight (trail + halo) drawn on top
     if (cursorEnabledRef.current && cursorOnThisDisplayRef.current) {
-      drawCursorHighlight(ctx, cursorTrailRef.current)
+      drawCursorHighlight(ctx, cursorTrailRef.current, cursorColorRef.current)
     }
   }
 
@@ -225,12 +245,10 @@ export function Overlay() {
     } else if (tool === 'spotlight') {
       draftRef.current = { ...base, kind: 'spotlight', center: pt, radius: 0 }
     } else if (tool === 'text') {
-      const text = window.prompt('Texte à insérer :', '') ?? ''
-      if (text.trim().length > 0) {
-        shapesRef.current.push({ ...base, kind: 'text', pos: pt, text })
-        redraw()
-      }
+      // Inline text input — better UX than window.prompt in a click-through window.
+      setTextInput({ x: pt.x, y: pt.y, value: '' })
       draftRef.current = null
+      return
     }
     redraw()
   }
@@ -271,6 +289,24 @@ export function Overlay() {
   // The canvas only receives pointer events when `tool !== 'select'`.
   // We don't need to gate it here because the main process toggles
   // setIgnoreMouseEvents on the window itself.
+  const commitTextInput = () => {
+    if (textInput === null) return
+    const value = textInput.value.trim()
+    if (value.length > 0) {
+      shapesRef.current.push({
+        id: ++idCounter.current,
+        color,
+        strokeWidth,
+        opacity,
+        kind: 'text',
+        pos: { x: textInput.x, y: textInput.y },
+        text: value
+      })
+      redraw()
+    }
+    setTextInput(null)
+  }
+
   return (
     <div
       style={{
@@ -288,6 +324,39 @@ export function Overlay() {
         onPointerCancel={onPointerUp}
         style={{ display: 'block', width: '100%', height: '100%' }}
       />
+
+      {textInput !== null && (
+        <input
+          autoFocus
+          type="text"
+          value={textInput.value}
+          onChange={(e) =>
+            setTextInput({ ...textInput, value: e.target.value })
+          }
+          onBlur={commitTextInput}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitTextInput()
+            if (e.key === 'Escape') setTextInput(null)
+          }}
+          placeholder="Saisis ton texte… (Entrée pour valider)"
+          style={{
+            position: 'absolute',
+            left: textInput.x,
+            top: textInput.y,
+            minWidth: 220,
+            padding: '6px 10px',
+            borderRadius: 8,
+            border: `2px solid ${color}`,
+            background: 'rgba(10, 22, 40, 0.85)',
+            color: '#fff',
+            fontSize: Math.max(14, strokeWidth * 4),
+            fontFamily: 'Inter, system-ui, sans-serif',
+            outline: 'none',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+            pointerEvents: 'auto'
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -310,15 +379,32 @@ function drawShape(
 
   switch (shape.kind) {
     case 'pencil': {
-      if (shape.points.length === 0) break
+      const pts = shape.points
+      if (pts.length === 0) break
       ctx.beginPath()
-      const first = shape.points[0]
+      const first = pts[0]
       if (!first) break
-      ctx.moveTo(first.x, first.y)
-      for (let i = 1; i < shape.points.length; i++) {
-        const p = shape.points[i]
-        if (p) ctx.lineTo(p.x, p.y)
+      if (pts.length === 1) {
+        // Single tap → small dot
+        ctx.arc(first.x, first.y, shape.strokeWidth / 2, 0, Math.PI * 2)
+        ctx.fillStyle = shape.color
+        ctx.fill()
+        break
       }
+      // Quadratic-curve smoothing: each control point is a sample, each
+      // anchor sits at the midpoint of consecutive samples. Gives a much
+      // smoother stroke than naive lineTo through every raw pointer event.
+      ctx.moveTo(first.x, first.y)
+      for (let i = 1; i < pts.length - 1; i++) {
+        const cur = pts[i]
+        const next = pts[i + 1]
+        if (!cur || !next) continue
+        const midX = (cur.x + next.x) / 2
+        const midY = (cur.y + next.y) / 2
+        ctx.quadraticCurveTo(cur.x, cur.y, midX, midY)
+      }
+      const last = pts[pts.length - 1]
+      if (last) ctx.lineTo(last.x, last.y)
       ctx.stroke()
       break
     }
@@ -381,11 +467,13 @@ function drawShape(
 
 function drawCursorHighlight(
   ctx: CanvasRenderingContext2D,
-  trail: CursorSample[]
+  trail: CursorSample[],
+  color: string
 ): void {
   if (trail.length === 0) return
   const last = trail[trail.length - 1]
   if (!last) return
+  const rgb = hexToRgb(color)
   ctx.save()
 
   // Smooth fading trail (older samples are more transparent + thinner)
@@ -397,7 +485,7 @@ function drawCursorHighlight(
       if (!a || !b) continue
       const age = now - b.t
       const t = Math.max(0, 1 - age / CURSOR_TRAIL_MS)
-      ctx.strokeStyle = `rgba(34, 211, 238, ${0.6 * t})`
+      ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${0.6 * t})`
       ctx.lineWidth = 2 + 4 * t
       ctx.lineCap = 'round'
       ctx.beginPath()
@@ -409,22 +497,31 @@ function drawCursorHighlight(
 
   // Big glowing halo around the current cursor point
   const grd = ctx.createRadialGradient(last.x, last.y, 4, last.x, last.y, 36)
-  grd.addColorStop(0, 'rgba(34, 211, 238, 0.55)')
-  grd.addColorStop(0.4, 'rgba(34, 211, 238, 0.25)')
-  grd.addColorStop(1, 'rgba(34, 211, 238, 0)')
+  grd.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.55)`)
+  grd.addColorStop(0.4, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.25)`)
+  grd.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0)`)
   ctx.fillStyle = grd
   ctx.beginPath()
   ctx.arc(last.x, last.y, 36, 0, Math.PI * 2)
   ctx.fill()
 
   // Crisp inner ring
-  ctx.strokeStyle = 'rgba(34, 211, 238, 0.95)'
+  ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.95)`
   ctx.lineWidth = 2
   ctx.beginPath()
   ctx.arc(last.x, last.y, 10, 0, Math.PI * 2)
   ctx.stroke()
 
   ctx.restore()
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const clean = hex.replace('#', '').padEnd(6, '0')
+  return {
+    r: parseInt(clean.slice(0, 2), 16) || 0,
+    g: parseInt(clean.slice(2, 4), 16) || 0,
+    b: parseInt(clean.slice(4, 6), 16) || 0
+  }
 }
 
 function drawLiveMask(ctx: CanvasRenderingContext2D, mask: LiveMask): void {

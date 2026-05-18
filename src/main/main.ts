@@ -356,6 +356,9 @@ function registerIpcHandlers(): void {
     if (enabled) startCursorTracking()
     else stopCursorTracking()
   })
+  ipcMain.on('cursor:set-color', (_e, hex: string) => {
+    forwardToOverlays('cursor:set-color', hex)
+  })
 
   ipcMain.on('console:open', () => {
     const win = new BrowserWindow({

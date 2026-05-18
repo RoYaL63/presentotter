@@ -99,31 +99,36 @@
      ============================================================ */
 
   /* Base panel — frosted glass with subtle border + inner light.
-     Background tinted with a touch of deep-blue so the toolbar reads as a
-     single solid surface over a busy desktop without ever turning opaque. */
+     The tint deepens slightly toward the bottom so labels and icons stay
+     legible over a bright background (white page, code editor light theme),
+     while still letting some of the desktop bleed through behind. */
   .glass {
     background: linear-gradient(
       180deg,
-      rgba(20, 35, 55, 0.55) 0%,
-      rgba(8, 18, 30, 0.55) 100%
+      rgba(15, 25, 40, 0.66) 0%,
+      rgba(5, 12, 22, 0.68) 100%
     );
-    @apply relative backdrop-blur-2xl border border-white/[0.1] shadow-glass;
+    box-shadow:
+      0 8px 32px 0 rgba(8, 51, 68, 0.35),
+      0 0 0 1px rgba(255, 255, 255, 0.05) inset,
+      0 1px 0 0 rgba(255, 255, 255, 0.10) inset;
+    @apply relative backdrop-blur-[18px] border border-white/[0.12];
   }
 
   /* Strong glass — used for floating modals / record button */
   .glass-strong {
     background: linear-gradient(
       180deg,
-      rgba(20, 35, 55, 0.7) 0%,
-      rgba(8, 18, 30, 0.7) 100%
+      rgba(15, 25, 40, 0.78) 0%,
+      rgba(5, 12, 22, 0.80) 100%
     );
-    @apply relative backdrop-blur-2xl border border-white/[0.14] shadow-glass-lg;
+    @apply relative backdrop-blur-[20px] border border-white/[0.16] shadow-glass-lg;
   }
 
   /* Subtle glass — sidebars, secondary surfaces */
   .glass-subtle {
-    background: rgba(20, 35, 55, 0.35);
-    @apply relative backdrop-blur-xl border border-white/[0.06] shadow-glass-sm;
+    background: rgba(15, 25, 40, 0.45);
+    @apply relative backdrop-blur-md border border-white/[0.08] shadow-glass-sm;
   }
 
   /* Hover lift state — adds otter-tinted glow on hover */
