@@ -17,6 +17,7 @@
     "build:renderer": "vite build",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win",
+    "pack:win": "npm run build && node scripts/package-win.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "vitest run integration-tests",
@@ -33,6 +34,7 @@
     "uiohook-napi": "^1.5.3"
   },
   "devDependencies": {
+    "@electron/packager": "^20.0.0",
     "@electron/rebuild": "^3.6.0",
     "@types/better-sqlite3": "^7.6.8",
     "@types/fluent-ffmpeg": "^2.1.24",
