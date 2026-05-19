@@ -81,6 +81,10 @@ export function Overlay() {
       redraw()
     })
     const off7 = api.onSetLiveMasks((zones) => {
+      console.warn(
+        `[overlay] received ${zones.length} live mask(s) · screenX=${window.screenX},screenY=${window.screenY} · innerSize=${window.innerWidth}x${window.innerHeight}`,
+        zones.slice(0, 3)
+      )
       liveMasksRef.current = zones
       setLiveMasks(zones)
     })
@@ -313,13 +317,17 @@ export function Overlay() {
         style={{ display: 'block', width: '100%', height: '100%' }}
       />
 
-      {/* Live sanitizer masks — DOM layer with real backdrop-filter blur.
-          Translated from absolute screen coords (captured display = 0,0) to
-          this overlay's local frame via overlayOriginRef. */}
+      {/* Live sanitizer masks — DOM layer with a solid frosted-glass-like
+          background. We tried CSS backdrop-filter alone, but on transparent
+          Electron windows it has nothing real to blur (the WebContents itself
+          has no opaque siblings underneath the DOM element) so it falls back
+          to a no-op. Solution: paint an opaque-ish frosted gradient with a
+          subtle striped texture overlay, giving a "matte glass" look that
+          reliably hides the pixels beneath. Translated from absolute screen
+          coords to this overlay's local frame. */}
       {liveMasks.map((mask, idx) => {
         const localX = mask.x - overlayOriginRef.current.x
         const localY = mask.y - overlayOriginRef.current.y
-        // Clip masks that don't intersect this overlay's display
         if (
           localX + mask.width < 0 ||
           localY + mask.height < 0 ||
@@ -337,29 +345,32 @@ export function Overlay() {
               top: localY,
               width: mask.width,
               height: mask.height,
-              backdropFilter: 'blur(14px) saturate(1.3) brightness(0.85)',
-              WebkitBackdropFilter: 'blur(14px) saturate(1.3) brightness(0.85)',
-              background: 'rgba(239, 68, 68, 0.06)',
-              border: '1.5px dashed rgba(239, 68, 68, 0.75)',
-              borderRadius: 6,
-              boxShadow: '0 0 0 1px rgba(0, 0, 0, 0.4), 0 4px 14px rgba(0, 0, 0, 0.25)',
+              background:
+                'repeating-linear-gradient(135deg, rgba(28,42,64,0.96) 0px, rgba(28,42,64,0.96) 6px, rgba(38,52,76,0.96) 6px, rgba(38,52,76,0.96) 12px)',
+              backdropFilter: 'blur(20px) saturate(1.4)',
+              WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
+              border: '1.5px dashed rgba(239, 68, 68, 0.9)',
+              borderRadius: 5,
+              boxShadow:
+                'inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(0,0,0,0.45), 0 4px 14px rgba(0,0,0,0.35)',
               pointerEvents: 'none',
               overflow: 'hidden'
             }}
             aria-label={`Zone masquée : ${mask.label}`}
           >
-            {mask.height >= 20 && (
+            {mask.height >= 18 && (
               <span
                 style={{
                   position: 'absolute',
                   top: 2,
                   left: 4,
                   fontSize: 10,
-                  fontWeight: 600,
-                  color: 'rgba(254, 226, 226, 0.95)',
-                  textShadow: '0 1px 2px rgba(0, 0, 0, 0.8)',
+                  fontWeight: 700,
+                  color: 'rgba(254, 226, 226, 1)',
+                  textShadow: '0 1px 2px rgba(0,0,0,0.9)',
                   letterSpacing: 0.3,
-                  pointerEvents: 'none'
+                  pointerEvents: 'none',
+                  whiteSpace: 'nowrap'
                 }}
               >
                 🛡 {mask.label}
