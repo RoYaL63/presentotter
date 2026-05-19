@@ -1,6 +1,14 @@
 // Public exports for the UI agent (Vitrine).
+//
+// As of v0.1.x-alpha, the multi-window console has been folded into the
+// single Home component. Recording / Preview pages and their helper
+// components have been removed; the floating Toolbar + Overlay are the
+// only siblings of Home.
 
-export { App } from './App'
+export { Home } from './Home'
+export { Toolbar } from './Toolbar'
+export { Overlay } from './Overlay'
+export { SanitizerPopup } from './SanitizerPopup'
 export { registerUIEventListeners } from './eventListeners'
 
 // Stores
@@ -13,20 +21,18 @@ export {
 export { useLibraryStore, type LibraryState } from './stores/useLibraryStore'
 export { useNavStore, type NavState, type PageName } from './stores/useNavStore'
 export { useExportStore } from './stores/useExportStore'
+export {
+  useToolSettingsStore,
+  type ToolDefaults,
+  type CursorSettings,
+  type CursorStyle,
+  type ToolId
+} from './stores/useToolSettingsStore'
 
 // Integration
-export { UIOrchestrator, orchestrator } from './orchestrator'
+export { UIOrchestrator, orchestrator, getOrchestrator } from './orchestrator'
 
-// Pages
-export { Home } from './pages/Home'
-export { Recording } from './pages/Recording'
-export { Preview } from './pages/Preview'
+// Sections (rendered inside Home)
 export { Library } from './pages/Library'
 export { Settings } from './pages/Settings'
-
-// Components
-export { RecordButton } from './components/RecordButton'
-export { SourceSelector } from './components/SourceSelector'
-export { AnnotationToolbar } from './components/AnnotationToolbar'
-export { VideoPreview } from './components/VideoPreview'
-export { TopBar } from './components/TopBar'
+export { Tools } from './pages/Tools'

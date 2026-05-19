@@ -44,7 +44,7 @@ const isDev = !app.isPackaged
 const DEV_URL = 'http://localhost:5173'
 const CURSOR_POLL_MS = 16
 
-function rendererUrl(hash: 'home' | 'toolbar' | 'overlay' | 'console'): string {
+function rendererUrl(hash: 'home' | 'toolbar' | 'overlay'): string {
   if (isDev) {
     return `${DEV_URL}/#${hash}`
   }
@@ -52,13 +52,13 @@ function rendererUrl(hash: 'home' | 'toolbar' | 'overlay' | 'console'): string {
   return `file://${filePath}#${hash}`
 }
 
-function getWindowRole(wc: WebContents): 'home' | 'toolbar' | 'overlay' | 'console' {
+function getWindowRole(wc: WebContents): 'home' | 'toolbar' | 'overlay' {
   if (homeWindow && wc.id === homeWindow.webContents.id) return 'home'
   if (toolbarWindow && wc.id === toolbarWindow.webContents.id) return 'toolbar'
   for (const w of overlayWindows.values()) {
     if (w.webContents.id === wc.id) return 'overlay'
   }
-  return 'console'
+  return 'home'
 }
 
 // ============================================================================
@@ -363,23 +363,18 @@ function registerIpcHandlers(): void {
     forwardToOverlays('cursor:set-settings', settings)
   })
 
+  // Console launcher → bring the Home window to front instead of opening a
+  // secondary BrowserWindow. The Tools/Library/Settings pages are now
+  // sections inside Home; the IPC channel is kept so the Toolbar's Layout
+  // button still has somewhere to send its 'open the console' intent.
   ipcMain.on('console:open', () => {
-    const win = new BrowserWindow({
-      width: 1280,
-      height: 800,
-      minWidth: 1024,
-      minHeight: 700,
-      backgroundColor: '#050a14',
-      show: false,
-      webPreferences: {
-        preload: path.join(__dirname, 'preload.js'),
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: false
-      }
-    })
-    void win.loadURL(rendererUrl('console'))
-    win.once('ready-to-show', () => win.show())
+    if (homeWindow === null || homeWindow.isDestroyed()) {
+      homeWindow = createHomeWindow()
+      return
+    }
+    if (homeWindow.isMinimized()) homeWindow.restore()
+    homeWindow.show()
+    homeWindow.focus()
   })
 }
 

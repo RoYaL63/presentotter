@@ -1,18 +1,29 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { App } from '../agents/ui/App'
 import { Home } from '../agents/ui/Home'
 import { Toolbar } from '../agents/ui/Toolbar'
 import { Overlay } from '../agents/ui/Overlay'
 import './index.css'
 
-type Mode = 'home' | 'toolbar' | 'overlay' | 'console'
+/**
+ * Window-mode dispatcher.
+ *
+ * The Electron main process boots three kinds of BrowserWindows, identified
+ * by a hash in the renderer URL:
+ *
+ *   #toolbar  → floating frameless toolbar (annotation tools + live sanitizer)
+ *   #overlay  → fullscreen transparent canvas (annotations + cursor halo)
+ *   anything else → Home (the single main window, with internal nav between
+ *                   Accueil / Outils / Bibliothèque / Paramètres)
+ *
+ * The old `#console` mode is gone — its content is now a section of Home.
+ */
+type Mode = 'home' | 'toolbar' | 'overlay'
 
 function detectMode(): Mode {
   const hash = window.location.hash.replace('#', '').trim()
   if (hash === 'toolbar') return 'toolbar'
   if (hash === 'overlay') return 'overlay'
-  if (hash === 'console') return 'console'
   return 'home'
 }
 
@@ -22,7 +33,6 @@ document.documentElement.dataset['mode'] = mode
 const Root: () => React.ReactElement = () => {
   if (mode === 'toolbar') return <Toolbar />
   if (mode === 'overlay') return <Overlay />
-  if (mode === 'console') return <App />
   return <Home />
 }
 
