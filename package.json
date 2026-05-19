@@ -18,6 +18,7 @@
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win",
     "pack:win": "npm run build && node scripts/package-win.js",
+    "installer:win": "npm run pack:win && node scripts/build-installer.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "vitest run integration-tests",
