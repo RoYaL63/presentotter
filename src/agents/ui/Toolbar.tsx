@@ -129,6 +129,16 @@ export function Toolbar() {
     return off
   }, [])
 
+  // Triple-tap Alt fires from the main process via uiohook-napi and toggles
+  // the cursor highlight. Mirror that state on the Crosshair button so the
+  // user sees the active indicator without re-clicking.
+  useEffect(() => {
+    const api = apiRef.current
+    if (!api) return
+    const off = api.onCursorHighlightChanged((enabled) => setCursorOn(enabled))
+    return off
+  }, [])
+
   const handleClear = () => apiRef.current?.clearOverlay()
   const handleUndo = () => apiRef.current?.undoOverlay()
   const handleConsole = () => apiRef.current?.openConsole()
@@ -439,8 +449,8 @@ export function Toolbar() {
               aria-pressed={cursorOn}
               title={
                 cursorOn
-                  ? 'Curseur en évidence actif · halo + traînée colorée'
-                  : 'Mettre le curseur en évidence (halo + traînée)'
+                  ? 'Curseur en évidence actif · halo + traînée colorée · triple-tap Alt pour couper'
+                  : 'Mettre le curseur en évidence (halo + traînée) · triple-tap Alt'
               }
               aria-label="Cursor highlight"
               className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-200 ${

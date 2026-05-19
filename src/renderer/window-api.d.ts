@@ -40,11 +40,18 @@ declare global {
     undoOverlay(): void
     setOverlayInteractive(interactive: boolean): void
     setOverlayVisible(visible: boolean): void
+    requestOverlayFocus(): void
 
     setLiveMasks(zones: LiveMask[]): void
     clearLiveMasks(): void
     onSetLiveMasks(cb: (zones: LiveMask[]) => void): () => void
     onClearLiveMasks(cb: () => void): () => void
+    liveAcquireTarget(): Promise<{
+      sourceId: string
+      displayId: number
+      bounds: { x: number; y: number; width: number; height: number }
+      scaleFactor: number
+    } | null>
 
     setCursorHighlight(enabled: boolean): void
     setCursorColor(hex: string): void
@@ -81,6 +88,7 @@ declare global {
     onClear(cb: () => void): () => void
     onUndo(cb: () => void): () => void
     onToolbarToolChanged(cb: (tool: ToolName) => void): () => void
+    onCursorHighlightChanged(cb: (enabled: boolean) => void): () => void
 
     toolbarMinimize(): void
     toolbarRestore(): void

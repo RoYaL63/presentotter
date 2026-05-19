@@ -10,6 +10,7 @@ import {
   type WebContents
 } from 'electron'
 import path from 'path'
+import { startTripleAltDetector, stopTripleAltDetector } from './triple-alt-detector'
 
 /**
  * PresentOtter main process.
@@ -39,6 +40,7 @@ let homeWindow: BrowserWindow | null = null
 let toolbarWindow: BrowserWindow | null = null
 const overlayWindows = new Map<number, BrowserWindow>() // keyed by Display.id
 let cursorInterval: ReturnType<typeof setInterval> | null = null
+let cursorHighlightOn = false
 
 const isDev = !app.isPackaged
 const DEV_URL = 'http://localhost:5173'
@@ -306,6 +308,37 @@ function registerIpcHandlers(): void {
   ipcMain.handle('app:version', () => app.getVersion())
   ipcMain.handle('toolbar:is-enabled', () => toolbarWindow !== null && !toolbarWindow.isDestroyed())
 
+  /** Live sanitizer asks main: which display should I capture, and what is
+   *  its position + DPI so I can translate OCR pixel coordinates into the
+   *  virtual-screen CSS coordinates the overlays use? We pick the display
+   *  the cursor is currently on so the user can choose by simply moving
+   *  the mouse to the screen they want scanned. */
+  ipcMain.handle('live:acquire-target', async () => {
+    const cursor = screen.getCursorScreenPoint()
+    const display = screen.getDisplayNearestPoint(cursor)
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: 0, height: 0 }
+    })
+    // Electron's source.display_id is a string (e.g. "12345"); Display.id is
+    // a number. Match by string equality after coercion.
+    const wanted = String(display.id)
+    let match = sources.find(
+      (s: Electron.DesktopCapturerSource & { display_id?: string }) =>
+        s.display_id === wanted
+    )
+    if (match === undefined) match = sources[0]
+    if (match === undefined) {
+      return null
+    }
+    return {
+      sourceId: match.id,
+      displayId: display.id,
+      bounds: display.bounds,
+      scaleFactor: display.scaleFactor
+    }
+  })
+
   // Home → main: toggle toolbar
   ipcMain.on('toolbar:enable', () => enableToolbar())
   ipcMain.on('toolbar:disable', () => disableToolbar())
@@ -340,6 +373,22 @@ function registerIpcHandlers(): void {
   ipcMain.on('overlay:set-interactive', (_e, interactive: boolean) =>
     setOverlaysInteractive(interactive)
   )
+
+  /** Overlay-initiated focus request — used by the text tool, which needs
+   *  the window to hold keyboard focus before its <input autoFocus> can
+   *  receive typing. Without this the input mounts in a focusable but
+   *  unfocused window and keypresses go nowhere. */
+  ipcMain.on('overlay:request-focus', (event) => {
+    for (const w of overlayWindows.values()) {
+      if (w.isDestroyed()) continue
+      if (w.webContents.id === event.sender.id) {
+        w.setFocusable(true)
+        w.focus()
+        w.webContents.focus()
+        break
+      }
+    }
+  })
   ipcMain.on('overlay:set-visible', (_e, visible: boolean) =>
     setOverlaysVisible(visible)
   )
@@ -352,7 +401,11 @@ function registerIpcHandlers(): void {
   })
 
   ipcMain.on('cursor:set-highlight', (_e, enabled: boolean) => {
+    cursorHighlightOn = enabled
     forwardToOverlays('cursor:set-highlight', enabled)
+    if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
+      toolbarWindow.webContents.send('toolbar:cursor-highlight-changed', enabled)
+    }
     if (enabled) startCursorTracking()
     else stopCursorTracking()
   })
@@ -425,6 +478,26 @@ function registerGlobalShortcuts(): void {
   }
 }
 
+/**
+ * Triple-tap Alt shortcut → toggle cursor highlight.
+ *
+ * If the floating toolbar is not yet enabled when the user taps, we spin it
+ * up first so the overlays exist to render the cursor halo on. That makes
+ * the shortcut a true one-gesture "summon highlighted cursor" trigger.
+ */
+function handleTripleAlt(): void {
+  if (toolbarWindow === null || toolbarWindow.isDestroyed()) {
+    enableToolbar()
+  }
+  cursorHighlightOn = !cursorHighlightOn
+  forwardToOverlays('cursor:set-highlight', cursorHighlightOn)
+  if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
+    toolbarWindow.webContents.send('toolbar:cursor-highlight-changed', cursorHighlightOn)
+  }
+  if (cursorHighlightOn) startCursorTracking()
+  else stopCursorTracking()
+}
+
 function configureDisplayMedia(): void {
   session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
     desktopCapturer
@@ -474,6 +547,7 @@ app
     homeWindow = createHomeWindow()
     registerGlobalShortcuts()
     setupDisplayHotPlug()
+    startTripleAltDetector(handleTripleAlt)
   })
   .catch((err: unknown) => {
     console.error('[main] startup failed:', err)
@@ -481,6 +555,7 @@ app
 
 app.on('will-quit', () => {
   stopCursorTracking()
+  stopTripleAltDetector()
   globalShortcut.unregisterAll()
 })
 

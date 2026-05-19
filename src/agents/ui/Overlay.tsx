@@ -43,6 +43,7 @@ const CURSOR_TRAIL_MAX = 90
 
 export function Overlay() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const textInputRef = useRef<HTMLInputElement | null>(null)
   const shapesRef = useRef<Shape[]>([])
   const draftRef = useRef<Shape | null>(null)
   const liveMasksRef = useRef<LiveMask[]>([])
@@ -261,6 +262,11 @@ export function Overlay() {
       draftRef.current = { ...base, kind: 'spotlight', center: pt, radius: 0 }
     } else if (tool === 'text') {
       // Inline text input — better UX than window.prompt in a click-through window.
+      // The overlay starts as focusable: false; even after toolbar flips it
+      // to true, the click that gets us here did not necessarily give the
+      // window keyboard focus. Ask main to explicitly focus this overlay so
+      // the <input> below actually receives keystrokes.
+      window.api?.requestOverlayFocus()
       setTextInput({ x: pt.x, y: pt.y, value: '' })
       draftRef.current = null
       return
@@ -405,6 +411,17 @@ export function Overlay() {
 
       {textInput !== null && (
         <input
+          ref={(el) => {
+            textInputRef.current = el
+            if (el !== null) {
+              // autoFocus only fires once at mount and relies on the window
+              // having keyboard focus already, which is not guaranteed here.
+              // Re-focus on each render of the input and on the next frame
+              // (after the focus IPC has had a chance to land in main).
+              el.focus()
+              window.requestAnimationFrame(() => el.focus())
+            }
+          }}
           autoFocus
           type="text"
           value={textInput.value}
@@ -425,13 +442,16 @@ export function Overlay() {
             padding: '6px 10px',
             borderRadius: 8,
             border: `2px solid ${color}`,
-            background: 'rgba(10, 22, 40, 0.85)',
+            background: 'rgba(10, 22, 40, 0.95)',
             color: '#fff',
             fontSize: Math.max(14, strokeWidth * 4),
             fontFamily: 'Inter, system-ui, sans-serif',
             outline: 'none',
             boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-            pointerEvents: 'auto'
+            pointerEvents: 'auto',
+            // Without an explicit z-index, the input sometimes renders below
+            // the canvas when the canvas is repainted during the same frame.
+            zIndex: 100
           }}
         />
       )}

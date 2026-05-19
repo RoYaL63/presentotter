@@ -47,6 +47,15 @@ const api = {
 
   // ---------- Live sanitizer ----------
 
+  /** Ask main which display to capture and how to translate its pixels
+   *  into the virtual-screen CSS coordinates used by the overlays. */
+  liveAcquireTarget: (): Promise<{
+    sourceId: string
+    displayId: number
+    bounds: { x: number; y: number; width: number; height: number }
+    scaleFactor: number
+  } | null> => ipcRenderer.invoke('live:acquire-target'),
+
   /** Push a fresh set of live-mask rectangles to the overlay. */
   setLiveMasks: (zones: Array<{ x: number; y: number; width: number; height: number; label: string }>) =>
     ipcRenderer.send('overlay:set-live-masks', zones),
@@ -71,6 +80,10 @@ const api = {
   /** Toggle whether the overlay catches pointer events (false = click-through). */
   setOverlayInteractive: (interactive: boolean) =>
     ipcRenderer.send('overlay:set-interactive', interactive),
+
+  /** Overlay-side: ask main to focus this specific overlay window so a
+   *  text input can receive keystrokes. */
+  requestOverlayFocus: () => ipcRenderer.send('overlay:request-focus'),
 
   /** Toggle overlay visibility entirely. */
   setOverlayVisible: (visible: boolean) =>
@@ -114,6 +127,14 @@ const api = {
     const handler = (_e: unknown, tool: ToolName) => cb(tool)
     ipcRenderer.on('toolbar:tool-changed', handler)
     return () => ipcRenderer.off('toolbar:tool-changed', handler)
+  },
+
+  /** Toolbar-side: cursor highlight toggled from a global gesture
+   *  (triple-tap Alt) so the toolbar's "active" indicator stays in sync. */
+  onCursorHighlightChanged: (cb: (enabled: boolean) => void) => {
+    const handler = (_e: unknown, enabled: boolean) => cb(enabled)
+    ipcRenderer.on('toolbar:cursor-highlight-changed', handler)
+    return () => ipcRenderer.off('toolbar:cursor-highlight-changed', handler)
   },
 
   // ---------- Cursor highlight ----------

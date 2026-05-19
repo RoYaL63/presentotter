@@ -40,9 +40,9 @@ function debug(...args: unknown[]): void {
  */
 
 export interface LiveMask {
-  /** Screen-pixel X coordinate relative to the captured display's origin. */
+  /** Virtual-screen CSS X — same coordinate space as `window.screenX`. */
   x: number
-  /** Screen-pixel Y coordinate relative to the captured display's origin. */
+  /** Virtual-screen CSS Y — same coordinate space as `window.screenY`. */
   y: number
   width: number
   height: number
@@ -59,8 +59,34 @@ interface TesseractWord {
   bbox: { x0: number; y0: number; x1: number; y1: number }
 }
 
+interface CaptureTarget {
+  sourceId: string
+  displayId: number
+  bounds: { x: number; y: number; width: number; height: number }
+  scaleFactor: number
+}
+
 const MAX_SCAN_WIDTH = 1280
 const DEFAULT_INTERVAL_MS = 2000
+
+/**
+ * getUserMedia constraints for Electron's desktop-capture pipeline.
+ *
+ * Electron specifically supports the legacy "mandatory" form of the
+ * MediaTrackConstraints object for capturing a chosen desktop source by
+ * its `chromeMediaSourceId`. Browsers shipped a different syntax; we
+ * type the shape locally so TypeScript does not reject the Electron
+ * extension.
+ */
+interface ElectronDesktopConstraints {
+  mandatory: {
+    chromeMediaSource: 'desktop'
+    chromeMediaSourceId: string
+    maxWidth?: number
+    maxHeight?: number
+    minFrameRate?: number
+  }
+}
 
 export class SanitizerLiveEngine {
   private worker: TesseractWorker | null = null
@@ -70,6 +96,7 @@ export class SanitizerLiveEngine {
   private interval: number | null = null
   private running = false
   private scanInFlight = false
+  private target: CaptureTarget | null = null
 
   constructor() {
     this.canvas = document.createElement('canvas')
@@ -135,11 +162,33 @@ export class SanitizerLiveEngine {
 
   private async acquireStream(): Promise<void> {
     if (this.stream !== null) return
-    // Electron's setDisplayMediaRequestHandler returns the primary screen
-    // without a system picker prompt.
-    this.stream = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
-      audio: false
+    // Ask main which display to capture (the one the cursor is on right
+    // now) plus its CSS bounds + DPI so we can translate OCR pixel coords
+    // into the virtual-screen CSS space the overlays understand.
+    const target = await window.api?.liveAcquireTarget()
+    if (target === undefined || target === null) {
+      throw new Error('Capture cible introuvable — aucun écran disponible.')
+    }
+    this.target = target
+    debug('target acquired:', target)
+
+    // Electron's chromeMediaSource extension lets us pin getUserMedia to
+    // a specific display source ID. This bypasses the system picker AND
+    // any setDisplayMediaRequestHandler defaults, so the engine reliably
+    // captures the display we want even on multi-monitor setups.
+    const constraints: ElectronDesktopConstraints = {
+      mandatory: {
+        chromeMediaSource: 'desktop',
+        chromeMediaSourceId: target.sourceId,
+        maxWidth: Math.floor(target.bounds.width * target.scaleFactor),
+        maxHeight: Math.floor(target.bounds.height * target.scaleFactor)
+      }
+    }
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      // The Electron typings don't list `mandatory`; cast through unknown
+      // so we don't have to weaken the public type elsewhere.
+      video: constraints as unknown as MediaTrackConstraints
     })
     const video = document.createElement('video')
     video.srcObject = this.stream
@@ -157,6 +206,7 @@ export class SanitizerLiveEngine {
       })
     }
     this.video = video
+    debug(`video acquired: ${video.videoWidth}x${video.videoHeight}`)
   }
 
   private async ensureWorker(): Promise<void> {
@@ -188,6 +238,11 @@ export class SanitizerLiveEngine {
       const data = result.data as unknown as { text?: string; words?: TesseractWord[] }
       const words = Array.isArray(data.words) ? data.words : []
       const textPreview = (data.text ?? '').slice(0, 80).replace(/\s+/g, ' ')
+      // scaleX / scaleY here recover physical source pixels from the
+      // downscaled OCR canvas. We then divide by the display's DPI scale
+      // factor to land in CSS pixels, and finally offset by the display's
+      // virtual-screen origin so the overlay can do a simple
+      // `mask.x - window.screenX` translation.
       const masks = this.detectMasks(words, scaleX, scaleY)
       const dur = Math.round(performance.now() - startedAt)
       debug(
@@ -233,6 +288,20 @@ export class SanitizerLiveEngine {
 
   private detectMasks(words: TesseractWord[], scaleX: number, scaleY: number): LiveMask[] {
     if (words.length === 0) return []
+    // To go from OCR pixel coords → virtual-screen CSS coords we need:
+    //   1. (bbox * scaleX) — undo the OCR downscale → source physical pixels
+    //   2. / scaleFactor  — undo the display DPI → display-local CSS pixels
+    //   3. + bounds.{x,y} — offset by display origin in the virtual desktop
+    // If we somehow ran without a target (programmer error), fall back to
+    // the identity transform so masks at least appear on the primary
+    // display rather than nowhere.
+    const t = this.target
+    const dpi = t?.scaleFactor ?? 1
+    const offX = t?.bounds.x ?? 0
+    const offY = t?.bounds.y ?? 0
+    const toCssX = (px: number): number => (px * scaleX) / dpi + offX
+    const toCssY = (px: number): number => (px * scaleY) / dpi + offY
+
     // Build the flat OCR text + a char-range → word index lookup so we can
     // map each regex hit back to the words that produced it.
     let text = ''
@@ -279,13 +348,17 @@ export class SanitizerLiveEngine {
           if (match[0].length === 0) pattern.regex.lastIndex += 1
           continue
         }
-        // Add a small padding so the mask covers the letters fully
+        // A small padding so the mask covers the letters fully
         const PAD = 4
+        const cssX = toCssX(x0) - PAD
+        const cssY = toCssY(y0) - PAD
+        const cssW = (x1 - x0) * scaleX / dpi + PAD * 2
+        const cssH = (y1 - y0) * scaleY / dpi + PAD * 2
         masks.push({
-          x: Math.max(0, Math.floor(x0 * scaleX) - PAD),
-          y: Math.max(0, Math.floor(y0 * scaleY) - PAD),
-          width: Math.ceil((x1 - x0) * scaleX) + PAD * 2,
-          height: Math.ceil((y1 - y0) * scaleY) + PAD * 2,
+          x: Math.floor(cssX),
+          y: Math.floor(cssY),
+          width: Math.ceil(cssW),
+          height: Math.ceil(cssH),
           label: pattern.name
         })
         // Defend against pathological zero-width matches
