@@ -20,6 +20,7 @@
  */
 
 const { packager } = require('@electron/packager')
+const { spawnSync, execSync } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
 
@@ -28,6 +29,13 @@ const fs = require('node:fs')
  * release/<bundle>/locales/ is deleted post-pack — saves ~35 MB.
  */
 const KEEP_LOCALES = new Set(['en-US.pak', 'fr.pak'])
+
+/** RFC 3161 timestamp servers we'll try in order if signing is requested. */
+const TIMESTAMP_SERVERS = [
+  'http://timestamp.digicert.com',
+  'http://timestamp.sectigo.com',
+  'http://timestamp.globalsign.com/tsa/r6advanced1'
+]
 
 /**
  * Paths matched against the leading slash of every project file. If any
@@ -123,6 +131,7 @@ async function main() {
 
   for (const dir of out) {
     stripUnusedLocales(dir)
+    signExeIfRequested(dir)
     reportBundleSize(dir)
     console.log(`[package-win] OK → ${dir}`)
   }
@@ -149,6 +158,105 @@ function stripUnusedLocales(bundleDir) {
   console.log(
     `[package-win] stripped ${removed} locale .pak file(s), saved ${(savedBytes / 1024 / 1024).toFixed(1)} MB`
   )
+}
+
+/**
+ * Sign PresentOtter.exe with signtool — only if the user has provided
+ * credentials via environment variables. No env vars set → no-op (the
+ * alpha ships unsigned and tells users to click 'Run anyway').
+ *
+ * Two modes supported:
+ *   A) PFX file on disk:
+ *        CSC_LINK=C:/path/to/cert.pfx
+ *        CSC_KEY_PASSWORD=<pfx password>
+ *   B) Certificate already imported into the Windows Cert Store
+ *      (typical for EV certs delivered on a USB token / HSM):
+ *        WIN_SIGN_CERT_SUBJECT="OTTERWISE Solutions"
+ *
+ * Optional:
+ *   WIN_SIGN_TIMESTAMP_URL=<override default timestamp server>
+ */
+function signExeIfRequested(bundleDir) {
+  const exePath = path.join(bundleDir, 'PresentOtter.exe')
+  if (!fs.existsSync(exePath)) {
+    console.warn(`[package-win] no PresentOtter.exe at ${exePath}, skipping signing`)
+    return
+  }
+
+  const pfx = process.env.CSC_LINK
+  const pfxPassword = process.env.CSC_KEY_PASSWORD
+  const certSubject = process.env.WIN_SIGN_CERT_SUBJECT
+  const timestamp = process.env.WIN_SIGN_TIMESTAMP_URL ?? TIMESTAMP_SERVERS[0]
+
+  const hasPfx = typeof pfx === 'string' && pfx.length > 0
+  const hasSubject = typeof certSubject === 'string' && certSubject.length > 0
+  if (!hasPfx && !hasSubject) {
+    console.log(
+      '[package-win] signing skipped (set CSC_LINK + CSC_KEY_PASSWORD for PFX, or WIN_SIGN_CERT_SUBJECT for cert store)'
+    )
+    return
+  }
+
+  const signtool = locateSigntool()
+  if (signtool === null) {
+    console.warn(
+      '[package-win] signtool.exe not found — install the Windows 10/11 SDK ' +
+        '(includes signtool) or add it to PATH. Skipping signing.'
+    )
+    return
+  }
+
+  const args = ['sign', '/fd', 'SHA256', '/tr', timestamp, '/td', 'SHA256']
+  if (hasPfx) {
+    args.push('/f', pfx)
+    if (typeof pfxPassword === 'string' && pfxPassword.length > 0) {
+      args.push('/p', pfxPassword)
+    }
+  } else if (hasSubject) {
+    // /n picks the cert from the Windows Cert Store by Subject Name. /sm
+    // looks in LocalMachine; without it, signtool defaults to CurrentUser.
+    args.push('/n', certSubject)
+  }
+  args.push(exePath)
+
+  console.log(`[package-win] signing PresentOtter.exe via ${path.basename(signtool)}…`)
+  const result = spawnSync(signtool, args, { stdio: 'inherit' })
+  if (result.status !== 0) {
+    throw new Error(`signtool exited with status ${result.status ?? 'unknown'}`)
+  }
+  console.log('[package-win] signed OK')
+}
+
+/**
+ * Locate signtool.exe — try PATH first, then the standard Windows SDK
+ * install paths.
+ */
+function locateSigntool() {
+  try {
+    const fromPath = execSync('where signtool', {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf8'
+    })
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)[0]
+    if (typeof fromPath === 'string' && fs.existsSync(fromPath)) return fromPath
+  } catch {
+    // 'where' returns non-zero when nothing matches — fall through to scanning
+  }
+
+  const sdkRoots = [
+    'C:\\Program Files (x86)\\Windows Kits\\10\\bin',
+    'C:\\Program Files\\Windows Kits\\10\\bin'
+  ]
+  for (const root of sdkRoots) {
+    if (!fs.existsSync(root)) continue
+    for (const versionDir of fs.readdirSync(root).sort().reverse()) {
+      const candidate = path.join(root, versionDir, 'x64', 'signtool.exe')
+      if (fs.existsSync(candidate)) return candidate
+    }
+  }
+  return null
 }
 
 function reportBundleSize(bundleDir) {
