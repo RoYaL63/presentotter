@@ -56,20 +56,17 @@ export function Toolbar() {
   const [livePhase, setLivePhase] = useState<'acquiring' | 'loading-ocr' | 'scanning' | 'idle' | null>(null)
   const [liveError, setLiveError] = useState<string | null>(null)
   const [cursorOn, setCursorOn] = useState(false)
-  const [cursorColor, setCursorColor] = useState<string>(() => {
-    try {
-      return localStorage.getItem('presentotter:cursor-color') ?? '#22d3ee'
-    } catch {
-      return '#22d3ee'
-    }
-  })
   const [showShareHint, setShowShareHint] = useState(true)
   const apiRef = useRef<PresentOtterAPI | undefined>(window.api)
   const engineRef = useRef<SanitizerLiveEngine | null>(null)
 
-  // Per-tool defaults persisted via Tools page.
+  // Per-tool defaults persisted via Tools page (auto-synced across windows
+  // through the storage event hooked inside useToolSettingsStore).
   const toolDefaults = useToolSettingsStore((s) => s.defaults)
   const cursorSettings = useToolSettingsStore((s) => s.cursor)
+  const setStoredCursor = useToolSettingsStore((s) => s.setCursor)
+  // Single source of truth for the cursor color: the persisted store.
+  const cursorColor = cursorSettings.color
 
   /** Push the current tool selection to the overlay & toggle click-through.
    *  Also applies the per-tool defaults from the Tools page so users get
@@ -197,29 +194,9 @@ export function Toolbar() {
     api.setCursorHighlight(next)
   }, [cursorOn])
 
-  // Push the persisted cursor color to overlays as soon as the toolbar mounts
-  // (so the very first time the user enables the highlight it uses the right hue).
-  useEffect(() => {
-    apiRef.current?.setCursorColor(cursorColor)
-  }, [cursorColor])
-
-  // When the Tools page changes the cursor color, mirror it into local state
-  // + push to overlays so the change is immediately visible without reloading.
-  useEffect(() => {
-    if (cursorSettings.color !== cursorColor) {
-      setCursorColor(cursorSettings.color)
-      try {
-        localStorage.setItem('presentotter:cursor-color', cursorSettings.color)
-      } catch {
-        // ignore
-      }
-      apiRef.current?.setCursorColor(cursorSettings.color)
-    }
-  }, [cursorSettings.color, cursorColor])
-
-  // Push the full cursor settings bundle (style + trail length + intensity)
-  // to the overlays whenever it changes, so the Tools page edits show up
-  // live without restart.
+  // Forward the full cursor settings bundle to overlays whenever any field
+  // changes — at mount, when the Tools page edits a slider, or when another
+  // window's storage event syncs us. One effect, one source of truth.
   useEffect(() => {
     apiRef.current?.setCursorSettings({
       color: cursorSettings.color,
@@ -234,15 +211,15 @@ export function Toolbar() {
     cursorSettings.intensity
   ])
 
-  const handleCursorColor = useCallback((hex: string) => {
-    setCursorColor(hex)
-    try {
-      localStorage.setItem('presentotter:cursor-color', hex)
-    } catch {
-      // ignore quota / unavailable
-    }
-    apiRef.current?.setCursorColor(hex)
-  }, [])
+  /** Color picker in the toolbar updates the shared store; the storage event
+   *  propagates the change to Home (Tools page) and the overlay listens to
+   *  the cursor settings IPC fired by the effect above. */
+  const handleCursorColor = useCallback(
+    (hex: string) => {
+      setStoredCursor({ color: hex })
+    },
+    [setStoredCursor]
+  )
 
   const handleMinimize = () => {
     setMinimized(true)

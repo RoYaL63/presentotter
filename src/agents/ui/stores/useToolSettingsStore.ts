@@ -3,13 +3,20 @@ import { create } from 'zustand'
 /**
  * Persistent per-tool defaults + cursor highlight preferences.
  *
- * Stored in localStorage under `presentotter:tool-settings:v1`. The
- * Tools page edits these values; the floating Toolbar reads them when
- * the user switches tools so the user's preferred color / thickness /
+ * Stored in localStorage under `presentotter:tool-settings:v1`. The Tools
+ * page (inside Home) edits these values; the floating Toolbar reads them
+ * when the user switches tools so the preferred color / thickness /
  * opacity travels across sessions.
  *
- * We avoid the zustand `persist` middleware (extra dependency surface)
- * and just hydrate manually — gives full control over the v1 schema.
+ * Cross-window sync — every Electron BrowserWindow runs an isolated
+ * renderer process with its own zustand store instance, but they all
+ * share the same default session and therefore the same localStorage.
+ * When the Tools page writes, we re-broadcast the new state to every
+ * sibling window through the standard `storage` DOM event so the
+ * Toolbar updates its UI without a restart.
+ *
+ * Schema is versioned in the key (`:v1`) so future migrations can detect
+ * old payloads and reset cleanly.
  */
 
 export type ToolId =
@@ -65,57 +72,68 @@ const FACTORY_CURSOR: CursorSettings = {
   intensity: 1
 }
 
-function loadFromStorage(): { defaults: Record<ToolId, ToolDefaults>; cursor: CursorSettings } {
+interface PersistedShape {
+  defaults: Record<ToolId, ToolDefaults>
+  cursor: CursorSettings
+}
+
+function loadFromStorage(): PersistedShape {
+  if (typeof localStorage === 'undefined') {
+    return { defaults: { ...FACTORY_DEFAULTS }, cursor: { ...FACTORY_CURSOR } }
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw === null) {
       return { defaults: { ...FACTORY_DEFAULTS }, cursor: { ...FACTORY_CURSOR } }
     }
-    const parsed = JSON.parse(raw) as unknown
-    if (parsed === null || typeof parsed !== 'object') {
-      return { defaults: { ...FACTORY_DEFAULTS }, cursor: { ...FACTORY_CURSOR } }
-    }
-    const candidate = parsed as Partial<ToolSettingsState>
-    return {
-      defaults: { ...FACTORY_DEFAULTS, ...(candidate.defaults ?? {}) },
-      cursor: { ...FACTORY_CURSOR, ...(candidate.cursor ?? {}) }
-    }
+    return parsePersisted(raw)
   } catch {
     return { defaults: { ...FACTORY_DEFAULTS }, cursor: { ...FACTORY_CURSOR } }
   }
 }
 
-function persist(state: { defaults: Record<ToolId, ToolDefaults>; cursor: CursorSettings }): void {
+function parsePersisted(raw: string): PersistedShape {
+  const parsed = JSON.parse(raw) as unknown
+  if (parsed === null || typeof parsed !== 'object') {
+    return { defaults: { ...FACTORY_DEFAULTS }, cursor: { ...FACTORY_CURSOR } }
+  }
+  const candidate = parsed as Partial<PersistedShape>
+  return {
+    defaults: { ...FACTORY_DEFAULTS, ...(candidate.defaults ?? {}) },
+    cursor: { ...FACTORY_CURSOR, ...(candidate.cursor ?? {}) }
+  }
+}
+
+function persist(state: PersistedShape): void {
+  if (typeof localStorage === 'undefined') return
   try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ defaults: state.defaults, cursor: state.cursor })
-    )
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
   } catch {
     // localStorage full / blocked — silent
   }
 }
 
-export const useToolSettingsStore = create<ToolSettingsState>((set, get) => {
+export const useToolSettingsStore = create<ToolSettingsState>((set) => {
   const hydrated = loadFromStorage()
   return {
     defaults: hydrated.defaults,
     cursor: hydrated.cursor,
     setToolColor(tool, hex) {
       set((s) => {
-        const current = s.defaults[tool]
-        const updated = { ...s.defaults, [tool]: { ...current, color: hex } }
+        const updated = {
+          ...s.defaults,
+          [tool]: { ...s.defaults[tool], color: hex }
+        }
         persist({ defaults: updated, cursor: s.cursor })
         return { defaults: updated }
       })
     },
     setToolStroke(tool, width) {
       set((s) => {
-        const current = s.defaults[tool]
         const clamped = Math.max(1, Math.min(64, Math.round(width)))
         const updated = {
           ...s.defaults,
-          [tool]: { ...current, strokeWidth: clamped }
+          [tool]: { ...s.defaults[tool], strokeWidth: clamped }
         }
         persist({ defaults: updated, cursor: s.cursor })
         return { defaults: updated }
@@ -123,11 +141,10 @@ export const useToolSettingsStore = create<ToolSettingsState>((set, get) => {
     },
     setToolOpacity(tool, opacity) {
       set((s) => {
-        const current = s.defaults[tool]
         const clamped = Math.max(0, Math.min(1, opacity))
         const updated = {
           ...s.defaults,
-          [tool]: { ...current, opacity: clamped }
+          [tool]: { ...s.defaults[tool], opacity: clamped }
         }
         persist({ defaults: updated, cursor: s.cursor })
         return { defaults: updated }
@@ -142,7 +159,12 @@ export const useToolSettingsStore = create<ToolSettingsState>((set, get) => {
             ? { intensity: Math.max(0, Math.min(1, patch.intensity)) }
             : {}),
           ...(typeof patch.trailLengthMs === 'number'
-            ? { trailLengthMs: Math.max(120, Math.min(3000, Math.round(patch.trailLengthMs))) }
+            ? {
+                trailLengthMs: Math.max(
+                  120,
+                  Math.min(3000, Math.round(patch.trailLengthMs))
+                )
+              }
             : {})
         }
         persist({ defaults: s.defaults, cursor: updated })
@@ -150,16 +172,41 @@ export const useToolSettingsStore = create<ToolSettingsState>((set, get) => {
       })
     },
     resetAll() {
-      const next = {
+      const next: PersistedShape = {
         defaults: { ...FACTORY_DEFAULTS },
         cursor: { ...FACTORY_CURSOR }
       }
       persist(next)
       set(next)
-      void get
     }
   }
 })
+
+// ----------------------------------------------------------------------------
+// Cross-window sync
+// ----------------------------------------------------------------------------
+//
+// The DOM `storage` event fires on every same-origin window *other than* the
+// one that wrote the change. In Electron, all our BrowserWindows share the
+// default session → same origin → same localStorage → event fires across
+// renderers. So when the Tools page (Home window) calls setToolColor, the
+// Toolbar window receives a `storage` event and re-hydrates its own zustand
+// store instance.
+//
+// Guards: ignore unrelated keys, malformed JSON, and the special case where
+// the value was cleared (newValue === null) — keep the current state then.
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== STORAGE_KEY) return
+    if (event.newValue === null) return
+    try {
+      const next = parsePersisted(event.newValue)
+      useToolSettingsStore.setState({ defaults: next.defaults, cursor: next.cursor })
+    } catch {
+      // ignore malformed payload from another tab
+    }
+  })
+}
 
 export const FACTORY_TOOL_DEFAULTS = FACTORY_DEFAULTS
 export const FACTORY_CURSOR_SETTINGS = FACTORY_CURSOR
