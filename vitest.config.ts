@@ -5,6 +5,16 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
+    // .claude/worktrees/ holds throwaway git worktrees spawned by background
+    // sub-agents during this Claude Code session — they would otherwise be
+    // picked up as duplicate test files (often outdated copies that fail).
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/release/**',
+      '**/.claude/**',
+      '**/.{idea,git,cache,output,temp}/**'
+    ],
     coverage: {
       provider: 'v8',
       // 'json-summary' produit coverage/coverage-summary.json consommé par le CI.

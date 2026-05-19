@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type PageName = 'home' | 'recording' | 'preview' | 'library' | 'settings'
+export type PageName = 'home' | 'recording' | 'preview' | 'library' | 'tools' | 'settings'
 
 export interface NavState {
   currentPage: PageName

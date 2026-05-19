@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { SanitizerPopup } from './SanitizerPopup'
 import { SanitizerLiveEngine, type ScanResult } from './sanitizer-live'
+import { useToolSettingsStore, type ToolId as SettingsToolId } from './stores/useToolSettingsStore'
 
 const TOOLS = [
   { id: 'select', label: 'Sélection · passe-through', shortcut: 'Alt+S', Icon: MousePointer2 },
@@ -66,14 +67,35 @@ export function Toolbar() {
   const apiRef = useRef<PresentOtterAPI | undefined>(window.api)
   const engineRef = useRef<SanitizerLiveEngine | null>(null)
 
-  /** Push the current tool selection to the overlay & toggle click-through. */
-  const sendTool = useCallback((next: ToolId) => {
-    setTool(next)
-    const api = apiRef.current
-    if (!api) return
-    api.setTool(next)
-    api.setOverlayInteractive(next !== 'select')
-  }, [])
+  // Per-tool defaults persisted via Tools page.
+  const toolDefaults = useToolSettingsStore((s) => s.defaults)
+  const cursorSettings = useToolSettingsStore((s) => s.cursor)
+
+  /** Push the current tool selection to the overlay & toggle click-through.
+   *  Also applies the per-tool defaults from the Tools page so users get
+   *  their preferred color/stroke/opacity automatically. */
+  const sendTool = useCallback(
+    (next: ToolId) => {
+      setTool(next)
+      const api = apiRef.current
+      if (!api) return
+      // Apply persisted defaults if we have any for this tool
+      if (next !== 'select') {
+        const settingsId = next as SettingsToolId
+        const def = toolDefaults[settingsId]
+        if (def) {
+          setColor(def.color)
+          setStrokeWidth(def.strokeWidth)
+          api.setColor(def.color)
+          api.setStrokeWidth(def.strokeWidth)
+          api.setOpacity(def.opacity)
+        }
+      }
+      api.setTool(next)
+      api.setOverlayInteractive(next !== 'select')
+    },
+    [toolDefaults]
+  )
 
   const sendColor = useCallback((hex: string) => {
     setColor(hex)
@@ -180,6 +202,37 @@ export function Toolbar() {
   useEffect(() => {
     apiRef.current?.setCursorColor(cursorColor)
   }, [cursorColor])
+
+  // When the Tools page changes the cursor color, mirror it into local state
+  // + push to overlays so the change is immediately visible without reloading.
+  useEffect(() => {
+    if (cursorSettings.color !== cursorColor) {
+      setCursorColor(cursorSettings.color)
+      try {
+        localStorage.setItem('presentotter:cursor-color', cursorSettings.color)
+      } catch {
+        // ignore
+      }
+      apiRef.current?.setCursorColor(cursorSettings.color)
+    }
+  }, [cursorSettings.color, cursorColor])
+
+  // Push the full cursor settings bundle (style + trail length + intensity)
+  // to the overlays whenever it changes, so the Tools page edits show up
+  // live without restart.
+  useEffect(() => {
+    apiRef.current?.setCursorSettings({
+      color: cursorSettings.color,
+      style: cursorSettings.style,
+      trailLengthMs: cursorSettings.trailLengthMs,
+      intensity: cursorSettings.intensity
+    })
+  }, [
+    cursorSettings.color,
+    cursorSettings.style,
+    cursorSettings.trailLengthMs,
+    cursorSettings.intensity
+  ])
 
   const handleCursorColor = useCallback((hex: string) => {
     setCursorColor(hex)

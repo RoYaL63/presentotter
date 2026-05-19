@@ -120,6 +120,12 @@ const api = {
 
   setCursorHighlight: (enabled: boolean) => ipcRenderer.send('cursor:set-highlight', enabled),
   setCursorColor: (hex: string) => ipcRenderer.send('cursor:set-color', hex),
+  setCursorSettings: (settings: {
+    color: string
+    style: 'meteor' | 'classic' | 'minimal'
+    trailLengthMs: number
+    intensity: number
+  }) => ipcRenderer.send('cursor:set-settings', settings),
 
   onCursorHighlight: (cb: (enabled: boolean) => void) => {
     const handler = (_e: unknown, enabled: boolean) => cb(enabled)
@@ -131,6 +137,27 @@ const api = {
     const handler = (_e: unknown, hex: string) => cb(hex)
     ipcRenderer.on('cursor:set-color', handler)
     return () => ipcRenderer.off('cursor:set-color', handler)
+  },
+
+  onCursorSettings: (
+    cb: (settings: {
+      color: string
+      style: 'meteor' | 'classic' | 'minimal'
+      trailLengthMs: number
+      intensity: number
+    }) => void
+  ) => {
+    const handler = (
+      _e: unknown,
+      settings: {
+        color: string
+        style: 'meteor' | 'classic' | 'minimal'
+        trailLengthMs: number
+        intensity: number
+      }
+    ) => cb(settings)
+    ipcRenderer.on('cursor:set-settings', handler)
+    return () => ipcRenderer.off('cursor:set-settings', handler)
   },
 
   onCursorPosition: (

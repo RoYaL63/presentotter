@@ -359,6 +359,9 @@ function registerIpcHandlers(): void {
   ipcMain.on('cursor:set-color', (_e, hex: string) => {
     forwardToOverlays('cursor:set-color', hex)
   })
+  ipcMain.on('cursor:set-settings', (_e, settings: unknown) => {
+    forwardToOverlays('cursor:set-settings', settings)
+  })
 
   ipcMain.on('console:open', () => {
     const win = new BrowserWindow({

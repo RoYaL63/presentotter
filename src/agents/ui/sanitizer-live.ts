@@ -2,6 +2,20 @@ import { createWorker, type Worker as TesseractWorker } from 'tesseract.js'
 import { PATTERNS } from '../sanitizer'
 
 /**
+ * Gate verbose tracing behind a global flag so production users don't see
+ * scan logs in their DevTools console.
+ *
+ * Enable from the DevTools console with:
+ *     window.__PRESENTOTTER_DEBUG = true
+ */
+function debug(...args: unknown[]): void {
+  const flag = (globalThis as { __PRESENTOTTER_DEBUG?: boolean }).__PRESENTOTTER_DEBUG
+  if (flag === true) {
+    console.warn('[sanitizer-live]', ...args)
+  }
+}
+
+/**
  * Live sanitizer scan engine.
  *
  * One scan cycle =
@@ -70,13 +84,13 @@ export class SanitizerLiveEngine {
     if (this.running) return
     this.running = true
     onStatus?.('acquiring')
-    console.warn('[sanitizer-live] acquireStream...')
+    debug('acquireStream...')
     await this.acquireStream()
-    console.warn('[sanitizer-live] stream OK, video size:', this.video?.videoWidth, 'x', this.video?.videoHeight)
+    debug('stream OK, video size:', this.video?.videoWidth, 'x', this.video?.videoHeight)
     onStatus?.('loading-ocr')
-    console.warn('[sanitizer-live] ensureWorker (Tesseract)...')
+    debug('ensureWorker (Tesseract)...')
     await this.ensureWorker()
-    console.warn('[sanitizer-live] worker ready')
+    debug('worker ready')
     onStatus?.('scanning')
     void this.scanOnce(onScan, onStatus)
     this.interval = window.setInterval(() => {
@@ -157,7 +171,7 @@ export class SanitizerLiveEngine {
     onStatus?: (s: 'acquiring' | 'loading-ocr' | 'scanning' | 'idle') => void
   ): Promise<ScanResult | null> {
     if (this.video === null || this.worker === null) {
-      console.warn('[sanitizer-live] scanOnce skipped: no video/worker')
+      debug('scanOnce skipped: no video/worker')
       return null
     }
     if (this.scanInFlight) return null
@@ -167,7 +181,7 @@ export class SanitizerLiveEngine {
     try {
       const { dataUrl, scaleX, scaleY } = this.captureFrameToDataUrl(this.video)
       if (dataUrl.length === 0) {
-        console.warn('[sanitizer-live] empty frame capture')
+        debug('empty frame capture')
         return null
       }
       const result = await this.worker.recognize(dataUrl)
@@ -176,8 +190,8 @@ export class SanitizerLiveEngine {
       const textPreview = (data.text ?? '').slice(0, 80).replace(/\s+/g, ' ')
       const masks = this.detectMasks(words, scaleX, scaleY)
       const dur = Math.round(performance.now() - startedAt)
-      console.warn(
-        `[sanitizer-live] scan done: ${dur}ms · ${words.length} words · ${masks.length} hits · text="${textPreview}..."`
+      debug(
+        `scan done: ${dur}ms · ${words.length} words · ${masks.length} hits · text="${textPreview}..."`
       )
       const out: ScanResult = { masks, scanDurationMs: dur }
       onScan?.(out)

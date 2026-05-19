@@ -37,8 +37,9 @@ interface CursorSample {
   t: number
 }
 
-const CURSOR_TRAIL_MS = 600
-const CURSOR_TRAIL_MAX = 60
+// CURSOR_TRAIL_MAX caps the in-memory ring buffer; the actual fade window
+// comes from the Tools page (settable) and is read via cursorTrailMsRef.
+const CURSOR_TRAIL_MAX = 90
 
 export function Overlay() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -49,6 +50,9 @@ export function Overlay() {
   const cursorEnabledRef = useRef(false)
   const cursorOnThisDisplayRef = useRef(false)
   const cursorColorRef = useRef<string>('#22d3ee')
+  const cursorStyleRef = useRef<'meteor' | 'classic' | 'minimal'>('meteor')
+  const cursorTrailMsRef = useRef<number>(900)
+  const cursorIntensityRef = useRef<number>(1)
   // Live sanitizer masks render as DOM nodes (CSS backdrop-filter blur of the
   // pixels behind the overlay) rather than canvas fills — gives a real
   // frosted-glass blur on the secret, not an opaque black rectangle.
@@ -81,12 +85,17 @@ export function Overlay() {
       redraw()
     })
     const off7 = api.onSetLiveMasks((zones) => {
-      console.warn(
-        `[overlay] received ${zones.length} live mask(s) · screenX=${window.screenX},screenY=${window.screenY} · innerSize=${window.innerWidth}x${window.innerHeight}`,
-        zones.slice(0, 3)
-      )
-      liveMasksRef.current = zones
-      setLiveMasks(zones)
+      // Cap the rendered masks so a pathological OCR result cannot explode
+      // the React tree. 30 covers every realistic 'leak the whole .env' case.
+      const capped = zones.length > 30 ? zones.slice(0, 30) : zones
+      if ((globalThis as { __PRESENTOTTER_DEBUG?: boolean }).__PRESENTOTTER_DEBUG === true) {
+        console.warn(
+          `[overlay] received ${zones.length} live mask(s) (rendering ${capped.length}) · screenX=${window.screenX},screenY=${window.screenY} · innerSize=${window.innerWidth}x${window.innerHeight}`,
+          capped.slice(0, 3)
+        )
+      }
+      liveMasksRef.current = capped
+      setLiveMasks(capped)
     })
     const off8 = api.onClearLiveMasks(() => {
       liveMasksRef.current = []
@@ -101,6 +110,12 @@ export function Overlay() {
     })
     const off10b = api.onCursorColor((hex) => {
       cursorColorRef.current = hex
+    })
+    const off10c = api.onCursorSettings((s) => {
+      cursorColorRef.current = s.color
+      cursorStyleRef.current = s.style
+      cursorTrailMsRef.current = s.trailLengthMs
+      cursorIntensityRef.current = s.intensity
     })
     const off10 = api.onCursorPosition((pos) => {
       if (!cursorEnabledRef.current) return
@@ -130,6 +145,7 @@ export function Overlay() {
       off8()
       off9()
       off10b()
+      off10c()
       off10()
     }
   }, [])
@@ -145,15 +161,15 @@ export function Overlay() {
     return () => window.removeEventListener('resize', update)
   }, [])
 
-  // Continuous redraw loop when cursor highlight is on (trail decays over time)
+  // Continuous redraw loop when cursor highlight is on (trail decays over time).
+  // The loop runs always but the heavy work (filter + redraw) only fires when
+  // cursor highlight is enabled, keeping idle CPU near zero.
   useEffect(() => {
     const loop = () => {
       if (cursorEnabledRef.current) {
-        // Trim expired samples
         const now = Date.now()
-        cursorTrailRef.current = cursorTrailRef.current.filter(
-          (s) => now - s.t < CURSOR_TRAIL_MS
-        )
+        const ttl = cursorTrailMsRef.current
+        cursorTrailRef.current = cursorTrailRef.current.filter((s) => now - s.t < ttl)
         redraw()
       }
       animationRef.current = window.requestAnimationFrame(loop)
@@ -210,7 +226,14 @@ export function Overlay() {
 
     // 3. Cursor highlight (trail + halo) drawn on top
     if (cursorEnabledRef.current && cursorOnThisDisplayRef.current) {
-      drawCursorHighlight(ctx, cursorTrailRef.current, cursorColorRef.current)
+      drawCursorHighlight(
+        ctx,
+        cursorTrailRef.current,
+        cursorColorRef.current,
+        cursorStyleRef.current,
+        cursorTrailMsRef.current,
+        cursorIntensityRef.current
+      )
     }
   }
 
@@ -520,53 +543,145 @@ function drawShape(
   ctx.restore()
 }
 
+/**
+ * Meteor-trail cursor renderer.
+ *
+ * The visual we want: a comet head with a glowing tail that thins and
+ * fades into the air behind the cursor, no visible polyline pixelation.
+ *
+ * Strategy: instead of a single stroke through every sample, we build a
+ * smoothed Catmull-Rom-ish path (quadratic curves through midpoints) and
+ * stroke it 4 times — from a wide soft halo down to a bright thin core.
+ * Each pass uses `lineCap: round` so segment joins look natural, and the
+ * stroke width tapers from the head (max) to the tail (~0).
+ *
+ * To avoid drawing a uniform-width single stroke (which kills the comet
+ * effect), we split the path into N sub-strokes, each with its own width
+ * and alpha derived from its position along the trail AND the age of the
+ * underlying samples (older → more transparent).
+ */
 function drawCursorHighlight(
   ctx: CanvasRenderingContext2D,
   trail: CursorSample[],
-  color: string
+  color: string,
+  style: 'meteor' | 'classic' | 'minimal',
+  trailMs: number,
+  intensity: number
 ): void {
   if (trail.length === 0) return
-  const last = trail[trail.length - 1]
-  if (!last) return
+  const head = trail[trail.length - 1]
+  if (!head) return
   const rgb = hexToRgb(color)
-  ctx.save()
+  const now = Date.now()
+  const k = Math.max(0, Math.min(1, intensity))
 
-  // Smooth fading trail (older samples are more transparent + thinner)
-  if (trail.length >= 2) {
-    const now = Date.now()
-    for (let i = 1; i < trail.length; i++) {
-      const a = trail[i - 1]
-      const b = trail[i]
-      if (!a || !b) continue
-      const age = now - b.t
-      const t = Math.max(0, 1 - age / CURSOR_TRAIL_MS)
-      ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${0.6 * t})`
-      ctx.lineWidth = 2 + 4 * t
-      ctx.lineCap = 'round'
-      ctx.beginPath()
-      ctx.moveTo(a.x, a.y)
-      ctx.lineTo(b.x, b.y)
-      ctx.stroke()
-    }
+  // -- Wide outer halo behind the head, scales with intensity --
+  if (style !== 'minimal') {
+    ctx.save()
+    const haloRadius = style === 'meteor' ? 56 : 40
+    const outerHalo = ctx.createRadialGradient(head.x, head.y, 2, head.x, head.y, haloRadius)
+    outerHalo.addColorStop(0, `rgba(${rgb.r},${rgb.g},${rgb.b},${0.55 * k})`)
+    outerHalo.addColorStop(0.35, `rgba(${rgb.r},${rgb.g},${rgb.b},${0.22 * k})`)
+    outerHalo.addColorStop(1, `rgba(${rgb.r},${rgb.g},${rgb.b},0)`)
+    ctx.fillStyle = outerHalo
+    ctx.beginPath()
+    ctx.arc(head.x, head.y, haloRadius, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
   }
 
-  // Big glowing halo around the current cursor point
-  const grd = ctx.createRadialGradient(last.x, last.y, 4, last.x, last.y, 36)
-  grd.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.55)`)
-  grd.addColorStop(0.4, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.25)`)
-  grd.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0)`)
-  ctx.fillStyle = grd
+  if (style === 'minimal') {
+    // Just a precise ring at the head — no trail, no halo.
+    ctx.save()
+    ctx.strokeStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${0.95 * k})`
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.arc(head.x, head.y, 8, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.restore()
+    return
+  }
+
+  if (trail.length < 2) {
+    drawCursorHead(ctx, head, rgb, k)
+    return
+  }
+
+  // -- Trail rendering --
+  // 'meteor' style uses 4 passes for a soft glowing tail; 'classic' uses 1
+  // brighter pass for a simple line.
+  const passes =
+    style === 'meteor'
+      ? [
+          { widthMult: 5.5, alphaMult: 0.10 },
+          { widthMult: 3.4, alphaMult: 0.20 },
+          { widthMult: 1.8, alphaMult: 0.40 },
+          { widthMult: 0.85, alphaMult: 0.95 }
+        ]
+      : [{ widthMult: 1.2, alphaMult: 0.8 }]
+
+  const N = trail.length
+
+  for (const pass of passes) {
+    ctx.save()
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+
+    for (let i = N - 1; i >= 1; i--) {
+      const cur = trail[i]
+      const prev = trail[i - 1]
+      if (!cur || !prev) continue
+
+      const positionT = i / (N - 1)
+      const ageT = Math.max(0, 1 - (now - cur.t) / trailMs)
+      const t = positionT * ageT
+      const width = Math.max(0.6, pass.widthMult * Math.pow(t, 0.7) * 6)
+      const alpha = pass.alphaMult * Math.pow(t, 0.85) * k
+      if (alpha < 0.01) continue
+
+      const beforePrev = i >= 2 ? trail[i - 2] : null
+      ctx.lineWidth = width
+      ctx.strokeStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`
+      ctx.beginPath()
+      if (beforePrev) {
+        const midStart = {
+          x: (beforePrev.x + prev.x) / 2,
+          y: (beforePrev.y + prev.y) / 2
+        }
+        const midEnd = {
+          x: (prev.x + cur.x) / 2,
+          y: (prev.y + cur.y) / 2
+        }
+        ctx.moveTo(midStart.x, midStart.y)
+        ctx.quadraticCurveTo(prev.x, prev.y, midEnd.x, midEnd.y)
+      } else {
+        ctx.moveTo(prev.x, prev.y)
+        ctx.lineTo(cur.x, cur.y)
+      }
+      ctx.stroke()
+    }
+    ctx.restore()
+  }
+
+  drawCursorHead(ctx, head, rgb, k)
+}
+
+function drawCursorHead(
+  ctx: CanvasRenderingContext2D,
+  head: CursorSample | Point,
+  rgb: { r: number; g: number; b: number },
+  intensity = 1
+): void {
+  ctx.save()
+  const k = Math.max(0, Math.min(1, intensity))
+  const inner = ctx.createRadialGradient(head.x, head.y, 0, head.x, head.y, 14)
+  inner.addColorStop(0, `rgba(255,255,255,${0.9 * k})`)
+  inner.addColorStop(0.4, `rgba(${rgb.r},${rgb.g},${rgb.b},${0.8 * k})`)
+  inner.addColorStop(1, `rgba(${rgb.r},${rgb.g},${rgb.b},0)`)
+  ctx.fillStyle = inner
   ctx.beginPath()
-  ctx.arc(last.x, last.y, 36, 0, Math.PI * 2)
+  ctx.arc(head.x, head.y, 14, 0, Math.PI * 2)
   ctx.fill()
-
-  // Crisp inner ring
-  ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.95)`
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  ctx.arc(last.x, last.y, 10, 0, Math.PI * 2)
-  ctx.stroke()
-
   ctx.restore()
 }
 

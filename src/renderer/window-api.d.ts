@@ -48,8 +48,22 @@ declare global {
 
     setCursorHighlight(enabled: boolean): void
     setCursorColor(hex: string): void
+    setCursorSettings(settings: {
+      color: string
+      style: 'meteor' | 'classic' | 'minimal'
+      trailLengthMs: number
+      intensity: number
+    }): void
     onCursorHighlight(cb: (enabled: boolean) => void): () => void
     onCursorColor(cb: (hex: string) => void): () => void
+    onCursorSettings(
+      cb: (settings: {
+        color: string
+        style: 'meteor' | 'classic' | 'minimal'
+        trailLengthMs: number
+        intensity: number
+      }) => void
+    ): () => void
     onCursorPosition(
       cb: (pos: {
         screenX: number

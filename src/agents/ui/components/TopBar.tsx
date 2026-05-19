@@ -1,4 +1,4 @@
-import { Library, Settings as SettingsIcon, Video } from 'lucide-react'
+import { Library, Settings as SettingsIcon, Sparkles, Video } from 'lucide-react'
 import { useNavStore, type PageName } from '../stores/useNavStore'
 
 interface NavItem {
@@ -9,6 +9,7 @@ interface NavItem {
 
 const ITEMS: ReadonlyArray<NavItem> = [
   { id: 'home', label: 'Accueil', Icon: Video },
+  { id: 'tools', label: 'Outils', Icon: Sparkles },
   { id: 'library', label: 'Bibliothèque', Icon: Library },
   { id: 'settings', label: 'Paramètres', Icon: SettingsIcon }
 ]

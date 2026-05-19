@@ -5,6 +5,7 @@ import { Recording } from './pages/Recording'
 import { Preview } from './pages/Preview'
 import { Library } from './pages/Library'
 import { Settings } from './pages/Settings'
+import { Tools } from './pages/Tools'
 import { useNavStore, type PageName } from './stores/useNavStore'
 import { registerUIEventListeners } from './eventListeners'
 
@@ -13,6 +14,7 @@ const PAGES: Record<PageName, () => ReactElement> = {
   recording: Recording,
   preview: Preview,
   library: Library,
+  tools: Tools,
   settings: Settings
 }
 
