@@ -149,7 +149,14 @@ function createOverlayWindow(display: Display): BrowserWindow {
 
   void win.loadURL(rendererUrl('overlay'))
 
-  win.once('ready-to-show', () => win.showInactive())
+  win.once('ready-to-show', () => {
+    win.showInactive()
+    // After the overlay raises, push the toolbar back above it so its
+    // buttons stay clickable (see setOverlaysInteractive comment).
+    if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
+      toolbarWindow.moveTop()
+    }
+  })
   win.on('closed', () => {
     overlayWindows.delete(display.id)
   })
@@ -168,8 +175,12 @@ function spawnOverlayForAllDisplays(): void {
 function createToolbarWindow(): BrowserWindow {
   const primary = screen.getPrimaryDisplay()
   const { x, width } = primary.workArea
-  const TOOLBAR_W = 1040
-  const TOOLBAR_H = 100
+  // Window dimensions need slack on both axes so the inner capsule
+  // shape can draw its rounded ends without being clipped by the
+  // rectangular BrowserWindow frame. ~60 px of horizontal margin gives
+  // each side enough room for the 40 px radius.
+  const TOOLBAR_W = 1120
+  const TOOLBAR_H = 108
 
   const win = new BrowserWindow({
     x: x + Math.floor((width - TOOLBAR_W) / 2),
@@ -285,6 +296,15 @@ function setOverlaysInteractive(interactive: boolean): void {
       w.setIgnoreMouseEvents(true, { forward: true })
       w.setFocusable(false)
     }
+  }
+  // On Windows, `alwaysOnTop: 'screen-saver'` on both the toolbar AND
+  // the overlay puts them in the same z-tier; the OS then orders them
+  // by last activity. An overlay that just received `setFocusable(true)`
+  // can briefly climb above the toolbar, hiding its buttons under the
+  // draw surface. Pushing the toolbar back to the top after every
+  // interactivity flip keeps its clicks reachable.
+  if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
+    toolbarWindow.moveTop()
   }
 }
 
@@ -482,7 +502,7 @@ function registerIpcHandlers(): void {
   })
   ipcMain.on('toolbar:restore', () => {
     if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
-    toolbarWindow.setSize(1040, 100, true)
+    toolbarWindow.setSize(1120, 108, true)
   })
 
   // Toolbar → Overlay(s)

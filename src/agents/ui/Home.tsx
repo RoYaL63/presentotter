@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import {
   Home as HomeIcon,
+  Keyboard,
   Library as LibraryIcon,
   Power,
   Settings as SettingsIcon,
@@ -297,6 +298,29 @@ function AccueilSection() {
         />
       </div>
 
+      {/* SHORTCUTS — inline cheat sheet so the user discovers them
+          without opening the help modal. Six most-used bindings shown
+          in a row; the rest is one click away. */}
+      <div className="otter-glass otter-aqua flex flex-wrap items-center gap-2 px-3 py-2 text-[11px] text-sea-700">
+        <Keyboard className="h-3.5 w-3.5 flex-shrink-0 text-coral-500" strokeWidth={2} />
+        <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-sea-700/70">
+          Raccourcis
+        </span>
+        <ShortcutChip combo={['Alt', 'P']} label="Crayon" />
+        <ShortcutChip combo={['Alt', 'R']} label="Rectangle" />
+        <ShortcutChip combo={['Alt', 'T']} label="Texte" />
+        <ShortcutChip combo={['Alt', 'L']} label="Spotlight" />
+        <ShortcutChip combo={['Clic droit']} label="Annuler" />
+        <ShortcutChip combo={['Alt', 'Alt', 'Alt']} label="Curseur" />
+        <button
+          type="button"
+          onClick={() => setShortcutsOpen(true)}
+          className="ml-auto inline-flex items-center gap-1 rounded-full bg-white/60 px-2.5 py-1 text-[10px] font-semibold text-sea-700 ring-1 ring-white/60 transition hover:bg-white/85"
+        >
+          Voir tous
+        </button>
+      </div>
+
       {/* FOOTER — version + tip + settings shortcut on a single row. */}
       <footer className="mt-auto flex flex-wrap items-center justify-between gap-2 text-[11px] text-cream-800/60">
         <span className="inline-flex items-center gap-1">
@@ -379,6 +403,32 @@ function ActionCard({ icon: Icon, title, description, onClick, highlight = false
         </p>
       </div>
     </button>
+  )
+}
+
+interface ShortcutChipProps {
+  combo: string[]
+  label: string
+}
+
+function ShortcutChip({ combo, label }: ShortcutChipProps) {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full bg-white/50 px-2 py-0.5 ring-1 ring-white/55"
+      title={`${label} : ${combo.join(' + ')}`}
+    >
+      <span className="flex items-center gap-0.5">
+        {combo.map((key, idx) => (
+          <kbd
+            key={`${key}-${idx}`}
+            className="rounded bg-white/85 px-1.5 py-0 font-mono text-[10px] font-semibold text-sea-700 ring-1 ring-sea-700/15"
+          >
+            {key}
+          </kbd>
+        ))}
+      </span>
+      <span className="text-[10px] font-semibold text-sea-700/85">{label}</span>
+    </span>
   )
 }
 

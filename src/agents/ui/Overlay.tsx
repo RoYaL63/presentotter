@@ -490,6 +490,22 @@ export function Overlay() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onContextMenu={(e) => {
+          // Right-click on the overlay = undo last annotation. Saves
+          // the user from having to reach the toolbar's Undo button
+          // while drawing. Block the default OS context menu so it
+          // doesn't pop up on top.
+          e.preventDefault()
+          if (draftRef.current !== null) {
+            draftRef.current = null
+            redraw()
+            return
+          }
+          if (shapesRef.current.length > 0) {
+            shapesRef.current.pop()
+            redraw()
+          }
+        }}
         style={{ display: 'block', width: '100%', height: '100%' }}
       />
 

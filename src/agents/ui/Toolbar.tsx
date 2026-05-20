@@ -296,7 +296,7 @@ export function Toolbar() {
       style={{ background: 'transparent' }}
     >
       <div
-        className="glass glass-shine flex items-center gap-1.5 px-3 py-2 animate-fade-in-up"
+        className="glass glass-shine flex items-center gap-1.5 px-6 py-2 animate-fade-in-up"
         style={
           {
             // Allow the user to drag the whole toolbar by default; specific
@@ -346,14 +346,25 @@ export function Toolbar() {
         >
           {TOOLS.map(({ id, label, shortcut, Icon }) => {
             const active = tool === id
+            // When the tool is active, the button visually becomes an
+            // "exit this tool" affordance: same coral surface, but the
+            // icon swaps to an ✕ so the user clearly sees that clicking
+            // it again will leave the mode (no need to hunt Échap).
+            const DisplayIcon = active ? X : Icon
+            const buttonTitle = active
+              ? `Quitter ${label.toLowerCase()} · ${shortcut}`
+              : `${label} — ${shortcut}`
+            const buttonAria = active
+              ? `Quitter ${label.toLowerCase()}`
+              : `${label} (${shortcut})`
             return (
               <button
                 key={id}
                 type="button"
                 onClick={() => sendTool(id)}
                 aria-pressed={active}
-                aria-label={`${label} (${shortcut})`}
-                title={`${label} — ${shortcut}`}
+                aria-label={buttonAria}
+                title={buttonTitle}
                 className={`relative flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-200 otter-aqua ${
                   active
                     ? 'bg-gradient-to-br from-coral-400 to-coral-500 text-white shadow-glow-coral ring-1 ring-coral-300/50'
@@ -366,7 +377,7 @@ export function Toolbar() {
                     aria-hidden
                   />
                 )}
-                <Icon className="relative h-4 w-4" strokeWidth={2} />
+                <DisplayIcon className="relative h-4 w-4" strokeWidth={2} />
               </button>
             )
           })}

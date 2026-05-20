@@ -45,6 +45,11 @@ const GROUPS: ShortcutGroup[] = [
     title: 'Manipuler les annotations',
     rows: [
       { combo: ['Alt', 'Z'], label: 'Annuler le dernier trait' },
+      {
+        combo: ['Clic droit'],
+        label: 'Annuler le dernier trait',
+        note: 'Sur la zone de dessin, depuis n\'importe quel outil'
+      },
       { combo: ['Alt', 'Shift', 'C'], label: 'Tout effacer' }
     ]
   },
