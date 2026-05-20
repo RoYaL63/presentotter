@@ -45,6 +45,11 @@ const CASES: PatternCase[] = [
     negative: 'ya29.short'
   },
   {
+    name: 'google-client-secret',
+    positive: 'client_secret = GOCSPX-aBcDef123456789aBcDef_1234',
+    negative: 'GOCSPX-short'
+  },
+  {
     name: 'aws-access-key',
     positive: 'AKIAIOSFODNN7EXAMPLE is the key',
     negative: 'AKIA-short or just AKIA123'

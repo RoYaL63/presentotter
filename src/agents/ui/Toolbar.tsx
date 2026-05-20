@@ -5,6 +5,7 @@ import {
   Crosshair,
   Eraser,
   GripVertical,
+  HelpCircle,
   Info,
   Layout,
   Minus,
@@ -18,7 +19,6 @@ import {
   Undo2,
   X
 } from 'lucide-react'
-import { SanitizerPopup } from './SanitizerPopup'
 import { Mascot } from './components/Mascot'
 import { SanitizerLiveEngine, type ScanResult } from './sanitizer-live'
 import { useToolSettingsStore, type ToolId as SettingsToolId } from './stores/useToolSettingsStore'
@@ -53,9 +53,14 @@ export function Toolbar() {
   const [strokeWidth, setStrokeWidth] = useState<number>(4)
   const [opacity] = useState<number>(1)
   const [minimized, setMinimized] = useState(false)
-  const [sanitizerOpen, setSanitizerOpen] = useState(false)
   const [liveOn, setLiveOn] = useState(false)
-  const [liveStatus, setLiveStatus] = useState<{ count: number; ms: number } | null>(null)
+  const [liveStatus, setLiveStatus] = useState<{
+    count: number
+    ms: number
+    words: number
+    preview: string
+    at: number
+  } | null>(null)
   const [livePhase, setLivePhase] = useState<'acquiring' | 'loading-ocr' | 'scanning' | 'idle' | null>(null)
   const [liveError, setLiveError] = useState<string | null>(null)
   const [cursorOn, setCursorOn] = useState(false)
@@ -67,21 +72,27 @@ export function Toolbar() {
   // through the storage event hooked inside useToolSettingsStore).
   const toolDefaults = useToolSettingsStore((s) => s.defaults)
   const cursorSettings = useToolSettingsStore((s) => s.cursor)
+  const sanitizerSettings = useToolSettingsStore((s) => s.sanitizer)
   const setStoredCursor = useToolSettingsStore((s) => s.setCursor)
   // Single source of truth for the cursor color: the persisted store.
   const cursorColor = cursorSettings.color
 
   /** Push the current tool selection to the overlay & toggle click-through.
    *  Also applies the per-tool defaults from the Tools page so users get
-   *  their preferred color/stroke/opacity automatically. */
+   *  their preferred color/stroke/opacity automatically.
+   *
+   *  Clicking the icon of the already-active tool deactivates it — the
+   *  user goes back to 'select' (passe-through) without having to hunt
+   *  for the Escape key. */
   const sendTool = useCallback(
     (next: ToolId) => {
-      setTool(next)
+      const target: ToolId = next === tool && next !== 'select' ? 'select' : next
+      setTool(target)
       const api = apiRef.current
       if (!api) return
       // Apply persisted defaults if we have any for this tool
-      if (next !== 'select') {
-        const settingsId = next as SettingsToolId
+      if (target !== 'select') {
+        const settingsId = target as SettingsToolId
         const def = toolDefaults[settingsId]
         if (def) {
           setColor(def.color)
@@ -91,10 +102,14 @@ export function Toolbar() {
           api.setOpacity(def.opacity)
         }
       }
-      api.setTool(next)
-      api.setOverlayInteractive(next !== 'select')
+      api.setTool(target)
+      api.setOverlayInteractive(target !== 'select')
+      // Spotlight follows the cursor live → tell main to (a) flip the
+      // poll on/off and (b) broadcast the active flag to overlays so
+      // they know whether to paint the dark wash + clear circle.
+      api.setSpotlightActive(target === 'spotlight')
     },
-    [toolDefaults]
+    [tool, toolDefaults]
   )
 
   const sendColor = useCallback((hex: string) => {
@@ -148,10 +163,22 @@ export function Toolbar() {
   const handleClose = () => apiRef.current?.toolbarClose()
 
   const handleScanResult = useCallback((result: ScanResult) => {
-    setLiveStatus({ count: result.masks.length, ms: result.scanDurationMs })
+    setLiveStatus({
+      count: result.masks.length,
+      ms: result.scanDurationMs,
+      words: result.wordCount,
+      preview: result.preview,
+      at: Date.now()
+    })
     setLiveError(null)
     apiRef.current?.setLiveMasks(result.masks)
+    apiRef.current?.setLiveOcrWords(result.ocrWords)
   }, [])
+
+  // Push contextual flag changes to the running engine without restart.
+  useEffect(() => {
+    engineRef.current?.setContextual(sanitizerSettings.contextual)
+  }, [sanitizerSettings.contextual])
 
   const handleToggleLive = useCallback(async () => {
     const api = apiRef.current
@@ -162,6 +189,7 @@ export function Toolbar() {
       setLiveStatus(null)
       setLivePhase(null)
       api.clearLiveMasks()
+      api.clearLiveOcrWords()
       if (engineRef.current) {
         await engineRef.current.stop()
         engineRef.current = null
@@ -174,6 +202,7 @@ export function Toolbar() {
       setLiveOn(true)
       setLivePhase('acquiring')
       const engine = new SanitizerLiveEngine()
+      engine.setContextual(sanitizerSettings.contextual)
       engineRef.current = engine
       await engine.start(2000, handleScanResult, (phase) => setLivePhase(phase))
     } catch (err) {
@@ -187,7 +216,7 @@ export function Toolbar() {
         engineRef.current = null
       }
     }
-  }, [liveOn, handleScanResult])
+  }, [liveOn, handleScanResult, sanitizerSettings.contextual])
 
   // Tear down the engine when the toolbar unmounts (app quit)
   useEffect(() => {
@@ -215,13 +244,15 @@ export function Toolbar() {
       color: cursorSettings.color,
       style: cursorSettings.style,
       trailLengthMs: cursorSettings.trailLengthMs,
-      intensity: cursorSettings.intensity
+      intensity: cursorSettings.intensity,
+      size: cursorSettings.size
     })
   }, [
     cursorSettings.color,
     cursorSettings.style,
     cursorSettings.trailLengthMs,
-    cursorSettings.intensity
+    cursorSettings.intensity,
+    cursorSettings.size
   ])
 
   /** Color picker in the toolbar updates the shared store; the storage event
@@ -283,14 +314,19 @@ export function Toolbar() {
           <GripVertical className="h-3.5 w-3.5" strokeWidth={1.5} />
         </div>
 
-        {/* Logo — clay cream loutre, aqua sheen */}
-        <div
-          className="otter-clay otter-aqua animate-bubble-slow relative mr-0.5 flex h-8 w-8 items-center justify-center overflow-hidden"
-          style={{ borderRadius: 12 }}
-          aria-hidden
+        {/* Logo — static loutre, click to bring Home forward. No clay
+            background or float animation; the icon stays still in the
+            toolbar so the eye anchors to it. */}
+        <button
+          type="button"
+          onClick={handleConsole}
+          title="Rouvrir PresentOtter"
+          aria-label="Rouvrir PresentOtter"
+          className="mr-0.5 flex h-8 w-8 items-center justify-center transition-transform duration-150 hover:scale-110 active:scale-95"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          <Mascot size={26} />
-        </div>
+          <Mascot size={30} />
+        </button>
 
         <div className="h-7 w-px bg-white/[0.08]" aria-hidden />
 
@@ -439,8 +475,8 @@ export function Toolbar() {
 
           <button
             type="button"
-            onClick={() => setSanitizerOpen(true)}
-            title="Sanitizer · vérifier un texte collé"
+            onClick={() => apiRef.current?.openSanitizer()}
+            title="Coller un texte pour vérifier qu'il ne contient pas de secret. S'ouvre dans la fenêtre principale."
             aria-label="Ouvrir le sanitizer manuel"
             className="flex h-8 w-8 items-center justify-center rounded-lg text-otter-300 transition-all hover:bg-otter-500/15 hover:text-otter-200"
           >
@@ -493,8 +529,43 @@ export function Toolbar() {
                 className="sr-only"
               />
             </label>
+            {/* Cursor size — applies to the highlight halo + particle
+                base size. Sits right next to the color picker so the
+                "personnaliser le curseur" controls are grouped. */}
+            <label
+              className="ml-1 inline-flex h-8 items-center gap-1 rounded-md px-1 hover:bg-white/[0.05]"
+              title="Taille du curseur"
+            >
+              <span className="text-[9px] uppercase tracking-wider text-otter-200/55">
+                ×
+              </span>
+              <input
+                type="range"
+                min={0.5}
+                max={2}
+                step={0.1}
+                value={cursorSettings.size}
+                onChange={(e) =>
+                  setStoredCursor({ size: Number(e.target.value) })
+                }
+                aria-label="Taille du curseur"
+                className="h-1 w-12 cursor-pointer accent-coral-400"
+              />
+              <span className="w-5 text-right text-[9px] font-medium text-otter-200/70 tabular-nums">
+                {cursorSettings.size.toFixed(1)}
+              </span>
+            </label>
           </div>
 
+          <button
+            type="button"
+            onClick={() => apiRef.current?.openShortcuts()}
+            title="Tous les raccourcis clavier — s'ouvre dans la fenêtre principale"
+            aria-label="Aide raccourcis"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
+          >
+            <HelpCircle className="h-4 w-4" strokeWidth={2} />
+          </button>
           <button
             type="button"
             onClick={handleConsole}
@@ -530,29 +601,38 @@ export function Toolbar() {
         Opacité: {opacity}
       </div>
 
-      {sanitizerOpen && <SanitizerPopup onClose={() => setSanitizerOpen(false)} />}
-
       {liveOn && (
         <div
           role="status"
-          className="pointer-events-auto absolute top-[110px] left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-full glass px-3 py-1.5 text-[11px] text-otter-100 shadow-glass animate-fade-in-up"
+          className="pointer-events-auto absolute top-full left-1/2 mt-2 -translate-x-1/2 flex max-w-[700px] items-center gap-2.5 rounded-2xl glass px-4 py-2 text-[11px] text-otter-100 shadow-glass animate-fade-in-up"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          <span className="relative inline-flex h-2 w-2">
-            <span className="absolute inset-0 rounded-full bg-otter-400 animate-glow-pulse" aria-hidden />
-            <span className="relative h-2 w-2 rounded-full bg-otter-400" aria-hidden />
+          <span className="relative inline-flex h-2 w-2 flex-shrink-0">
+            <span
+              className="absolute inset-0 rounded-full bg-coral-400 animate-glow-pulse"
+              aria-hidden
+            />
+            <span className="relative h-2 w-2 rounded-full bg-coral-500" aria-hidden />
           </span>
-          <span className="font-semibold tracking-wide">
+          <span className="font-semibold tracking-wide whitespace-nowrap">
             {livePhase === 'acquiring' && 'Acquisition de l\'écran…'}
             {livePhase === 'loading-ocr' && 'Chargement OCR (Tesseract)…'}
-            {livePhase === 'scanning' && 'Analyse en cours…'}
-            {livePhase === 'idle' && liveStatus !== null && (
+            {livePhase === 'scanning' && liveStatus === null && 'Analyse en cours…'}
+            {liveStatus !== null && (
               liveStatus.count === 0
-                ? `Aucun secret détecté · ${liveStatus.ms}ms`
-                : `${liveStatus.count} secret${liveStatus.count > 1 ? 's' : ''} masqué${liveStatus.count > 1 ? 's' : ''} · ${liveStatus.ms}ms`
+                ? `0 secret · ${liveStatus.words} mots · ${liveStatus.ms}ms`
+                : `${liveStatus.count} masqué${liveStatus.count > 1 ? 's' : ''} · ${liveStatus.words} mots · ${liveStatus.ms}ms`
             )}
-            {livePhase === null && 'Sanitizer LIVE actif'}
+            {livePhase === null && liveStatus === null && 'Sanitizer LIVE actif'}
           </span>
+          {liveStatus !== null && liveStatus.preview.length > 0 && (
+            <span
+              className="hidden sm:inline truncate text-otter-100/65 font-mono text-[10px]"
+              title={liveStatus.preview}
+            >
+              · &ldquo;{liveStatus.preview}&rdquo;
+            </span>
+          )}
         </div>
       )}
 

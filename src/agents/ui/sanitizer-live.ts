@@ -51,7 +51,25 @@ export interface LiveMask {
 
 export interface ScanResult {
   masks: LiveMask[]
+  /** Bounding boxes of every word OCR'd this cycle (virtual-screen CSS).
+   *  Used by the debug overlay so the user can see WHAT Tesseract is
+   *  seeing — separates "OCR missed the word" from "word seen but no
+   *  pattern matched". */
+  ocrWords: OcrWordBox[]
+  /** Concatenated OCR text trimmed to the first ~120 chars — surfaces
+   *  in the toolbar status so the user knows scans are happening. */
+  preview: string
+  /** Total words Tesseract returned (regardless of how many we masked). */
+  wordCount: number
   scanDurationMs: number
+}
+
+export interface OcrWordBox {
+  x: number
+  y: number
+  width: number
+  height: number
+  text: string
 }
 
 interface TesseractWord {
@@ -97,9 +115,16 @@ export class SanitizerLiveEngine {
   private running = false
   private scanInFlight = false
   private target: CaptureTarget | null = null
+  /** Whether to run the label-based contextual detection pass on top
+   *  of the regex pass. Toggleable live via setContextual(). */
+  private contextual = true
 
   constructor() {
     this.canvas = document.createElement('canvas')
+  }
+
+  setContextual(enabled: boolean): void {
+    this.contextual = enabled
   }
 
   /** Start the periodic scan loop. Idempotent. */
@@ -237,18 +262,25 @@ export class SanitizerLiveEngine {
       const result = await this.worker.recognize(dataUrl)
       const data = result.data as unknown as { text?: string; words?: TesseractWord[] }
       const words = Array.isArray(data.words) ? data.words : []
-      const textPreview = (data.text ?? '').slice(0, 80).replace(/\s+/g, ' ')
+      const textPreview = (data.text ?? '').slice(0, 120).replace(/\s+/g, ' ').trim()
       // scaleX / scaleY here recover physical source pixels from the
       // downscaled OCR canvas. We then divide by the display's DPI scale
       // factor to land in CSS pixels, and finally offset by the display's
       // virtual-screen origin so the overlay can do a simple
       // `mask.x - window.screenX` translation.
       const masks = this.detectMasks(words, scaleX, scaleY)
+      const ocrWords = this.wordsToCss(words, scaleX, scaleY)
       const dur = Math.round(performance.now() - startedAt)
       debug(
         `scan done: ${dur}ms · ${words.length} words · ${masks.length} hits · text="${textPreview}..."`
       )
-      const out: ScanResult = { masks, scanDurationMs: dur }
+      const out: ScanResult = {
+        masks,
+        ocrWords,
+        preview: textPreview,
+        wordCount: words.length,
+        scanDurationMs: dur
+      }
       onScan?.(out)
       onStatus?.('idle')
       return out
@@ -366,7 +398,117 @@ export class SanitizerLiveEngine {
       }
     }
 
+    // Contextual pass — masks any 6+ char value that sits on the same
+    // line as a secret-label keyword (secret / mot de passe / token /
+    // credential / key / clé / etc., FR + EN). This catches things the
+    // pure-regex pass misses, e.g. provider-specific formats we don't
+    // explicitly enumerate, or values already partially redacted like
+    // "****tuy6" that still need to be hidden because the LABEL right
+    // next to them screams "this is a secret".
+    const contextualMasks = this.contextual ? this.detectContextualSecrets(words) : []
+    for (const ctxMask of contextualMasks) {
+      const PAD = 4
+      const cssX = toCssX(ctxMask.x0) - PAD
+      const cssY = toCssY(ctxMask.y0) - PAD
+      const cssW = (ctxMask.x1 - ctxMask.x0) * scaleX / dpi + PAD * 2
+      const cssH = (ctxMask.y1 - ctxMask.y0) * scaleY / dpi + PAD * 2
+      masks.push({
+        x: Math.floor(cssX),
+        y: Math.floor(cssY),
+        width: Math.ceil(cssW),
+        height: Math.ceil(cssH),
+        label: `context:${ctxMask.label}`
+      })
+    }
+
     return mergeOverlappingMasks(masks)
+  }
+
+  /**
+   * Translate every OCR word's bbox into virtual-screen CSS coordinates
+   * (same space as window.screenX/Y) so the overlay can debug-render
+   * them on top of any display in the right place.
+   */
+  private wordsToCss(
+    words: TesseractWord[],
+    scaleX: number,
+    scaleY: number
+  ): OcrWordBox[] {
+    const t = this.target
+    const dpi = t?.scaleFactor ?? 1
+    const offX = t?.bounds.x ?? 0
+    const offY = t?.bounds.y ?? 0
+    const out: OcrWordBox[] = []
+    for (const w of words) {
+      if (!w || !w.bbox) continue
+      const b = w.bbox
+      out.push({
+        x: Math.floor((b.x0 * scaleX) / dpi + offX),
+        y: Math.floor((b.y0 * scaleY) / dpi + offY),
+        width: Math.ceil((b.x1 - b.x0) * scaleX / dpi),
+        height: Math.ceil((b.y1 - b.y0) * scaleY / dpi),
+        text: w.text
+      })
+    }
+    return out
+  }
+
+  /**
+   * Look for secret-y label words (FR + EN) and mask the next 1-3 words
+   * on the same line that look like a credential value. "Same line" is
+   * baselines within half the keyword's height. "Credential-like" is
+   * any 6+ char run of base64/url-safe/asterisk characters that is
+   * neither a date nor a plain number.
+   */
+  private detectContextualSecrets(
+    words: TesseractWord[]
+  ): Array<{ x0: number; y0: number; x1: number; y1: number; label: string }> {
+    const KEYWORDS =
+      /^(secret|secrets|password|passwords|mot|pwd|token|tokens|cle|clé|cles|clés|key|keys|credential|credentials|api[_-]?key|client[_-]?secret|access[_-]?token|bearer|auth)s?[:.;,]*$/i
+    // Values that pass the shape filter: alphanumeric + the small set of
+    // separator chars that appear in credentials. We KEEP `*` so a
+    // server-side-redacted `****tuy6` is still flagged when the label
+    // next to it says "secret".
+    const VALUE_RE = /^[A-Za-z0-9_\-./+=:*]{6,}$/
+    // Things that look like values but aren't credentials.
+    const DATE_RE = /^\d{1,4}[-/]\d{1,2}([-/]\d{1,4})?$/
+    const NUM_RE = /^\d+([.,]\d+)?$/
+    const out: Array<{ x0: number; y0: number; x1: number; y1: number; label: string }> = []
+    for (let i = 0; i < words.length; i++) {
+      const kw = words[i]
+      if (!kw || !kw.bbox) continue
+      if (!KEYWORDS.test(kw.text)) continue
+      const refY = (kw.bbox.y0 + kw.bbox.y1) / 2
+      const lineTol = Math.max(8, (kw.bbox.y1 - kw.bbox.y0) * 0.5)
+      // Scan up to 6 words to the right on the same horizontal line.
+      let consumedNearbyKeyword = false
+      for (let j = i + 1; j < Math.min(i + 7, words.length); j++) {
+        const v = words[j]
+        if (!v || !v.bbox) continue
+        const vy = (v.bbox.y0 + v.bbox.y1) / 2
+        if (Math.abs(vy - refY) > lineTol) break // dropped to next line
+        // Skip filler keywords ("de", "du", "client") so "Code secret du
+        // client *****tuy6" still ends up masking the actual value.
+        const isFiller = /^(de|du|d[eu]?|le|la|les|of|the|client|user|api|le|du|pour|for)$/i.test(
+          v.text
+        )
+        if (isFiller && !consumedNearbyKeyword) continue
+        consumedNearbyKeyword = true
+        if (!VALUE_RE.test(v.text)) continue
+        if (DATE_RE.test(v.text) || NUM_RE.test(v.text)) continue
+        // Mask just this one value and stop — we don't want to keep
+        // masking subsequent words on the same line.
+        out.push({
+          x0: v.bbox.x0,
+          y0: v.bbox.y0,
+          x1: v.bbox.x1,
+          y1: v.bbox.y1,
+          label: kw.text.toLowerCase().replace(/[:.;,]*$/, '')
+        })
+        break
+      }
+    }
+    return out
   }
 }
 

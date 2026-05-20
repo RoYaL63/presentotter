@@ -5,6 +5,7 @@ import {
   Crosshair,
   Pencil,
   RotateCcw,
+  ShieldCheck,
   Square,
   Sun,
   Type
@@ -121,10 +122,12 @@ const COLOR_SWATCHES = [
 export function Tools() {
   const defaults = useToolSettingsStore((s) => s.defaults)
   const cursor = useToolSettingsStore((s) => s.cursor)
+  const sanitizer = useToolSettingsStore((s) => s.sanitizer)
   const setToolColor = useToolSettingsStore((s) => s.setToolColor)
   const setToolStroke = useToolSettingsStore((s) => s.setToolStroke)
   const setToolOpacity = useToolSettingsStore((s) => s.setToolOpacity)
   const setCursor = useToolSettingsStore((s) => s.setCursor)
+  const setSanitizer = useToolSettingsStore((s) => s.setSanitizer)
   const resetAll = useToolSettingsStore((s) => s.resetAll)
 
   return (
@@ -242,7 +245,70 @@ export function Tools() {
           onChange={(v) => setCursor({ intensity: v / 100 })}
         />
       </div>
+
+      {/* Sanitizer section — controls for the live OCR scanner that runs
+          when the radar in the toolbar is on. */}
+      <div className="glass glass-shine flex flex-col gap-4 rounded-2xl p-6">
+        <header className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-coral-500/15 border border-coral-400/30 text-coral-500">
+            <ShieldCheck className="h-5 w-5" strokeWidth={1.75} />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-otter-50">Sanitizer LIVE</h2>
+            <p className="text-xs text-otter-200/60">
+              Détection en direct par OCR + regex sur l&apos;écran partagé.
+            </p>
+          </div>
+        </header>
+
+        <SanitizerToggle
+          label="Détection contextuelle"
+          help='Masque la valeur 6+ caractères qui suit un libellé comme "secret", "mot de passe", "token", "credential", "key" sur la même ligne (FR + EN). Désactive si tu vois trop de faux positifs.'
+          value={sanitizer.contextual}
+          onChange={(v) => setSanitizer({ contextual: v })}
+        />
+
+        <SanitizerToggle
+          label="Mode debug OCR"
+          help="Encadre chaque mot que Tesseract lit, en kelp. Utile pour vérifier si le sanitizer a bien vu le texte qui n'a pas été masqué. Diagnostic uniquement."
+          value={sanitizer.debugOcr}
+          onChange={(v) => setSanitizer({ debugOcr: v })}
+        />
+      </div>
     </section>
+  )
+}
+
+interface SanitizerToggleProps {
+  label: string
+  help: string
+  value: boolean
+  onChange(v: boolean): void
+}
+
+function SanitizerToggle({ label, help, value, onChange }: SanitizerToggleProps) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="flex-1">
+        <p className="text-sm font-semibold text-otter-50">{label}</p>
+        <p className="mt-0.5 text-xs leading-snug text-otter-200/60">{help}</p>
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange(!value)}
+        role="switch"
+        aria-checked={value}
+        className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+          value ? 'bg-coral-500' : 'bg-white/[0.12]'
+        }`}
+      >
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+            value ? 'translate-x-6' : 'translate-x-1'
+          }`}
+        />
+      </button>
+    </div>
   )
 }
 

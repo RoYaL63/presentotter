@@ -42,15 +42,29 @@ export interface CursorSettings {
   trailLengthMs: number
   /** 0..1 — overall opacity multiplier of the trail. */
   intensity: number
+  /** 0.5..2.0 — multiplier on the halo radius + particle base size. */
+  size: number
+}
+
+export interface SanitizerSettings {
+  /** Show each OCR-detected word as a small box on the overlay so the
+   *  user can see what Tesseract is reading. Off by default — it's a
+   *  diagnostic tool, not part of the normal UX. */
+  debugOcr: boolean
+  /** Catch values next to a "secret / mot de passe / token / key / …"
+   *  label even when the value doesn't match a known credential format. */
+  contextual: boolean
 }
 
 export interface ToolSettingsState {
   defaults: Record<ToolId, ToolDefaults>
   cursor: CursorSettings
+  sanitizer: SanitizerSettings
   setToolColor(tool: ToolId, hex: string): void
   setToolStroke(tool: ToolId, width: number): void
   setToolOpacity(tool: ToolId, opacity: number): void
   setCursor(patch: Partial<CursorSettings>): void
+  setSanitizer(patch: Partial<SanitizerSettings>): void
   resetAll(): void
 }
 
@@ -72,38 +86,51 @@ const FACTORY_CURSOR: CursorSettings = {
   color: '#FF8B7B', // coral pop — signature CTA accent
   style: 'meteor',
   trailLengthMs: 900,
-  intensity: 1
+  intensity: 1,
+  size: 1
+}
+
+const FACTORY_SANITIZER: SanitizerSettings = {
+  debugOcr: false,
+  // Contextual detection is on by default — a strict regex-only mode
+  // misses too many real-world cases (Cloud Console "Code secret du
+  // client", admin dashboards, etc.).
+  contextual: true
 }
 
 interface PersistedShape {
   defaults: Record<ToolId, ToolDefaults>
   cursor: CursorSettings
+  sanitizer: SanitizerSettings
+}
+
+function emptyShape(): PersistedShape {
+  return {
+    defaults: { ...FACTORY_DEFAULTS },
+    cursor: { ...FACTORY_CURSOR },
+    sanitizer: { ...FACTORY_SANITIZER }
+  }
 }
 
 function loadFromStorage(): PersistedShape {
-  if (typeof localStorage === 'undefined') {
-    return { defaults: { ...FACTORY_DEFAULTS }, cursor: { ...FACTORY_CURSOR } }
-  }
+  if (typeof localStorage === 'undefined') return emptyShape()
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw === null) {
-      return { defaults: { ...FACTORY_DEFAULTS }, cursor: { ...FACTORY_CURSOR } }
-    }
+    if (raw === null) return emptyShape()
     return parsePersisted(raw)
   } catch {
-    return { defaults: { ...FACTORY_DEFAULTS }, cursor: { ...FACTORY_CURSOR } }
+    return emptyShape()
   }
 }
 
 function parsePersisted(raw: string): PersistedShape {
   const parsed = JSON.parse(raw) as unknown
-  if (parsed === null || typeof parsed !== 'object') {
-    return { defaults: { ...FACTORY_DEFAULTS }, cursor: { ...FACTORY_CURSOR } }
-  }
+  if (parsed === null || typeof parsed !== 'object') return emptyShape()
   const candidate = parsed as Partial<PersistedShape>
   return {
     defaults: { ...FACTORY_DEFAULTS, ...(candidate.defaults ?? {}) },
-    cursor: { ...FACTORY_CURSOR, ...(candidate.cursor ?? {}) }
+    cursor: { ...FACTORY_CURSOR, ...(candidate.cursor ?? {}) },
+    sanitizer: { ...FACTORY_SANITIZER, ...(candidate.sanitizer ?? {}) }
   }
 }
 
@@ -121,13 +148,14 @@ export const useToolSettingsStore = create<ToolSettingsState>((set) => {
   return {
     defaults: hydrated.defaults,
     cursor: hydrated.cursor,
+    sanitizer: hydrated.sanitizer,
     setToolColor(tool, hex) {
       set((s) => {
         const updated = {
           ...s.defaults,
           [tool]: { ...s.defaults[tool], color: hex }
         }
-        persist({ defaults: updated, cursor: s.cursor })
+        persist({ defaults: updated, cursor: s.cursor, sanitizer: s.sanitizer })
         return { defaults: updated }
       })
     },
@@ -138,7 +166,7 @@ export const useToolSettingsStore = create<ToolSettingsState>((set) => {
           ...s.defaults,
           [tool]: { ...s.defaults[tool], strokeWidth: clamped }
         }
-        persist({ defaults: updated, cursor: s.cursor })
+        persist({ defaults: updated, cursor: s.cursor, sanitizer: s.sanitizer })
         return { defaults: updated }
       })
     },
@@ -149,7 +177,7 @@ export const useToolSettingsStore = create<ToolSettingsState>((set) => {
           ...s.defaults,
           [tool]: { ...s.defaults[tool], opacity: clamped }
         }
-        persist({ defaults: updated, cursor: s.cursor })
+        persist({ defaults: updated, cursor: s.cursor, sanitizer: s.sanitizer })
         return { defaults: updated }
       })
     },
@@ -168,17 +196,24 @@ export const useToolSettingsStore = create<ToolSettingsState>((set) => {
                   Math.min(3000, Math.round(patch.trailLengthMs))
                 )
               }
+            : {}),
+          ...(typeof patch.size === 'number'
+            ? { size: Math.max(0.5, Math.min(2.5, patch.size)) }
             : {})
         }
-        persist({ defaults: s.defaults, cursor: updated })
+        persist({ defaults: s.defaults, cursor: updated, sanitizer: s.sanitizer })
         return { cursor: updated }
       })
     },
+    setSanitizer(patch) {
+      set((s) => {
+        const updated: SanitizerSettings = { ...s.sanitizer, ...patch }
+        persist({ defaults: s.defaults, cursor: s.cursor, sanitizer: updated })
+        return { sanitizer: updated }
+      })
+    },
     resetAll() {
-      const next: PersistedShape = {
-        defaults: { ...FACTORY_DEFAULTS },
-        cursor: { ...FACTORY_CURSOR }
-      }
+      const next: PersistedShape = emptyShape()
       persist(next)
       set(next)
     }
@@ -204,7 +239,11 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     if (event.newValue === null) return
     try {
       const next = parsePersisted(event.newValue)
-      useToolSettingsStore.setState({ defaults: next.defaults, cursor: next.cursor })
+      useToolSettingsStore.setState({
+        defaults: next.defaults,
+        cursor: next.cursor,
+        sanitizer: next.sanitizer
+      })
     } catch {
       // ignore malformed payload from another tab
     }

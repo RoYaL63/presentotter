@@ -44,6 +44,10 @@ let toolbarWindow: BrowserWindow | null = null
 const overlayWindows = new Map<number, BrowserWindow>() // keyed by Display.id
 let cursorInterval: ReturnType<typeof setInterval> | null = null
 let cursorHighlightOn = false
+/** True while the spotlight tool is selected. Drives the same cursor
+ *  poll as `cursorHighlightOn` so the overlay can draw a dark wash
+ *  with a clear circle that follows the mouse, no drag required. */
+let spotlightActive = false
 
 const isDev = !app.isPackaged
 const DEV_URL = 'http://localhost:5173'
@@ -239,6 +243,21 @@ function closeToolbarAndOverlays(): void {
   stopCursorTracking()
 }
 
+/**
+ * Re-create the Home window if it has been closed, otherwise un-minimize
+ * + raise + focus it. Used by every "go back to the app" intent (Toolbar
+ * logo click, manual-sanitizer shortcut, Console layout button, …).
+ */
+function bringHomeToFront(): void {
+  if (homeWindow === null || homeWindow.isDestroyed()) {
+    homeWindow = createHomeWindow()
+    return
+  }
+  if (homeWindow.isMinimized()) homeWindow.restore()
+  homeWindow.show()
+  homeWindow.focus()
+}
+
 function notifyHomeStatus(): void {
   if (homeWindow === null || homeWindow.isDestroyed()) return
   homeWindow.webContents.send('home:toolbar-status', {
@@ -302,6 +321,14 @@ function stopCursorTracking(): void {
     clearInterval(cursorInterval)
     cursorInterval = null
   }
+}
+
+/** Single source of truth for "should the cursor poll be running?". The
+ *  poll fires while either the cursor highlight OR the spotlight tool
+ *  is active — they both consume the same cursor position stream. */
+function syncCursorTracking(): void {
+  if (cursorHighlightOn || spotlightActive) startCursorTracking()
+  else stopCursorTracking()
 }
 
 // ============================================================================
@@ -503,6 +530,12 @@ function registerIpcHandlers(): void {
   ipcMain.on('overlay:clear-live-masks', () => {
     forwardToOverlays('overlay:clear-live-masks')
   })
+  ipcMain.on('overlay:set-live-ocr-words', (_e, words: unknown) => {
+    forwardToOverlays('overlay:set-live-ocr-words', words)
+  })
+  ipcMain.on('overlay:clear-live-ocr-words', () => {
+    forwardToOverlays('overlay:clear-live-ocr-words')
+  })
 
   ipcMain.on('cursor:set-highlight', (_e, enabled: boolean) => {
     cursorHighlightOn = enabled
@@ -510,8 +543,13 @@ function registerIpcHandlers(): void {
     if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
       toolbarWindow.webContents.send('toolbar:cursor-highlight-changed', enabled)
     }
-    if (enabled) startCursorTracking()
-    else stopCursorTracking()
+    syncCursorTracking()
+  })
+
+  ipcMain.on('spotlight:set-active', (_e, active: boolean) => {
+    spotlightActive = active
+    forwardToOverlays('spotlight:set-active', active)
+    syncCursorTracking()
   })
   ipcMain.on('cursor:set-color', (_e, hex: string) => {
     forwardToOverlays('cursor:set-color', hex)
@@ -525,13 +563,27 @@ function registerIpcHandlers(): void {
   // sections inside Home; the IPC channel is kept so the Toolbar's Layout
   // button still has somewhere to send its 'open the console' intent.
   ipcMain.on('console:open', () => {
-    if (homeWindow === null || homeWindow.isDestroyed()) {
-      homeWindow = createHomeWindow()
-      return
+    bringHomeToFront()
+  })
+
+  /** Toolbar shortcut to the manual sanitizer popup. The popup has to
+   *  live inside the Home window because the Toolbar window is only
+   *  100 px tall — too short to fit the modal's textarea + verdict.
+   *  So we focus Home then tell it to open the popup. */
+  ipcMain.on('console:open-sanitizer', () => {
+    bringHomeToFront()
+    if (homeWindow !== null && !homeWindow.isDestroyed()) {
+      homeWindow.webContents.send('home:open-sanitizer')
     }
-    if (homeWindow.isMinimized()) homeWindow.restore()
-    homeWindow.show()
-    homeWindow.focus()
+  })
+
+  /** Same plumbing for the keyboard-shortcuts cheat sheet — too tall
+   *  for the toolbar window, lives in Home. */
+  ipcMain.on('console:open-shortcuts', () => {
+    bringHomeToFront()
+    if (homeWindow !== null && !homeWindow.isDestroyed()) {
+      homeWindow.webContents.send('home:open-shortcuts')
+    }
   })
 }
 
@@ -598,8 +650,7 @@ function handleTripleAlt(): void {
   if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
     toolbarWindow.webContents.send('toolbar:cursor-highlight-changed', cursorHighlightOn)
   }
-  if (cursorHighlightOn) startCursorTracking()
-  else stopCursorTracking()
+  syncCursorTracking()
 }
 
 /**

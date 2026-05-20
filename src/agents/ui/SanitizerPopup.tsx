@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, CheckCircle2, ShieldCheck, X } from 'lucide-react'
-import { SanitizerAnalyzer } from '../sanitizer'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ClipboardPaste,
+  Copy,
+  ShieldCheck,
+  X
+} from 'lucide-react'
+import { SanitizerAnalyzer, PATTERNS } from '../sanitizer'
 import type { DetectedZone } from '@interfaces'
 
 /**
@@ -19,6 +26,7 @@ interface SanitizerPopupProps {
 
 export function SanitizerPopup({ onClose }: SanitizerPopupProps) {
   const [text, setText] = useState('')
+  const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle')
   const analyzer = useMemo(() => new SanitizerAnalyzer(), [])
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
@@ -37,7 +45,38 @@ export function SanitizerPopup({ onClose }: SanitizerPopupProps) {
     return analyzer.analyzeText(text)
   }, [text, analyzer])
 
+  // Build the redacted version on the fly so the user can copy it back
+  // and paste a safe version instead of the raw one.
+  const redactedText = useMemo(() => {
+    if (text.trim().length === 0) return ''
+    let out = text
+    for (const p of PATTERNS) {
+      p.regex.lastIndex = 0
+      out = out.replace(p.regex, p.replacement)
+    }
+    return out
+  }, [text])
+
   const isSafe = text.trim().length > 0 && zones.length === 0
+
+  const handlePaste = async (): Promise<void> => {
+    try {
+      const clip = await navigator.clipboard.readText()
+      if (clip.length > 0) setText(clip)
+    } catch (err) {
+      console.warn('[sanitizer-popup] clipboard read failed:', err)
+    }
+  }
+
+  const handleCopyRedacted = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(redactedText)
+      setCopyState('copied')
+      window.setTimeout(() => setCopyState('idle'), 1800)
+    } catch (err) {
+      console.warn('[sanitizer-popup] clipboard write failed:', err)
+    }
+  }
 
   return (
     <div
@@ -73,13 +112,38 @@ export function SanitizerPopup({ onClose }: SanitizerPopupProps) {
           </button>
         </header>
 
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handlePaste()}
+            className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-otter-100 ring-1 ring-white/[0.12] transition hover:bg-white/[0.10]"
+            title="Coller le contenu du presse-papier"
+          >
+            <ClipboardPaste className="h-3.5 w-3.5" />
+            Coller depuis le presse-papier
+          </button>
+          {text.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setText('')}
+              className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-otter-200/80 ring-1 ring-white/[0.10] transition hover:bg-white/[0.08]"
+              title="Vider la zone de texte"
+            >
+              Vider
+            </button>
+          )}
+          <span className="ml-auto text-[10px] text-otter-200/50">
+            {text.length} caractère{text.length > 1 ? 's' : ''}
+          </span>
+        </div>
+
         <textarea
           ref={textareaRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Colle ici une ligne de code, un curl, un .env, une clé... rien ne sort de ce poste."
-          rows={6}
-          className="w-full rounded-xl border border-white/[0.1] bg-deep-950/60 backdrop-blur-xl px-4 py-3 text-sm font-mono text-otter-50 outline-none placeholder:text-otter-200/30 focus:border-otter-400/50"
+          rows={7}
+          className="mt-2 w-full rounded-xl border border-white/[0.1] bg-deep-950/60 backdrop-blur-xl px-4 py-3 text-sm font-mono text-otter-50 outline-none placeholder:text-otter-200/30 focus:border-otter-400/50"
         />
 
         {/* Verdict */}
@@ -121,13 +185,42 @@ export function SanitizerPopup({ onClose }: SanitizerPopupProps) {
                   ))}
                 </ul>
                 <p className="mt-2 text-xs text-red-200/70">
-                  Ne partage pas ce texte tel quel pendant ton écran. Remplace, redacte, ou
-                  cite-le sans la valeur sensible.
+                  Ne partage pas ce texte tel quel pendant ton écran. Copie la version
+                  redactée ci-dessous, elle est sûre à coller en clair.
                 </p>
               </div>
             </div>
           )}
         </div>
+
+        {/* Redacted version + copy back. Hidden when nothing was matched. */}
+        {zones.length > 0 && (
+          <div className="mt-3 rounded-xl border border-white/[0.08] bg-deep-950/40 p-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-otter-200/70">
+                Version redactée
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleCopyRedacted()}
+                className="inline-flex items-center gap-1.5 rounded-full bg-coral-500/85 px-3 py-1 text-[11px] font-bold text-white shadow-glow-coral transition hover:bg-coral-500"
+              >
+                {copyState === 'copied' ? (
+                  <>
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Copié
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5" /> Copier
+                  </>
+                )}
+              </button>
+            </div>
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-deep-950/70 px-3 py-2 font-mono text-[11px] leading-snug text-otter-100/90">
+              {redactedText}
+            </pre>
+          </div>
+        )}
       </div>
     </div>
   )

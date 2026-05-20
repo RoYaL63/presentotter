@@ -71,6 +71,12 @@ export function Overlay() {
   const cursorStyleRef = useRef<'meteor' | 'classic' | 'minimal'>('meteor')
   const cursorTrailMsRef = useRef<number>(900)
   const cursorIntensityRef = useRef<number>(1)
+  const cursorSizeRef = useRef<number>(1)
+  // Spotlight tool — when active, redraw() paints a dark wash + clear
+  // circle that follows the live cursor position. Independent from the
+  // cursor-highlight visual (the user can have either, neither, or both).
+  const spotlightActiveRef = useRef<boolean>(false)
+  const spotlightStrokeRef = useRef<number>(4)
   // Live sanitizer masks render as DOM nodes (CSS backdrop-filter blur of the
   // pixels behind the overlay) rather than canvas fills — gives a real
   // frosted-glass blur on the secret, not an opaque black rectangle.
@@ -84,6 +90,12 @@ export function Overlay() {
   const [strokeWidth, setStrokeWidth] = useState<number>(4)
   const [opacity, setOpacity] = useState<number>(1)
   const [textInput, setTextInput] = useState<{ x: number; y: number; value: string } | null>(null)
+  // Debug OCR overlay — when on, every word Tesseract returned is drawn
+  // as a thin outlined box so the user can verify what the engine sees.
+  const [debugOcr, setDebugOcr] = useState<boolean>(false)
+  const [ocrWords, setOcrWords] = useState<
+    Array<{ x: number; y: number; width: number; height: number; text: string }>
+  >([])
 
   // ----- IPC subscriptions from the toolbar -----
   useEffect(() => {
@@ -92,7 +104,10 @@ export function Overlay() {
     const off1 = api.onSetTool((t) => setTool(t))
     const off2 = api.onSetColor((c) => setColor(c))
     const off3 = api.onSetOpacity((o) => setOpacity(o))
-    const off4 = api.onSetStrokeWidth((w) => setStrokeWidth(w))
+    const off4 = api.onSetStrokeWidth((w) => {
+      setStrokeWidth(w)
+      spotlightStrokeRef.current = w
+    })
     const off5 = api.onClear(() => {
       shapesRef.current = []
       draftRef.current = null
@@ -119,10 +134,23 @@ export function Overlay() {
       liveMasksRef.current = []
       setLiveMasks([])
     })
+    const off8b = api.onSetLiveOcrWords((words) => {
+      setOcrWords(words.length > 1000 ? words.slice(0, 1000) : words)
+    })
+    const off8c = api.onClearLiveOcrWords(() => setOcrWords([]))
     const off9 = api.onCursorHighlight((enabled) => {
       cursorEnabledRef.current = enabled
       if (!enabled) {
         cursorTrailRef.current = []
+        redraw()
+      }
+    })
+    const off9b = api.onSpotlightActive((active) => {
+      spotlightActiveRef.current = active
+      if (!active) {
+        // Wipe the cursor trail too so a spotlight-only session doesn't
+        // leak particles into a later meteor-cursor session.
+        if (!cursorEnabledRef.current) cursorTrailRef.current = []
         redraw()
       }
     })
@@ -134,9 +162,12 @@ export function Overlay() {
       cursorStyleRef.current = s.style
       cursorTrailMsRef.current = s.trailLengthMs
       cursorIntensityRef.current = s.intensity
+      cursorSizeRef.current = s.size
     })
     const off10 = api.onCursorPosition((pos) => {
-      if (!cursorEnabledRef.current) return
+      // We need the cursor sample for the meteor highlight AND the
+      // spotlight tool. Either is enough to keep processing samples.
+      if (!cursorEnabledRef.current && !spotlightActiveRef.current) return
       const origin = overlayOriginRef.current
       // Translate global screen coords → this overlay's local (CSS) frame.
       const localX = pos.screenX - origin.x
@@ -199,11 +230,40 @@ export function Overlay() {
       off6()
       off7()
       off8()
+      off8b()
+      off8c()
       off9()
+      off9b()
       off10b()
       off10c()
       off10()
     }
+  }, [])
+
+  // Hydrate the OCR-debug flag from localStorage so the overlay knows
+  // whether to render OCR word boxes. Also listen to the storage event
+  // so when the user toggles the flag from the Home Tools section, the
+  // overlay reacts immediately.
+  useEffect(() => {
+    const STORAGE_KEY = 'presentotter:tool-settings:v1'
+    const apply = (raw: string | null): void => {
+      if (raw === null) return
+      try {
+        const parsed = JSON.parse(raw) as {
+          sanitizer?: { debugOcr?: boolean }
+        }
+        setDebugOcr(parsed?.sanitizer?.debugOcr === true)
+      } catch {
+        /* ignore malformed JSON */
+      }
+    }
+    apply(localStorage.getItem(STORAGE_KEY))
+    const onStorage = (e: StorageEvent): void => {
+      if (e.key !== STORAGE_KEY) return
+      apply(e.newValue)
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
   }, [])
 
   // Each overlay needs to know its display origin to translate global cursor
@@ -222,7 +282,8 @@ export function Overlay() {
   // cursor highlight is enabled, keeping idle CPU near zero.
   useEffect(() => {
     const loop = () => {
-      if (cursorEnabledRef.current) {
+      const active = cursorEnabledRef.current || spotlightActiveRef.current
+      if (active) {
         const now = Date.now()
         const ttl = cursorTrailMsRef.current
         cursorTrailRef.current = cursorTrailRef.current.filter((s) => now - s.t < ttl)
@@ -282,6 +343,17 @@ export function Overlay() {
       drawShape(ctx, draftRef.current, w, h)
     }
 
+    // 2b. Live spotlight following the cursor — draws AFTER annotations
+    // so the dark wash darkens them too (the focus area always stays
+    // legible because the hole is fully clear). Skipped if the cursor
+    // isn't on this display so we don't dim the overlay all alone.
+    if (spotlightActiveRef.current && cursorOnThisDisplayRef.current) {
+      const head = cursorTrailRef.current[cursorTrailRef.current.length - 1]
+      if (head) {
+        drawSpotlight(ctx, head.x, head.y, w, h, spotlightStrokeRef.current)
+      }
+    }
+
     // 3. Cursor highlight (trail + halo) drawn on top
     if (cursorEnabledRef.current && cursorOnThisDisplayRef.current) {
       drawCursorHighlight(
@@ -291,7 +363,8 @@ export function Overlay() {
         cursorColorRef.current,
         cursorStyleRef.current,
         cursorTrailMsRef.current,
-        cursorIntensityRef.current
+        cursorIntensityRef.current,
+        cursorSizeRef.current
       )
     }
   }
@@ -317,7 +390,10 @@ export function Overlay() {
     } else if (tool === 'arrow') {
       draftRef.current = { ...base, kind: 'arrow', from: pt, to: pt }
     } else if (tool === 'spotlight') {
-      draftRef.current = { ...base, kind: 'spotlight', center: pt, radius: 0 }
+      // Spotlight is no longer a draggable shape; it follows the cursor
+      // live (rendered in redraw() from the cursor sample stream). Click
+      // does nothing, drag does nothing.
+      return
     } else if (tool === 'text') {
       // Inline text input — better UX than window.prompt in a click-through window.
       // The overlay starts as focusable: false; even after toolbar flips it
@@ -403,6 +479,41 @@ export function Overlay() {
         onPointerCancel={onPointerUp}
         style={{ display: 'block', width: '100%', height: '100%' }}
       />
+
+      {/* OCR debug — thin outlines around every word Tesseract returned.
+          Useful when "the sanitizer didn't mask my secret" to figure out
+          whether the OCR even read the text. Off by default; toggled
+          from Tools → Sanitizer → Mode debug OCR. */}
+      {debugOcr &&
+        ocrWords.map((w, idx) => {
+          const localX = w.x - overlayOriginRef.current.x
+          const localY = w.y - overlayOriginRef.current.y
+          if (
+            localX + w.width < 0 ||
+            localY + w.height < 0 ||
+            localX > window.innerWidth ||
+            localY > window.innerHeight
+          ) {
+            return null
+          }
+          return (
+            <div
+              key={`ocr-${idx}-${w.x}-${w.y}`}
+              style={{
+                position: 'absolute',
+                left: localX,
+                top: localY,
+                width: w.width,
+                height: w.height,
+                border: '1px solid rgba(74, 124, 89, 0.85)', // kelp
+                borderRadius: 2,
+                background: 'rgba(74, 124, 89, 0.10)',
+                pointerEvents: 'none'
+              }}
+              aria-hidden
+            />
+          )
+        })}
 
       {/* Live sanitizer masks — DOM layer with a solid frosted-glass-like
           background. We tried CSS backdrop-filter alone, but on transparent
@@ -646,7 +757,8 @@ function drawCursorHighlight(
   color: string,
   style: 'meteor' | 'classic' | 'minimal',
   trailMs: number,
-  intensity: number
+  intensity: number,
+  size: number
 ): void {
   if (trail.length === 0) return
   const head = trail[trail.length - 1]
@@ -654,6 +766,9 @@ function drawCursorHighlight(
   const rgb = hexToRgb(color)
   const now = Date.now()
   const k = Math.max(0, Math.min(1, intensity))
+  // Clamp size to a sane range so we never get a halo larger than the
+  // overlay or smaller than the cursor itself.
+  const s = Math.max(0.4, Math.min(2.5, size))
 
   // ---- MINIMAL: precise ring, no trail, no halo ----
   if (style === 'minimal') {
@@ -661,7 +776,7 @@ function drawCursorHighlight(
     ctx.strokeStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${0.95 * k})`
     ctx.lineWidth = 2
     ctx.beginPath()
-    ctx.arc(head.x, head.y, 8, 0, Math.PI * 2)
+    ctx.arc(head.x, head.y, 8 * s, 0, Math.PI * 2)
     ctx.stroke()
     ctx.restore()
     return
@@ -669,7 +784,7 @@ function drawCursorHighlight(
 
   // Soft outer halo behind the head (meteor + classic share this).
   ctx.save()
-  const haloRadius = style === 'meteor' ? 64 : 40
+  const haloRadius = (style === 'meteor' ? 64 : 40) * s
   const outerHalo = ctx.createRadialGradient(head.x, head.y, 2, head.x, head.y, haloRadius)
   outerHalo.addColorStop(0, `rgba(${rgb.r},${rgb.g},${rgb.b},${0.55 * k})`)
   outerHalo.addColorStop(0.35, `rgba(${rgb.r},${rgb.g},${rgb.b},${0.22 * k})`)
@@ -682,14 +797,14 @@ function drawCursorHighlight(
 
   // ---- METEOR: particle-based comet tail ----
   if (style === 'meteor') {
-    drawMeteorTail(ctx, particles, rgb, trailMs, k, now)
-    drawCursorHead(ctx, head, rgb, k * 1.05)
+    drawMeteorTail(ctx, particles, rgb, trailMs, k, s, now)
+    drawCursorHead(ctx, head, rgb, k * 1.05, s)
     return
   }
 
   // ---- CLASSIC: single smooth stroke through samples ----
   if (trail.length < 2) {
-    drawCursorHead(ctx, head, rgb, k)
+    drawCursorHead(ctx, head, rgb, k, s)
     return
   }
   const N = trail.length
@@ -703,7 +818,7 @@ function drawCursorHighlight(
     const positionT = i / (N - 1)
     const ageT = Math.max(0, 1 - (now - cur.t) / trailMs)
     const t = positionT * ageT
-    const width = Math.max(0.6, 1.2 * Math.pow(t, 0.7) * 6)
+    const width = Math.max(0.6, 1.2 * Math.pow(t, 0.7) * 6 * s)
     const alpha = 0.8 * Math.pow(t, 0.85) * k
     if (alpha < 0.01) continue
     const beforePrev = i >= 2 ? trail[i - 2] : null
@@ -728,7 +843,7 @@ function drawCursorHighlight(
     ctx.stroke()
   }
   ctx.restore()
-  drawCursorHead(ctx, head, rgb, k)
+  drawCursorHead(ctx, head, rgb, k, s)
 }
 
 /**
@@ -747,6 +862,7 @@ function drawMeteorTail(
   rgb: { r: number; g: number; b: number },
   trailMs: number,
   intensity: number,
+  size: number,
   now: number
 ): void {
   if (particles.length === 0) return
@@ -765,8 +881,9 @@ function drawMeteorTail(
     const alpha = ease * 0.45 * intensity
     if (alpha < 0.008) continue
     // Particles slightly grow as they age (smoke-puff feel) before
-    // disappearing — gives the trail volume without hard edges.
-    const radius = p.size * (1 + age * 0.6)
+    // disappearing — gives the trail volume without hard edges. The
+    // user-controlled `size` multiplier scales the whole tail.
+    const radius = p.size * (1 + age * 0.6) * size
     const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius)
     grad.addColorStop(0, `rgba(255,255,255,${alpha * 0.85})`)
     grad.addColorStop(0.35, `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`)
@@ -783,18 +900,69 @@ function drawCursorHead(
   ctx: CanvasRenderingContext2D,
   head: CursorSample | Point,
   rgb: { r: number; g: number; b: number },
-  intensity = 1
+  intensity = 1,
+  size = 1
 ): void {
   ctx.save()
   const k = Math.max(0, Math.min(1, intensity))
-  const inner = ctx.createRadialGradient(head.x, head.y, 0, head.x, head.y, 14)
+  const r = 14 * size
+  const inner = ctx.createRadialGradient(head.x, head.y, 0, head.x, head.y, r)
   inner.addColorStop(0, `rgba(255,255,255,${0.9 * k})`)
   inner.addColorStop(0.4, `rgba(${rgb.r},${rgb.g},${rgb.b},${0.8 * k})`)
   inner.addColorStop(1, `rgba(${rgb.r},${rgb.g},${rgb.b},0)`)
   ctx.fillStyle = inner
   ctx.beginPath()
-  ctx.arc(head.x, head.y, 14, 0, Math.PI * 2)
+  ctx.arc(head.x, head.y, r, 0, Math.PI * 2)
   ctx.fill()
+  ctx.restore()
+}
+
+/**
+ * Spotlight effect — dim the whole canvas with a soft-edged hole at
+ * (cx, cy). The hole is built with a destination-out radial gradient so
+ * the inner pixels are fully clear, the edge ones are partially clear,
+ * giving a vignette transition instead of a hard circle.
+ *
+ * Radius scales with the user's stroke-width slider so the same control
+ * the annotation tools use also picks the spotlight diameter.
+ */
+function drawSpotlight(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  canvasW: number,
+  canvasH: number,
+  strokeWidth: number
+): void {
+  // strokeWidth runs 1..16 from the toolbar slider. Map it to a 90..330
+  // px outer radius so even the smallest setting is usable on 4K.
+  const outer = 90 + Math.max(1, Math.min(16, strokeWidth)) * 15
+  const inner = outer * 0.55 // sharp clear area inside, then soft fall-off
+
+  // 1. Dark wash everywhere.
+  ctx.save()
+  ctx.fillStyle = 'rgba(7, 33, 47, 0.62)'
+  ctx.fillRect(0, 0, canvasW, canvasH)
+
+  // 2. Punch the spotlight hole. destination-out removes the canvas
+  //    alpha where we draw; the radial gradient gives a soft edge.
+  ctx.globalCompositeOperation = 'destination-out'
+  const cut = ctx.createRadialGradient(cx, cy, inner, cx, cy, outer)
+  cut.addColorStop(0, 'rgba(0,0,0,1)')
+  cut.addColorStop(0.7, 'rgba(0,0,0,0.6)')
+  cut.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = cut
+  ctx.fillRect(cx - outer, cy - outer, outer * 2, outer * 2)
+  ctx.restore()
+
+  // 3. Thin coral ring on the outer edge of the bright zone so the
+  //    user can see exactly what's in focus.
+  ctx.save()
+  ctx.strokeStyle = 'rgba(255, 139, 123, 0.75)'
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.arc(cx, cy, outer, 0, Math.PI * 2)
+  ctx.stroke()
   ctx.restore()
 }
 

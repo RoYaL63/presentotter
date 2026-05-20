@@ -46,6 +46,16 @@ declare global {
     clearLiveMasks(): void
     onSetLiveMasks(cb: (zones: LiveMask[]) => void): () => void
     onClearLiveMasks(cb: () => void): () => void
+    setLiveOcrWords(
+      words: Array<{ x: number; y: number; width: number; height: number; text: string }>
+    ): void
+    clearLiveOcrWords(): void
+    onSetLiveOcrWords(
+      cb: (
+        words: Array<{ x: number; y: number; width: number; height: number; text: string }>
+      ) => void
+    ): () => void
+    onClearLiveOcrWords(cb: () => void): () => void
     liveAcquireTarget(): Promise<{
       sourceId: string
       displayId: number
@@ -74,12 +84,15 @@ declare global {
     ): Promise<{ ok: true; path: string } | { ok: false; reason: string }>
 
     setCursorHighlight(enabled: boolean): void
+    setSpotlightActive(active: boolean): void
+    onSpotlightActive(cb: (active: boolean) => void): () => void
     setCursorColor(hex: string): void
     setCursorSettings(settings: {
       color: string
       style: 'meteor' | 'classic' | 'minimal'
       trailLengthMs: number
       intensity: number
+      size: number
     }): void
     onCursorHighlight(cb: (enabled: boolean) => void): () => void
     onCursorColor(cb: (hex: string) => void): () => void
@@ -89,6 +102,7 @@ declare global {
         style: 'meteor' | 'classic' | 'minimal'
         trailLengthMs: number
         intensity: number
+        size: number
       }) => void
     ): () => void
     onCursorPosition(
@@ -114,6 +128,10 @@ declare global {
     toolbarRestore(): void
     toolbarClose(): void
     openConsole(): void
+    openSanitizer(): void
+    onOpenSanitizer(cb: () => void): () => void
+    openShortcuts(): void
+    onOpenShortcuts(cb: () => void): () => void
   }
 
   interface Window {

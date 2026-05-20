@@ -72,6 +72,16 @@ export const PATTERNS: SanitizePatternWithType[] = [
     zoneType: 'api-key'
   },
   {
+    // Google OAuth client secret — the value the user gets from
+    // Google Cloud Console "Identifiants" → "Codes secrets du client".
+    // Always starts with the literal "GOCSPX-" prefix.
+    name: 'google-client-secret',
+    regex: /\bGOCSPX-[A-Za-z0-9_-]{20,}\b/g,
+    replacement: '[REDACTED:google-client-secret]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
     name: 'aws-access-key',
     regex: /AKIA[0-9A-Z]{16}/g,
     replacement: '[REDACTED:aws-access-key]',

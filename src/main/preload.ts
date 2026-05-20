@@ -86,6 +86,13 @@ const api = {
     ipcRenderer.send('overlay:set-live-masks', zones),
   clearLiveMasks: () => ipcRenderer.send('overlay:clear-live-masks'),
 
+  /** Diagnostic feed: the OCR word boxes from the last scan. The
+   *  overlay only renders these if its local debugOcr flag is on. */
+  setLiveOcrWords: (
+    words: Array<{ x: number; y: number; width: number; height: number; text: string }>
+  ) => ipcRenderer.send('overlay:set-live-ocr-words', words),
+  clearLiveOcrWords: () => ipcRenderer.send('overlay:clear-live-ocr-words'),
+
   onSetLiveMasks: (
     cb: (zones: Array<{ x: number; y: number; width: number; height: number; label: string }>) => void
   ) => {
@@ -100,6 +107,23 @@ const api = {
     const handler = () => cb()
     ipcRenderer.on('overlay:clear-live-masks', handler)
     return () => ipcRenderer.off('overlay:clear-live-masks', handler)
+  },
+  onSetLiveOcrWords: (
+    cb: (
+      words: Array<{ x: number; y: number; width: number; height: number; text: string }>
+    ) => void
+  ) => {
+    const handler = (
+      _e: unknown,
+      words: Array<{ x: number; y: number; width: number; height: number; text: string }>
+    ) => cb(words)
+    ipcRenderer.on('overlay:set-live-ocr-words', handler)
+    return () => ipcRenderer.off('overlay:set-live-ocr-words', handler)
+  },
+  onClearLiveOcrWords: (cb: () => void) => {
+    const handler = () => cb()
+    ipcRenderer.on('overlay:clear-live-ocr-words', handler)
+    return () => ipcRenderer.off('overlay:clear-live-ocr-words', handler)
   },
 
   /** Toggle whether the overlay catches pointer events (false = click-through). */
@@ -165,12 +189,22 @@ const api = {
   // ---------- Cursor highlight ----------
 
   setCursorHighlight: (enabled: boolean) => ipcRenderer.send('cursor:set-highlight', enabled),
+  /** Spotlight tool — when active, overlay paints a dark wash with a
+   *  clear circle around the live cursor position. Same cursor poll as
+   *  the highlight, separate visual. */
+  setSpotlightActive: (active: boolean) => ipcRenderer.send('spotlight:set-active', active),
+  onSpotlightActive: (cb: (active: boolean) => void) => {
+    const handler = (_e: unknown, active: boolean) => cb(active)
+    ipcRenderer.on('spotlight:set-active', handler)
+    return () => ipcRenderer.off('spotlight:set-active', handler)
+  },
   setCursorColor: (hex: string) => ipcRenderer.send('cursor:set-color', hex),
   setCursorSettings: (settings: {
     color: string
     style: 'meteor' | 'classic' | 'minimal'
     trailLengthMs: number
     intensity: number
+    size: number
   }) => ipcRenderer.send('cursor:set-settings', settings),
 
   onCursorHighlight: (cb: (enabled: boolean) => void) => {
@@ -191,6 +225,7 @@ const api = {
       style: 'meteor' | 'classic' | 'minimal'
       trailLengthMs: number
       intensity: number
+      size: number
     }) => void
   ) => {
     const handler = (
@@ -200,6 +235,7 @@ const api = {
         style: 'meteor' | 'classic' | 'minimal'
         trailLengthMs: number
         intensity: number
+        size: number
       }
     ) => cb(settings)
     ipcRenderer.on('cursor:set-settings', handler)
@@ -235,6 +271,21 @@ const api = {
   toolbarRestore: () => ipcRenderer.send('toolbar:restore'),
   toolbarClose: () => ipcRenderer.send('toolbar:close'),
   openConsole: () => ipcRenderer.send('console:open'),
+  /** Toolbar shortcut: focus Home + ask it to open the manual
+   *  sanitizer popup (which needs more vertical room than the toolbar
+   *  window has). */
+  openSanitizer: () => ipcRenderer.send('console:open-sanitizer'),
+  onOpenSanitizer: (cb: () => void) => {
+    const handler = () => cb()
+    ipcRenderer.on('home:open-sanitizer', handler)
+    return () => ipcRenderer.off('home:open-sanitizer', handler)
+  },
+  openShortcuts: () => ipcRenderer.send('console:open-shortcuts'),
+  onOpenShortcuts: (cb: () => void) => {
+    const handler = () => cb()
+    ipcRenderer.on('home:open-shortcuts', handler)
+    return () => ipcRenderer.off('home:open-shortcuts', handler)
+  },
 
   // ---------- Misc ----------
 

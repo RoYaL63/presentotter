@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { SanitizerPopup } from './SanitizerPopup'
 import { RecordingPanel } from './RecordingPanel'
+import { ShortcutsHelp } from './ShortcutsHelp'
 import { Mascot } from './components/Mascot'
 import { Library } from './pages/Library'
 import { Tools } from './pages/Tools'
@@ -169,6 +170,7 @@ function AccueilSection() {
   const [toolbarOn, setToolbarOn] = useState(false)
   const [sanitizerOpen, setSanitizerOpen] = useState(false)
   const [recordingOpen, setRecordingOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const navigate = useNavStore((s) => s.navigate)
 
   useEffect(() => {
@@ -176,6 +178,24 @@ function AccueilSection() {
     if (!api) return
     void api.isToolbarEnabled().then((on) => setToolbarOn(on))
     const off = api.onToolbarStatus(({ enabled }) => setToolbarOn(enabled))
+    return off
+  }, [])
+
+  // Toolbar (other window) can ask us to open the manual sanitizer
+  // popup — listen here, then setSanitizerOpen so it renders in the
+  // Home window which has the vertical room for the modal.
+  useEffect(() => {
+    const api = apiRef.current
+    if (!api) return
+    const off = api.onOpenSanitizer(() => setSanitizerOpen(true))
+    return off
+  }, [])
+
+  // Shortcuts cheat sheet — same pattern as the sanitizer popup.
+  useEffect(() => {
+    const api = apiRef.current
+    if (!api) return
+    const off = api.onOpenShortcuts(() => setShortcutsOpen(true))
     return off
   }, [])
 
@@ -300,6 +320,7 @@ function AccueilSection() {
 
       {sanitizerOpen && <SanitizerPopup onClose={() => setSanitizerOpen(false)} />}
       {recordingOpen && <RecordingPanel onClose={() => setRecordingOpen(false)} />}
+      {shortcutsOpen && <ShortcutsHelp onClose={() => setShortcutsOpen(false)} />}
     </section>
   )
 }
