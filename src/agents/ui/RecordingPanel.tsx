@@ -12,6 +12,7 @@ import {
   MicOff,
   Monitor,
   RotateCcw,
+  Sparkles,
   Square,
   Squircle,
   Upload,
@@ -58,7 +59,7 @@ interface SourceItem {
 type Phase = 'picking' | 'preparing' | 'recording' | 'stopped' | 'saving' | 'saved'
 
 type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
-type WebcamShape = 'circle' | 'rounded' | 'square'
+type WebcamShape = 'circle' | 'rounded' | 'square' | 'glass'
 type WebcamSize = 'small' | 'medium' | 'large'
 type BackgroundKind = 'none' | 'preset' | 'custom'
 
@@ -587,7 +588,7 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
           </button>
         </header>
 
-        <div className="relative flex-1 overflow-hidden px-4 py-3">
+        <div className="relative flex-1 overflow-y-auto px-4 py-3">
           {error !== null && (
             <div
               role="alert"
@@ -787,10 +788,12 @@ interface PickerViewProps {
 }
 
 function PickerView(props: PickerViewProps) {
+  // No internal overflow: the modal's central area scrolls. Sections
+  // stack on narrow viewports (< lg ≈ 1024px), sit side by side on wide
+  // ones. Either way every setting is reachable by scrolling the modal.
   return (
-    <div className="grid h-full grid-cols-1 gap-4 overflow-hidden lg:grid-cols-[1.4fr_1fr]">
-      {/* LEFT — sources */}
-      <div className="flex h-full flex-col gap-3 overflow-hidden">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr]">
+      <div className="flex flex-col gap-3">
         <SourcesPane
           sources={props.sources}
           selectedId={props.selectedId}
@@ -798,9 +801,7 @@ function PickerView(props: PickerViewProps) {
           onRefresh={props.onRefresh}
         />
       </div>
-
-      {/* RIGHT — config */}
-      <div className="flex h-full flex-col gap-3 overflow-y-auto pr-1">
+      <div className="flex flex-col gap-3">
         <AudioConfig
           includeMic={props.includeMic}
           onToggleMic={props.onToggleMic}
@@ -850,7 +851,7 @@ function SourcesPane({ sources, selectedId, onSelect, onRefresh }: SourcesPanePr
   const windows = sources.filter((s) => s.kind === 'window')
 
   return (
-    <div className="otter-glass relative flex h-full flex-col overflow-hidden p-3">
+    <div className="otter-glass relative flex flex-col p-3">
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-[11px] font-bold uppercase tracking-[0.18em] text-sea-700/70">
           Source
@@ -864,7 +865,7 @@ function SourcesPane({ sources, selectedId, onSelect, onRefresh }: SourcesPanePr
           <RotateCcw className="h-3 w-3" /> Rafraîchir
         </button>
       </div>
-      <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+      <div className="space-y-3">
         <SourceGroup
           title="Écrans"
           items={screens}
@@ -1090,7 +1091,7 @@ function WebcamConfig({
               <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-sea-700/60">
                 Forme
               </span>
-              <div className="flex gap-1.5">
+              <div className="flex flex-wrap gap-1.5">
                 <ShapeButton
                   active={shape === 'circle'}
                   onClick={() => onSelectShape('circle')}
@@ -1108,6 +1109,12 @@ function WebcamConfig({
                   onClick={() => onSelectShape('square')}
                   label="Carré"
                   Icon={Square}
+                />
+                <ShapeButton
+                  active={shape === 'glass'}
+                  onClick={() => onSelectShape('glass')}
+                  label="Glass"
+                  Icon={Sparkles}
                 />
               </div>
             </div>
@@ -1143,7 +1150,12 @@ function WebcamConfig({
             <div
               className="relative h-24 w-24 overflow-hidden bg-deep-900 shadow-glass"
               style={{
-                borderRadius: shape === 'circle' ? '50%' : shape === 'rounded' ? 14 : 4
+                borderRadius:
+                  shape === 'circle'
+                    ? '50%'
+                    : shape === 'rounded' || shape === 'glass'
+                      ? 18
+                      : 4
               }}
             >
               <video
@@ -1153,6 +1165,20 @@ function WebcamConfig({
                 className="h-full w-full object-cover"
                 style={{ transform: 'scaleX(-1)' }}
               />
+              {shape === 'glass' && (
+                // Glass overlay preview — soft top highlight + inner ring.
+                <span
+                  className="pointer-events-none absolute inset-0"
+                  style={{
+                    background:
+                      'linear-gradient(155deg, rgba(255,255,255,0.45) 0%, rgba(255,255,255,0.08) 30%, transparent 55%)',
+                    boxShadow:
+                      'inset 0 0 0 1px rgba(255,255,255,0.55), inset 0 -10px 24px rgba(13,53,72,0.35)',
+                    borderRadius: 18
+                  }}
+                  aria-hidden
+                />
+              )}
             </div>
           </div>
         </div>
@@ -1360,7 +1386,12 @@ function CornerPicker({ value, onChange, shape }: CornerPickerProps) {
                 bottom: c.startsWith('bottom') ? 4 : undefined,
                 left: c.endsWith('left') ? 4 : undefined,
                 right: c.endsWith('right') ? 4 : undefined,
-                borderRadius: shape === 'circle' ? '50%' : shape === 'rounded' ? 3 : 1
+                borderRadius:
+                  shape === 'circle'
+                    ? '50%'
+                    : shape === 'rounded' || shape === 'glass'
+                      ? 3
+                      : 1
               }}
             />
           </button>
@@ -1465,10 +1496,10 @@ function ActiveView({
   onBgPresetChange
 }: ActiveViewProps) {
   return (
-    <div className="flex h-full flex-col items-center gap-3 overflow-hidden">
+    <div className="flex flex-col items-center gap-3">
       <div
-        className="relative w-full flex-shrink overflow-hidden rounded-2xl bg-deep-900 shadow-glass-lg"
-        style={{ maxHeight: '60vh', aspectRatio: '16 / 9' }}
+        className="relative w-full overflow-hidden rounded-2xl bg-deep-900 shadow-glass-lg"
+        style={{ maxHeight: '55vh', aspectRatio: '16 / 9' }}
       >
         <video
           ref={previewRef}
@@ -1514,6 +1545,12 @@ function ActiveView({
                 onClick={() => onShapeChange('square')}
                 label="■"
                 Icon={Square}
+              />
+              <ShapeButton
+                active={webcamShape === 'glass'}
+                onClick={() => onShapeChange('glass')}
+                label="✦"
+                Icon={Sparkles}
               />
               {(['small', 'medium', 'large'] as WebcamSize[]).map((s) => (
                 <button
@@ -1639,15 +1676,12 @@ async function startComposer(
   screenVideo.muted = true
   screenVideo.playsInline = true
   await screenVideo.play()
-  if (screenVideo.videoWidth === 0) {
-    await new Promise<void>((resolve) => {
-      const handler = () => {
-        screenVideo.removeEventListener('loadedmetadata', handler)
-        resolve()
-      }
-      screenVideo.addEventListener('loadedmetadata', handler)
-    })
-  }
+  // Wait for the source's first actual frame to be decoded — videoWidth
+  // becomes non-zero on loadedmetadata, but the pixels aren't yet
+  // available until HAVE_CURRENT_DATA (readyState >= 2). Drawing before
+  // that returns transparent / black, which the MediaRecorder happily
+  // captures as a flash on the very first second of the file.
+  await waitForFirstFrame(screenVideo)
 
   let webcamVideo: HTMLVideoElement | null = null
   if (webcamStream !== null) {
@@ -1656,15 +1690,7 @@ async function startComposer(
     webcamVideo.muted = true
     webcamVideo.playsInline = true
     await webcamVideo.play()
-    if (webcamVideo.videoWidth === 0) {
-      await new Promise<void>((resolve) => {
-        const handler = () => {
-          webcamVideo!.removeEventListener('loadedmetadata', handler)
-          resolve()
-        }
-        webcamVideo!.addEventListener('loadedmetadata', handler)
-      })
-    }
+    await waitForFirstFrame(webcamVideo)
   }
 
   const canvas = document.createElement('canvas')
@@ -1672,6 +1698,11 @@ async function startComposer(
   canvas.height = screenVideo.videoHeight
   const ctx = canvas.getContext('2d', { alpha: false })
   if (ctx === null) throw new Error('Impossible de créer le contexte 2D pour la composition.')
+  // Prime the canvas with a deep-sea fill so the very first captured
+  // frame is never pure black — gives a clean fade-in if the screen
+  // video is somehow slow to deliver its initial frame.
+  ctx.fillStyle = '#07212F'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
 
   // Inset padding when a background is on, so the screen feels nicely
   // framed instead of bleeding to the canvas edge.
@@ -1687,9 +1718,13 @@ async function startComposer(
     const h = canvas.height
     const bgKind = opts.bgKindRef.current
 
+    // Guard every drawImage with a readyState check so a momentarily
+    // un-decoded video frame doesn't blank the canvas (the previous
+    // frame keeps showing instead — no black flash).
+    const screenReady = screenVideo.readyState >= 2
+
     if (bgKind === 'none') {
-      // No background — screen fills the canvas (original behavior).
-      ctx.drawImage(screenVideo, 0, 0, w, h)
+      if (screenReady) ctx.drawImage(screenVideo, 0, 0, w, h)
     } else {
       // Paint background first
       if (bgKind === 'preset') {
@@ -1731,12 +1766,14 @@ async function startComposer(
       ctx.save()
       roundedRectPath(ctx, padX, padY, innerW, innerH, r)
       ctx.clip()
-      ctx.drawImage(screenVideo, padX, padY, innerW, innerH)
+      if (screenReady) {
+        ctx.drawImage(screenVideo, padX, padY, innerW, innerH)
+      }
       ctx.restore()
     }
 
     // Webcam overlay (always on top, both with and without background)
-    if (webcamVideo !== null) {
+    if (webcamVideo !== null && webcamVideo.readyState >= 2) {
       const baseEdge = Math.min(w, h)
       const ratio = WEBCAM_SIZE_RATIO[opts.sizeRef.current]
       const camW = Math.floor(baseEdge * ratio * 1.6)
@@ -1751,6 +1788,7 @@ async function startComposer(
       const cy = corner.startsWith('top') ? margin : h - camH - margin
       const shape = opts.shapeRef.current
 
+      // The webcam body — clip, mirror horizontally, draw.
       ctx.save()
       pathForShape(ctx, cx, cy, camW, camH, shape)
       ctx.clip()
@@ -1759,21 +1797,63 @@ async function startComposer(
       ctx.drawImage(webcamVideo, 0, 0, camW, camH)
       ctx.restore()
 
-      ctx.save()
-      ctx.lineWidth = WEBCAM_BORDER_PX
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)'
-      ctx.shadowColor = 'rgba(7, 33, 47, 0.45)'
-      ctx.shadowBlur = 14
-      pathForShape(ctx, cx, cy, camW, camH, shape)
-      ctx.stroke()
-      ctx.restore()
+      if (shape === 'glass') {
+        // Liquid Glass effect: warm specular highlight from top-left, soft
+        // bottom shadow, hairline white inner stroke, faint aqua tint, no
+        // hard border. Reads like visionOS / Apple Liquid Glass.
+        ctx.save()
+        pathForShape(ctx, cx, cy, camW, camH, shape)
+        ctx.clip()
+        const hi = ctx.createLinearGradient(cx, cy, cx + camW, cy + camH)
+        hi.addColorStop(0, 'rgba(255, 255, 255, 0.42)')
+        hi.addColorStop(0.35, 'rgba(255, 255, 255, 0.08)')
+        hi.addColorStop(0.65, 'rgba(184, 224, 232, 0.04)')
+        hi.addColorStop(1, 'rgba(13, 53, 72, 0.30)')
+        ctx.fillStyle = hi
+        ctx.fillRect(cx, cy, camW, camH)
+        ctx.restore()
+
+        // Outer soft white halo — gives the floating-glass illusion.
+        ctx.save()
+        ctx.lineWidth = Math.max(2, Math.floor(WEBCAM_BORDER_PX * 1.4))
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)'
+        ctx.shadowColor = 'rgba(255, 255, 255, 0.45)'
+        ctx.shadowBlur = 22
+        pathForShape(ctx, cx, cy, camW, camH, shape)
+        ctx.stroke()
+        ctx.restore()
+
+        // Inner crisp hairline so the silhouette stays readable.
+        ctx.save()
+        ctx.lineWidth = 1.4
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)'
+        pathForShape(ctx, cx + 1, cy + 1, camW - 2, camH - 2, shape)
+        ctx.stroke()
+        ctx.restore()
+      } else {
+        // Default border for circle / rounded / square.
+        ctx.save()
+        ctx.lineWidth = WEBCAM_BORDER_PX
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)'
+        ctx.shadowColor = 'rgba(7, 33, 47, 0.45)'
+        ctx.shadowBlur = 14
+        pathForShape(ctx, cx, cy, camW, camH, shape)
+        ctx.stroke()
+        ctx.restore()
+      }
     }
 
     raf = requestAnimationFrame(draw)
   }
-  raf = requestAnimationFrame(draw)
 
+  // Draw a single frame BEFORE captureStream() so the very first
+  // recorded sample already contains real pixels. Then start the rAF
+  // loop. Without this, MediaRecorder grabs the empty canvas and the
+  // saved WebM opens on a black flash.
+  draw()
   const stream = canvas.captureStream()
+  // The first draw() also schedules the next frame, so we don't need
+  // to call requestAnimationFrame again here.
 
   return {
     stream,
@@ -1784,6 +1864,33 @@ async function startComposer(
       if (webcamVideo !== null) webcamVideo.srcObject = null
     }
   }
+}
+
+/**
+ * Resolve when the video has decoded its first frame (readyState >= 2,
+ * HAVE_CURRENT_DATA). Until that point, drawImage(video) writes
+ * transparent pixels.
+ */
+async function waitForFirstFrame(video: HTMLVideoElement): Promise<void> {
+  if (video.readyState >= 2) return
+  await new Promise<void>((resolve) => {
+    const handler = () => {
+      if (video.readyState >= 2) {
+        video.removeEventListener('loadeddata', handler)
+        video.removeEventListener('canplay', handler)
+        resolve()
+      }
+    }
+    video.addEventListener('loadeddata', handler)
+    video.addEventListener('canplay', handler)
+    // Belt-and-suspenders: timeout after 1.5 s so we never hang the
+    // recording start path forever on an uncooperative source.
+    window.setTimeout(() => {
+      video.removeEventListener('loadeddata', handler)
+      video.removeEventListener('canplay', handler)
+      resolve()
+    }, 1500)
+  })
 }
 
 function pathForShape(
@@ -1799,6 +1906,10 @@ function pathForShape(
     ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2)
   } else if (shape === 'rounded') {
     roundedRectPath(ctx, x, y, w, h, Math.min(28, Math.min(w, h) / 6))
+  } else if (shape === 'glass') {
+    // Slightly softer corners than 'rounded' so the highlight feels
+    // closer to a true liquid-glass pebble.
+    roundedRectPath(ctx, x, y, w, h, Math.min(36, Math.min(w, h) / 4.5))
   } else {
     ctx.rect(x, y, w, h)
   }
