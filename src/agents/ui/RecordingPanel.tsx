@@ -382,7 +382,8 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
         pickerWebcamStreamRef.current = null
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Unmount cleanup only — intentionally no deps so the effect
+    // fires exactly once.
   }, [])
 
   const stopAllTracks = () => {

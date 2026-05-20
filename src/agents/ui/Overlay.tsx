@@ -143,15 +143,17 @@ export function Overlay() {
       if (!enabled) {
         cursorTrailRef.current = []
         redraw()
+      } else {
+        kickAnimationRef.current()
       }
     })
     const off9b = api.onSpotlightActive((active) => {
       spotlightActiveRef.current = active
       if (!active) {
-        // Wipe the cursor trail too so a spotlight-only session doesn't
-        // leak particles into a later meteor-cursor session.
         if (!cursorEnabledRef.current) cursorTrailRef.current = []
         redraw()
+      } else {
+        kickAnimationRef.current()
       }
     })
     const off10b = api.onCursorColor((hex) => {
@@ -168,6 +170,9 @@ export function Overlay() {
       // We need the cursor sample for the meteor highlight AND the
       // spotlight tool. Either is enough to keep processing samples.
       if (!cursorEnabledRef.current && !spotlightActiveRef.current) return
+      // Make sure the rAF pump is running while we have fresh samples
+      // to consume — it self-stops when idle, this revives it.
+      kickAnimationRef.current()
       const origin = overlayOriginRef.current
       // Translate global screen coords → this overlay's local (CSS) frame.
       const localX = pos.screenX - origin.x
@@ -277,23 +282,31 @@ export function Overlay() {
     return () => window.removeEventListener('resize', update)
   }, [])
 
-  // Continuous redraw loop when cursor highlight is on (trail decays over time).
-  // The loop runs always but the heavy work (filter + redraw) only fires when
-  // cursor highlight is enabled, keeping idle CPU near zero.
+  // Animation pump — only runs when something is actually animating
+  // (cursor highlight OR spotlight follow OR meteor particles still
+  // decaying). When the user disables both, the loop stops itself and
+  // we drop to zero CPU. kickAnimation() restarts it on demand.
+  const kickAnimationRef = useRef<() => void>(() => {})
   useEffect(() => {
-    const loop = () => {
+    const loop = (): void => {
       const active = cursorEnabledRef.current || spotlightActiveRef.current
-      if (active) {
-        const now = Date.now()
-        const ttl = cursorTrailMsRef.current
-        cursorTrailRef.current = cursorTrailRef.current.filter((s) => now - s.t < ttl)
-        // Meteor particles expire on the same TTL as the trail.
-        particlesRef.current = particlesRef.current.filter((p) => now - p.birth < ttl)
-        redraw()
+      if (!active && particlesRef.current.length === 0) {
+        animationRef.current = null
+        return
       }
+      const now = Date.now()
+      const ttl = cursorTrailMsRef.current
+      cursorTrailRef.current = cursorTrailRef.current.filter((s) => now - s.t < ttl)
+      particlesRef.current = particlesRef.current.filter((p) => now - p.birth < ttl)
+      redraw()
       animationRef.current = window.requestAnimationFrame(loop)
     }
-    animationRef.current = window.requestAnimationFrame(loop)
+    const kick = (): void => {
+      if (animationRef.current === null) {
+        animationRef.current = window.requestAnimationFrame(loop)
+      }
+    }
+    kickAnimationRef.current = kick
     return () => {
       if (animationRef.current !== null) {
         window.cancelAnimationFrame(animationRef.current)

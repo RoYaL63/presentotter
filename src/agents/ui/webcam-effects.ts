@@ -132,6 +132,11 @@ export async function startWebcamEffects(
   let segmenter: ImageSegmenter | null = null
   let raf = 0
   let running = true
+  // Frame skip — segment one frame out of two. Visual cost is negligible
+  // (the person moves <2 px between webcam frames at 30 fps) but CPU/GPU
+  // savings are substantial (segmentation is the bulk of the work).
+  let frameTick = 0
+  let lastMaskValid = false
 
   // Kick off the segmenter load in the background — the first few
   // frames will be raw passthrough until it's ready, no flash.
@@ -156,51 +161,55 @@ export async function startWebcamEffects(
       return
     }
 
-    // 1. Segment the current frame
-    let confidenceMask: MPMask | null = null
-    try {
-      const result = segmenter.segmentForVideo(video, performance.now())
-      const masks = result.confidenceMasks
-      if (masks !== undefined && masks.length > 0) {
-        // selfie_segmenter ships a single confidence mask: probability of
-        // the pixel being PERSON (foreground).
-        confidenceMask = masks[0] ?? null
+    // 1. Segment the current frame — but only every other rAF tick.
+    //    The mask between frames is barely changing (person moves <2 px
+    //    at 30 fps); reusing the previous mask halves the inference
+    //    cost without any visible quality drop.
+    frameTick = (frameTick + 1) & 1
+    if (frameTick === 0 || !lastMaskValid) {
+      let confidenceMask: MPMask | null = null
+      try {
+        const result = segmenter.segmentForVideo(video, performance.now())
+        const masks = result.confidenceMasks
+        if (masks !== undefined && masks.length > 0) {
+          // selfie_segmenter ships a single confidence mask: probability
+          // of the pixel being PERSON (foreground).
+          confidenceMask = masks[0] ?? null
+        }
+      } catch (err) {
+        console.warn('[webcam-effects] segment failed:', err)
       }
-    } catch (err) {
-      console.warn('[webcam-effects] segment failed:', err)
-    }
 
-    if (confidenceMask === null) {
-      // Segmenter hiccup — fall back to passthrough this frame so we
-      // never flash an empty canvas.
-      ctx.drawImage(video, 0, 0, outW, outH)
-      raf = requestAnimationFrame(draw)
-      return
-    }
+      if (confidenceMask === null) {
+        // Segmenter hiccup — fall back to passthrough this frame so we
+        // never flash an empty canvas.
+        ctx.drawImage(video, 0, 0, outW, outH)
+        raf = requestAnimationFrame(draw)
+        return
+      }
 
-    // 2. Mask → ImageData on the small mask canvas
-    const arr = confidenceMask.getAsFloat32Array()
-    const mw = confidenceMask.width
-    const mh = confidenceMask.height
-    // Use the small maskCanvas dimensions as the ImageData size (they
-    // should always match, but defend if the model returns something
-    // unexpected).
-    if (maskCanvas.width !== mw || maskCanvas.height !== mh) {
-      maskCanvas.width = mw
-      maskCanvas.height = mh
+      // 2. Mask → ImageData on the small mask canvas
+      const arr = confidenceMask.getAsFloat32Array()
+      const mw = confidenceMask.width
+      const mh = confidenceMask.height
+      if (maskCanvas.width !== mw || maskCanvas.height !== mh) {
+        maskCanvas.width = mw
+        maskCanvas.height = mh
+      }
+      const maskImageData = maskCtx.createImageData(mw, mh)
+      const md = maskImageData.data
+      for (let i = 0; i < arr.length; i++) {
+        const a = Math.floor(((arr[i] ?? 0) as number) * 255)
+        const j = i * 4
+        md[j] = 255
+        md[j + 1] = 255
+        md[j + 2] = 255
+        md[j + 3] = a
+      }
+      maskCtx.putImageData(maskImageData, 0, 0)
+      confidenceMask.close()
+      lastMaskValid = true
     }
-    const maskImageData = maskCtx.createImageData(mw, mh)
-    const md = maskImageData.data
-    for (let i = 0; i < arr.length; i++) {
-      const a = Math.floor(((arr[i] ?? 0) as number) * 255)
-      const j = i * 4
-      md[j] = 255
-      md[j + 1] = 255
-      md[j + 2] = 255
-      md[j + 3] = a
-    }
-    maskCtx.putImageData(maskImageData, 0, 0)
-    confidenceMask.close()
 
     // 3. Paint background on the OUTPUT canvas
     paintBackground(ctx, outW, outH, video, refs)

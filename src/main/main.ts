@@ -11,7 +11,7 @@ import {
   type Display,
   type WebContents
 } from 'electron'
-import { promises as fsp } from 'node:fs'
+import { promises as fsp, accessSync, constants as fsConstants } from 'node:fs'
 import path from 'path'
 import { startTripleAltDetector, stopTripleAltDetector } from './triple-alt-detector'
 
@@ -672,8 +672,7 @@ function locateFfmpeg(): string | null {
       try {
         // existsSync would be sufficient on Windows; using accessSync
         // also catches permission anomalies.
-        const fs = require('node:fs') as typeof import('node:fs')
-        fs.accessSync(full, fs.constants.X_OK)
+        accessSync(full, fsConstants.X_OK)
         return full
       } catch {
         /* not here, keep looking */
