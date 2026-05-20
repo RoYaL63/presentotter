@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import {
-  Crosshair,
   Home as HomeIcon,
   Library as LibraryIcon,
   Power,
@@ -188,110 +187,115 @@ function AccueilSection() {
   }
 
   return (
-    <section className="mx-auto flex h-full max-w-4xl flex-col items-center justify-start gap-10 px-8 py-12">
-      <header className="flex flex-col items-center gap-4 text-center">
-        <div className="relative" aria-hidden>
-          {/* Soft halo behind the mascot — sits on the mesh and reads
-              as a halo of light around the loutre. */}
-          <div className="absolute inset-0 -z-10 rounded-full bg-coral-200/40 blur-3xl" />
-          <Mascot size={160} animate />
+    <section className="mx-auto flex h-full max-w-5xl flex-col gap-4 px-6 pb-3 pt-4">
+      {/* HERO — mascot to the left of the title in a single line so it
+          stops eating vertical space. The bubble float still reads. */}
+      <header className="flex items-center justify-center gap-5 text-center">
+        <div className="relative shrink-0" aria-hidden>
+          <div className="absolute inset-0 -z-10 rounded-full bg-coral-200/40 blur-2xl" />
+          <Mascot size={96} animate />
         </div>
-        <h1 className="font-display text-5xl font-black tracking-tight text-sea-700">
-          Present<span className="text-coral-400">Otter</span>
-        </h1>
-        <p className="max-w-md text-sm leading-relaxed text-cream-800/70">
-          Annote, surligne et masque les secrets en direct par-dessus
-          n&apos;importe quelle app pendant tes partages d&apos;écran.
-        </p>
+        <div className="text-left">
+          <h1 className="font-display text-3xl font-black leading-none tracking-tight text-sea-700">
+            Present<span className="text-coral-400">Otter</span>
+          </h1>
+          <p className="mt-1 max-w-md text-xs leading-snug text-cream-800/75">
+            Annote, surligne et masque les secrets en direct par-dessus
+            n&apos;importe quelle app pendant tes partages d&apos;écran.
+          </p>
+        </div>
       </header>
 
+      {/* PRIMARY CTA — single-row pill, status pill folded into the
+          right edge so we don't need a separate row for it. */}
       <button
         type="button"
         onClick={toggleToolbar}
         aria-pressed={toolbarOn}
-        className={`group relative flex flex-col items-center gap-3 px-14 py-9 transition-all duration-300 ease-out otter-aqua ${
+        className={`group relative flex items-center justify-between gap-4 px-6 py-4 transition-all duration-300 ease-out otter-aqua ${
           toolbarOn ? 'otter-clay-sea' : 'otter-clay-coral'
         }`}
-        style={{ borderRadius: 36 }}
+        style={{ borderRadius: 24 }}
       >
-        <Power
-          className={`relative h-12 w-12 transition-transform duration-300 ${
-            toolbarOn ? 'scale-110' : 'group-hover:scale-110'
-          }`}
-          strokeWidth={1.5}
-        />
-        <span className="relative text-base font-bold tracking-tight">
-          {toolbarOn ? 'Désactiver la barre' : 'Activer la barre d\'outils'}
+        <span className="flex items-center gap-3">
+          <Power
+            className={`h-7 w-7 transition-transform duration-300 ${
+              toolbarOn ? 'scale-110' : 'group-hover:scale-110'
+            }`}
+            strokeWidth={1.7}
+          />
+          <span className="flex flex-col items-start">
+            <span className="text-sm font-bold tracking-tight">
+              {toolbarOn ? 'Désactiver la barre' : 'Activer la barre d\'outils'}
+            </span>
+            <span className="text-[11px] opacity-90">
+              {toolbarOn
+                ? 'La toolbar flotte au-dessus de tes apps'
+                : 'Affiche la toolbar flottante au-dessus de tes apps'}
+            </span>
+          </span>
         </span>
-        <span className="relative text-xs opacity-90">
-          {toolbarOn
-            ? 'La toolbar flotte au-dessus de tes apps'
-            : 'Affiche la toolbar flottante au-dessus de tes apps'}
-        </span>
-      </button>
-
-      <div className="flex items-center gap-2">
-        <span className="otter-badge">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/25 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">
           <span
-            className={`relative h-2 w-2 rounded-full ${
+            className={`relative h-1.5 w-1.5 rounded-full ${
               toolbarOn
-                ? 'bg-kelp-500 shadow-[0_0_8px_rgba(74,124,89,0.55)]'
-                : 'bg-cream-400'
+                ? 'bg-white shadow-[0_0_6px_rgba(255,255,255,0.85)]'
+                : 'bg-white/65'
             }`}
             aria-hidden
           />
-          Toolbar {toolbarOn ? 'active' : 'inactive'}
+          {toolbarOn ? 'Active' : 'Inactive'}
         </span>
-        <span className="text-[11px] text-cream-800/55">
-          · triple-tap <kbd className="font-mono text-cream-800">Alt</kbd> pour le curseur en évidence
-        </span>
-      </div>
+      </button>
 
-      <div className="grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* QUICK ACTIONS — 4 cards on one row so the whole page fits. */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         <ActionCard
           icon={Video}
-          title="Enregistrer l'écran"
-          description="Capture écran, fenêtre, micro + audio système"
+          title="Enregistrer"
+          description="Écran, audio, webcam, fond"
           onClick={() => setRecordingOpen(true)}
           highlight
         />
         <ActionCard
           icon={ShieldCheck}
           title="Sanitizer manuel"
-          description="Vérifier un texte avant de le coller à l'écran"
+          description="Vérifier un texte avant de coller"
           onClick={() => setSanitizerOpen(true)}
         />
         <ActionCard
           icon={Wand2}
-          title="Configurer les outils"
-          description="Couleurs et tailles par défaut de chaque outil"
+          title="Outils"
+          description="Couleurs et tailles par défaut"
           onClick={() => navigate('tools')}
         />
         <ActionCard
           icon={LibraryIcon}
           title="Bibliothèque"
-          description="Tes enregistrements et exports précédents"
+          description="Enregistrements et exports"
           onClick={() => navigate('library')}
         />
       </div>
 
-      <div className="grid w-full max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4">
-        <Feature icon={Wand2} label="Annotations" />
-        <Feature icon={ShieldCheck} label="Sanitizer LIVE" />
-        <Feature icon={Crosshair} label="Curseur tracé" />
-        <Feature icon={Sparkles} label="Multi-écran" />
-      </div>
-
-      <footer className="mt-auto flex items-center gap-2 text-[11px] text-cream-800/50">
-        <span>PresentOtter v0.1 · 🦦 Otterwise Solutions</span>
-        <span aria-hidden>·</span>
-        <button
-          type="button"
-          onClick={() => navigate('settings')}
-          className="inline-flex items-center gap-1 transition-colors hover:text-sea-700"
-        >
-          <SettingsIcon className="h-3 w-3" /> Paramètres
-        </button>
+      {/* FOOTER — version + tip + settings shortcut on a single row. */}
+      <footer className="mt-auto flex flex-wrap items-center justify-between gap-2 text-[11px] text-cream-800/60">
+        <span className="inline-flex items-center gap-1">
+          Triple-tap{' '}
+          <kbd className="rounded bg-white/55 px-1.5 py-0.5 font-mono text-[10px] text-sea-700 ring-1 ring-white/60">
+            Alt
+          </kbd>{' '}
+          pour le curseur en évidence
+        </span>
+        <span className="inline-flex items-center gap-2">
+          <span>PresentOtter v0.3 · 🦦 Otterwise</span>
+          <button
+            type="button"
+            onClick={() => navigate('settings')}
+            className="inline-flex items-center gap-1 transition-colors hover:text-sea-700"
+          >
+            <SettingsIcon className="h-3 w-3" /> Paramètres
+          </button>
+        </span>
       </footer>
 
       {sanitizerOpen && <SanitizerPopup onClose={() => setSanitizerOpen(false)} />}
@@ -310,36 +314,44 @@ interface ActionCardProps {
 }
 
 function ActionCard({ icon: Icon, title, description, onClick, highlight = false }: ActionCardProps) {
+  // Compact card — single icon column + 2-line text. Fits 4 in a row
+  // on the Home without scrolling.
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`group flex items-start gap-3 p-4 text-left transition-all duration-300 hover:-translate-y-0.5 ${
+      className={`group flex items-center gap-2.5 p-2.5 text-left transition-all duration-300 hover:-translate-y-0.5 ${
         highlight
           ? 'otter-clay-coral otter-aqua text-white shadow-glow-coral'
           : 'otter-glass otter-aqua hover:shadow-glow-aqua'
       }`}
-      style={highlight ? { borderRadius: 24 } : undefined}
+      style={highlight ? { borderRadius: 18 } : undefined}
     >
       <div
         className={
           highlight
-            ? 'flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-white/25 text-white'
-            : 'otter-clay flex h-11 w-11 flex-shrink-0 items-center justify-center text-sea-700 transition-colors group-hover:text-coral-500'
+            ? 'flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-white/25 text-white'
+            : 'otter-clay flex h-9 w-9 flex-shrink-0 items-center justify-center text-sea-700 transition-colors group-hover:text-coral-500'
         }
-        style={highlight ? undefined : { borderRadius: 14 }}
+        style={highlight ? undefined : { borderRadius: 12 }}
       >
-        <Icon className="h-5 w-5" strokeWidth={1.75} />
+        <Icon className="h-4 w-4" strokeWidth={1.75} />
       </div>
-      <div className="relative">
-        <p className={highlight ? 'text-sm font-bold text-white' : 'text-sm font-bold text-sea-700'}>
+      <div className="relative min-w-0">
+        <p
+          className={
+            highlight
+              ? 'truncate text-xs font-bold text-white'
+              : 'truncate text-xs font-bold text-sea-700'
+          }
+        >
           {title}
         </p>
         <p
           className={
             highlight
-              ? 'mt-1 text-xs leading-snug text-white/85'
-              : 'mt-1 text-xs leading-snug text-cream-800/65'
+              ? 'mt-0.5 truncate text-[10px] text-white/85'
+              : 'mt-0.5 truncate text-[10px] text-cream-800/65'
           }
         >
           {description}
@@ -349,16 +361,3 @@ function ActionCard({ icon: Icon, title, description, onClick, highlight = false
   )
 }
 
-interface FeatureProps {
-  icon: typeof ShieldCheck
-  label: string
-}
-
-function Feature({ icon: Icon, label }: FeatureProps) {
-  return (
-    <div className="otter-badge !rounded-2xl !py-2.5 justify-center">
-      <Icon className="h-3.5 w-3.5 text-coral-400" strokeWidth={2} />
-      <span>{label}</span>
-    </div>
-  )
-}
