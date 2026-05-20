@@ -1,6 +1,6 @@
 {
   "name": "presentotter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Open source screen recorder for no-code educators",
   "main": "dist/main/main.js",
   "homepage": "https://github.com/RoYaL63/presentotter",
@@ -19,6 +19,7 @@
     "dist:win": "npm run build && electron-builder --win",
     "pack:win": "npm run build && node scripts/package-win.js",
     "installer:win": "npm run pack:win && node scripts/build-installer.js",
+    "release": "node scripts/release.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "vitest run integration-tests",

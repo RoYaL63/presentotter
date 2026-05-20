@@ -60,10 +60,17 @@ if (iscc === null) {
   )
 }
 
-console.log(`[build-installer] using ISCC at ${iscc}`)
-console.log(`[build-installer] compiling ${issPath} …`)
+// Pull the version from package.json and override the .iss #define at
+// compile time so we never have to edit the installer script for a bump.
+const pkg = JSON.parse(
+  fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')
+)
+const appVersion = String(pkg.version)
 
-const result = spawnSync(iscc, [issPath], {
+console.log(`[build-installer] using ISCC at ${iscc}`)
+console.log(`[build-installer] compiling ${issPath} (v${appVersion}) …`)
+
+const result = spawnSync(iscc, [`/DMyAppVersion=${appVersion}`, issPath], {
   cwd: path.dirname(issPath),
   stdio: 'inherit'
 })

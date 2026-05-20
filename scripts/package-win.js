@@ -109,7 +109,11 @@ const IGNORE_PATTERNS = [
 
 async function main() {
   const projectRoot = path.resolve(__dirname, '..')
-  console.log(`[package-win] Packaging from ${projectRoot}`)
+  // Single source of truth for the version: package.json. Both the
+  // packager and the Inno Setup script read from it via build-installer.
+  const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'))
+  const appVersion = String(pkg.version)
+  console.log(`[package-win] Packaging from ${projectRoot} (v${appVersion})`)
 
   const out = await packager({
     dir: projectRoot,
@@ -122,7 +126,7 @@ async function main() {
     // them — uiohook-napi.node would otherwise fail with "Cannot find
     // module" at runtime when Electron tries to load the prebuild.
     asar: { unpack: '**/*.{node,dll}' },
-    appVersion: '0.1.0',
+    appVersion,
     appCopyright: 'Copyright © 2025 OTTERWISE Solutions',
     // Trim Chromium locale .pak files down to French + English. Each .pak
     // is ~700 KB and there are 55 by default → saving ~35 MB.

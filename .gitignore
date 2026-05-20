@@ -3,6 +3,7 @@ dist/
 release/
 build/installer/
 coverage/
+RELEASE_NOTES_v*.md
 .DS_Store
 *.log
 *.swp

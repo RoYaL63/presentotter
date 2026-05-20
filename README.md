@@ -55,36 +55,63 @@ Détecte et masque automatiquement :
 
 ## Installation
 
-### Téléchargement direct
-👉 [Dernière version](https://github.com/RoYaL63/presentotter/releases/latest)
+### Méthode recommandée — Setup.exe depuis les Releases
 
-Télécharge `PresentOtter-Setup-x.x.x.exe` et lance l'installeur.
+👉 **[Télécharger la dernière version](https://github.com/RoYaL63/presentotter/releases/latest)**
+
+1. Récupère `PresentOtter-Setup-x.y.z.exe` dans la section *Assets* de la release.
+2. Double-clic. SmartScreen va probablement dire *« Windows protected your PC »* → clique **More info** → **Run anyway**.
+3. L'installeur Inno Setup s'ouvre. Par défaut, install per-user dans `%LOCALAPPDATA%\Programs\PresentOtter\` (pas d'UAC, pas d'admin requis).
+4. Garde *« Lancer PresentOtter »* coché à la fin.
+
+**Mise à jour** : télécharge la nouvelle release et lance le nouveau Setup. Il écrase l'install précédente proprement (l'AppId est stable, donc Windows reconnaît une mise à jour, pas une nouvelle install).
+
+**Désinstallation** : Settings → Apps → cherche *PresentOtter* → trois points → Uninstall. Wipe également `%LOCALAPPDATA%\PresentOtter\` (cache + préférences).
+
+### Si Smart App Control bloque l'install (Win11)
+
+Le binaire n'est pas signé (alpha open-source, pas de budget EV cert). Sur Win11 récent avec SAC = ON, Windows refuse sans option de bypass. Deux solutions :
+
+- **Désactiver SAC** : Settings → Privacy & Security → Windows Security → App & browser control → Smart App Control settings → Off. ⚠️ Irréversible sans réinstaller Windows.
+- **Build depuis les sources et `npm run dev`** : l'électron de dev est signé par GitHub, SAC le laisse passer (cf. ci-dessous).
 
 ### Build depuis les sources
 
-Prérequis : Node.js 20+, Windows 10/11
+Prérequis : Node.js 20+, Windows 10/11.
 
 ```bash
 git clone https://github.com/RoYaL63/presentotter
 cd presentotter
 npm install
-npm run dev
+npm run dev          # dev avec hot reload (signé GitHub, OK avec SAC)
 ```
 
-Build production :
+Régénérer l'installeur localement :
+
 ```bash
-npm run dist:win
+npm run installer:win    # produit release/PresentOtter-Setup-<version>.exe
+npm run release          # imprime le hash + commandes pour publier sur GitHub Releases
 ```
 
 ## Raccourcis clavier
 
+Les annotations passent par la toolbar flottante (à activer depuis l'accueil) :
+
 | Action | Raccourci |
 |---|---|
-| Démarrer / Pauser | F9 |
-| Stopper | F10 |
-| Mode annotation | F8 |
-| Clear annotations | Escape |
-| Screenshot rapide | F12 |
+| Sélection / passe-through | Alt+S |
+| Crayon | Alt+P |
+| Rectangle | Alt+R |
+| Cercle | Alt+O |
+| Flèche | Alt+A |
+| Texte | Alt+T |
+| Spotlight | Alt+L |
+| Undo dernier trait | Alt+Z |
+| Tout effacer | Alt+Shift+C |
+| Masquer / montrer overlays | Alt+H |
+| Masquer / montrer toolbar | Alt+B |
+| Repasser en passe-through | Escape |
+| **Curseur en évidence (global)** | **Triple-tap Alt** |
 
 ## Contribuer
 

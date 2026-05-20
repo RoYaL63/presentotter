@@ -18,7 +18,13 @@
 ;   under Program Files).
 
 #define MyAppName "PresentOtter"
-#define MyAppVersion "0.1.0"
+; Default version used when ISCC is invoked without a /DMyAppVersion=…
+; override. scripts/build-installer.js always passes the value from
+; package.json, so this fallback only matters if someone runs ISCC by
+; hand. Use #ifndef to let the command-line value win.
+#ifndef MyAppVersion
+  #define MyAppVersion "0.2.0"
+#endif
 #define MyAppPublisher "OTTERWISE Solutions"
 #define MyAppURL "https://github.com/RoYaL63/presentotter"
 #define MyAppExeName "PresentOtter.exe"
