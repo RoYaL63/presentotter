@@ -41,6 +41,22 @@ interface CursorSample {
 // comes from the Tools page (settable) and is read via cursorTrailMsRef.
 const CURSOR_TRAIL_MAX = 90
 
+/**
+ * Meteor particle — independent of the cursor sample buffer. Each is a
+ * soft glowing blob that drifts behind the cursor and fades over its
+ * lifetime, giving the smooth comet-tail effect (no visible polyline
+ * segments / pixelation).
+ */
+interface MeteorParticle {
+  x: number
+  y: number
+  vx: number
+  vy: number
+  birth: number
+  size: number
+}
+const PARTICLE_POOL_MAX = 600
+
 export function Overlay() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const textInputRef = useRef<HTMLInputElement | null>(null)
@@ -48,6 +64,7 @@ export function Overlay() {
   const draftRef = useRef<Shape | null>(null)
   const liveMasksRef = useRef<LiveMask[]>([])
   const cursorTrailRef = useRef<CursorSample[]>([])
+  const particlesRef = useRef<MeteorParticle[]>([])
   const cursorEnabledRef = useRef(false)
   const cursorOnThisDisplayRef = useRef(false)
   const cursorColorRef = useRef<string>('#22d3ee')
@@ -129,9 +146,47 @@ export function Overlay() {
       const onThisDisplay = localX >= 0 && localX <= w && localY >= 0 && localY <= h
       cursorOnThisDisplayRef.current = onThisDisplay
       if (onThisDisplay) {
+        const prev =
+          cursorTrailRef.current[cursorTrailRef.current.length - 1] ?? null
         cursorTrailRef.current.push({ x: localX, y: localY, t: pos.timestamp })
         if (cursorTrailRef.current.length > CURSOR_TRAIL_MAX) {
           cursorTrailRef.current.shift()
+        }
+
+        // Spawn meteor particles along the segment from the previous
+        // sample to this one — density scales with cursor speed so a
+        // slow drift produces a thin trail, a fast flick produces a
+        // dense comet tail.
+        if (cursorStyleRef.current === 'meteor' && prev !== null) {
+          const dx = localX - prev.x
+          const dy = localY - prev.y
+          const dist = Math.sqrt(dx * dx + dy * dy)
+          if (dist > 0.5) {
+            const count = Math.min(14, Math.max(2, Math.floor(dist / 5)))
+            // Slight drift "behind" the cursor (opposite to motion)
+            // gives the tail its lag; the jitter is what makes it look
+            // organic instead of mechanical.
+            const driftX = -dx * 0.015
+            const driftY = -dy * 0.015
+            for (let i = 0; i < count; i++) {
+              const t = i / count
+              particlesRef.current.push({
+                x: prev.x + dx * t + (Math.random() - 0.5) * 4,
+                y: prev.y + dy * t + (Math.random() - 0.5) * 4,
+                vx: driftX + (Math.random() - 0.5) * 0.4,
+                vy: driftY + (Math.random() - 0.5) * 0.4,
+                birth: pos.timestamp,
+                size: 5 + Math.random() * 10
+              })
+            }
+            // Cap the pool so very long fast moves don't unbound mem.
+            if (particlesRef.current.length > PARTICLE_POOL_MAX) {
+              particlesRef.current.splice(
+                0,
+                particlesRef.current.length - PARTICLE_POOL_MAX
+              )
+            }
+          }
         }
       }
     })
@@ -171,6 +226,8 @@ export function Overlay() {
         const now = Date.now()
         const ttl = cursorTrailMsRef.current
         cursorTrailRef.current = cursorTrailRef.current.filter((s) => now - s.t < ttl)
+        // Meteor particles expire on the same TTL as the trail.
+        particlesRef.current = particlesRef.current.filter((p) => now - p.birth < ttl)
         redraw()
       }
       animationRef.current = window.requestAnimationFrame(loop)
@@ -230,6 +287,7 @@ export function Overlay() {
       drawCursorHighlight(
         ctx,
         cursorTrailRef.current,
+        particlesRef.current,
         cursorColorRef.current,
         cursorStyleRef.current,
         cursorTrailMsRef.current,
@@ -567,25 +625,24 @@ function drawShape(
 }
 
 /**
- * Meteor-trail cursor renderer.
+ * Cursor highlight renderer.
  *
- * The visual we want: a comet head with a glowing tail that thins and
- * fades into the air behind the cursor, no visible polyline pixelation.
+ * Three visual modes:
+ *   - 'meteor' : particle-based glowing comet trail (additive blend),
+ *                no polyline strokes → no visible segment pixelation
+ *   - 'classic': single smooth stroke through trail samples, simple line
+ *   - 'minimal': ring at the head only, no trail
  *
- * Strategy: instead of a single stroke through every sample, we build a
- * smoothed Catmull-Rom-ish path (quadratic curves through midpoints) and
- * stroke it 4 times — from a wide soft halo down to a bright thin core.
- * Each pass uses `lineCap: round` so segment joins look natural, and the
- * stroke width tapers from the head (max) to the tail (~0).
- *
- * To avoid drawing a uniform-width single stroke (which kills the comet
- * effect), we split the path into N sub-strokes, each with its own width
- * and alpha derived from its position along the trail AND the age of the
- * underlying samples (older → more transparent).
+ * The meteor mode spawns its own particle pool from the cursor sample
+ * stream (see Overlay's onCursorPosition handler) so it can be rendered
+ * with `globalCompositeOperation = 'lighter'` for a real light-emission
+ * effect — overlapping blobs add up, the head reads brighter than the
+ * tail naturally.
  */
 function drawCursorHighlight(
   ctx: CanvasRenderingContext2D,
   trail: CursorSample[],
+  particles: MeteorParticle[],
   color: string,
   style: 'meteor' | 'classic' | 'minimal',
   trailMs: number,
@@ -598,23 +655,8 @@ function drawCursorHighlight(
   const now = Date.now()
   const k = Math.max(0, Math.min(1, intensity))
 
-  // -- Wide outer halo behind the head, scales with intensity --
-  if (style !== 'minimal') {
-    ctx.save()
-    const haloRadius = style === 'meteor' ? 56 : 40
-    const outerHalo = ctx.createRadialGradient(head.x, head.y, 2, head.x, head.y, haloRadius)
-    outerHalo.addColorStop(0, `rgba(${rgb.r},${rgb.g},${rgb.b},${0.55 * k})`)
-    outerHalo.addColorStop(0.35, `rgba(${rgb.r},${rgb.g},${rgb.b},${0.22 * k})`)
-    outerHalo.addColorStop(1, `rgba(${rgb.r},${rgb.g},${rgb.b},0)`)
-    ctx.fillStyle = outerHalo
-    ctx.beginPath()
-    ctx.arc(head.x, head.y, haloRadius, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.restore()
-  }
-
+  // ---- MINIMAL: precise ring, no trail, no halo ----
   if (style === 'minimal') {
-    // Just a precise ring at the head — no trail, no halo.
     ctx.save()
     ctx.strokeStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${0.95 * k})`
     ctx.lineWidth = 2
@@ -625,68 +667,116 @@ function drawCursorHighlight(
     return
   }
 
+  // Soft outer halo behind the head (meteor + classic share this).
+  ctx.save()
+  const haloRadius = style === 'meteor' ? 64 : 40
+  const outerHalo = ctx.createRadialGradient(head.x, head.y, 2, head.x, head.y, haloRadius)
+  outerHalo.addColorStop(0, `rgba(${rgb.r},${rgb.g},${rgb.b},${0.55 * k})`)
+  outerHalo.addColorStop(0.35, `rgba(${rgb.r},${rgb.g},${rgb.b},${0.22 * k})`)
+  outerHalo.addColorStop(1, `rgba(${rgb.r},${rgb.g},${rgb.b},0)`)
+  ctx.fillStyle = outerHalo
+  ctx.beginPath()
+  ctx.arc(head.x, head.y, haloRadius, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+
+  // ---- METEOR: particle-based comet tail ----
+  if (style === 'meteor') {
+    drawMeteorTail(ctx, particles, rgb, trailMs, k, now)
+    drawCursorHead(ctx, head, rgb, k * 1.05)
+    return
+  }
+
+  // ---- CLASSIC: single smooth stroke through samples ----
   if (trail.length < 2) {
     drawCursorHead(ctx, head, rgb, k)
     return
   }
-
-  // -- Trail rendering --
-  // 'meteor' style uses 4 passes for a soft glowing tail; 'classic' uses 1
-  // brighter pass for a simple line.
-  const passes =
-    style === 'meteor'
-      ? [
-          { widthMult: 5.5, alphaMult: 0.10 },
-          { widthMult: 3.4, alphaMult: 0.20 },
-          { widthMult: 1.8, alphaMult: 0.40 },
-          { widthMult: 0.85, alphaMult: 0.95 }
-        ]
-      : [{ widthMult: 1.2, alphaMult: 0.8 }]
-
   const N = trail.length
-
-  for (const pass of passes) {
-    ctx.save()
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-
-    for (let i = N - 1; i >= 1; i--) {
-      const cur = trail[i]
-      const prev = trail[i - 1]
-      if (!cur || !prev) continue
-
-      const positionT = i / (N - 1)
-      const ageT = Math.max(0, 1 - (now - cur.t) / trailMs)
-      const t = positionT * ageT
-      const width = Math.max(0.6, pass.widthMult * Math.pow(t, 0.7) * 6)
-      const alpha = pass.alphaMult * Math.pow(t, 0.85) * k
-      if (alpha < 0.01) continue
-
-      const beforePrev = i >= 2 ? trail[i - 2] : null
-      ctx.lineWidth = width
-      ctx.strokeStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`
-      ctx.beginPath()
-      if (beforePrev) {
-        const midStart = {
-          x: (beforePrev.x + prev.x) / 2,
-          y: (beforePrev.y + prev.y) / 2
-        }
-        const midEnd = {
-          x: (prev.x + cur.x) / 2,
-          y: (prev.y + cur.y) / 2
-        }
-        ctx.moveTo(midStart.x, midStart.y)
-        ctx.quadraticCurveTo(prev.x, prev.y, midEnd.x, midEnd.y)
-      } else {
-        ctx.moveTo(prev.x, prev.y)
-        ctx.lineTo(cur.x, cur.y)
+  ctx.save()
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  for (let i = N - 1; i >= 1; i--) {
+    const cur = trail[i]
+    const prev = trail[i - 1]
+    if (!cur || !prev) continue
+    const positionT = i / (N - 1)
+    const ageT = Math.max(0, 1 - (now - cur.t) / trailMs)
+    const t = positionT * ageT
+    const width = Math.max(0.6, 1.2 * Math.pow(t, 0.7) * 6)
+    const alpha = 0.8 * Math.pow(t, 0.85) * k
+    if (alpha < 0.01) continue
+    const beforePrev = i >= 2 ? trail[i - 2] : null
+    ctx.lineWidth = width
+    ctx.strokeStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`
+    ctx.beginPath()
+    if (beforePrev) {
+      const midStart = {
+        x: (beforePrev.x + prev.x) / 2,
+        y: (beforePrev.y + prev.y) / 2
       }
-      ctx.stroke()
+      const midEnd = {
+        x: (prev.x + cur.x) / 2,
+        y: (prev.y + cur.y) / 2
+      }
+      ctx.moveTo(midStart.x, midStart.y)
+      ctx.quadraticCurveTo(prev.x, prev.y, midEnd.x, midEnd.y)
+    } else {
+      ctx.moveTo(prev.x, prev.y)
+      ctx.lineTo(cur.x, cur.y)
     }
-    ctx.restore()
+    ctx.stroke()
   }
-
+  ctx.restore()
   drawCursorHead(ctx, head, rgb, k)
+}
+
+/**
+ * Meteor tail: each particle is a soft radial blob, rendered with
+ * additive blending so the overlapping blobs sum into a continuous
+ * glow with no visible polyline. Particles drift slightly behind the
+ * cursor + random jitter for an organic, splash-of-light feel.
+ *
+ * The size + alpha both fall with age, so older particles fade into
+ * nothing rather than cutting off hard. The bright white core + outer
+ * coloured halo on each particle reads like real radiative light.
+ */
+function drawMeteorTail(
+  ctx: CanvasRenderingContext2D,
+  particles: MeteorParticle[],
+  rgb: { r: number; g: number; b: number },
+  trailMs: number,
+  intensity: number,
+  now: number
+): void {
+  if (particles.length === 0) return
+  ctx.save()
+  // 'lighter' = additive RGB blending — perfect for emissive light.
+  ctx.globalCompositeOperation = 'lighter'
+  for (const p of particles) {
+    const age = (now - p.birth) / trailMs
+    if (age >= 1 || age < 0) continue
+    // Apply drift since last frame so the tail "lags" behind the head.
+    p.x += p.vx
+    p.y += p.vy
+    const life = 1 - age
+    // ease-out so particles fade gracefully near the end of life.
+    const ease = life * life
+    const alpha = ease * 0.45 * intensity
+    if (alpha < 0.008) continue
+    // Particles slightly grow as they age (smoke-puff feel) before
+    // disappearing — gives the trail volume without hard edges.
+    const radius = p.size * (1 + age * 0.6)
+    const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius)
+    grad.addColorStop(0, `rgba(255,255,255,${alpha * 0.85})`)
+    grad.addColorStop(0.35, `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`)
+    grad.addColorStop(1, `rgba(${rgb.r},${rgb.g},${rgb.b},0)`)
+    ctx.fillStyle = grad
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.restore()
 }
 
 function drawCursorHead(
