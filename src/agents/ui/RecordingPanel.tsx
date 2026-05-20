@@ -11,6 +11,7 @@ import {
   Mic,
   MicOff,
   Monitor,
+  Palette,
   RotateCcw,
   Sparkles,
   Square,
@@ -19,8 +20,15 @@ import {
   User,
   Volume2,
   VolumeX,
+  Wand2,
   X
 } from 'lucide-react'
+import {
+  startWebcamEffects,
+  type BlurIntensity,
+  type CamBgMode,
+  type WebcamEffectsProcessor
+} from './webcam-effects'
 
 /**
  * RecordingPanel — full-screen modal that lets the user:
@@ -184,6 +192,12 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
   const [bgKind, setBgKind] = useState<BackgroundKind>('none')
   const [bgPresetId, setBgPresetId] = useState<string>(BG_PRESETS[0]?.id ?? 'otter-mesh')
   const [bgCustomDataUrl, setBgCustomDataUrl] = useState<string | null>(null)
+  // Webcam-only background — Aucun / Flou / Image / Couleur. Independent
+  // from the whole-canvas Fond above. Powered by MediaPipe segmentation.
+  const [camBgMode, setCamBgMode] = useState<CamBgMode>('none')
+  const [camBgBlur, setCamBgBlur] = useState<BlurIntensity>('medium')
+  const [camBgImageDataUrl, setCamBgImageDataUrl] = useState<string | null>(null)
+  const [camBgColor, setCamBgColor] = useState<string>('#00B140') // chroma green
   const [phase, setPhase] = useState<Phase>('picking')
   const [error, setError] = useState<string | null>(null)
   const [elapsedMs, setElapsedMs] = useState(0)
@@ -203,17 +217,26 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
   const bgKindRef = useRef<BackgroundKind>(bgKind)
   const bgPresetIdRef = useRef<string>(bgPresetId)
   const bgCustomBitmapRef = useRef<ImageBitmap | null>(null)
+  // Webcam-effects refs read each frame by the segmentation pipeline.
+  const camBgModeRef = useRef<CamBgMode>(camBgMode)
+  const camBgBlurRef = useRef<BlurIntensity>(camBgBlur)
+  const camBgImageBitmapRef = useRef<ImageBitmap | null>(null)
+  const camBgColorRef = useRef<string>(camBgColor)
   cornerRef.current = webcamCorner
   shapeRef.current = webcamShape
   sizeRef.current = webcamSize
   bgKindRef.current = bgKind
   bgPresetIdRef.current = bgPresetId
+  camBgModeRef.current = camBgMode
+  camBgBlurRef.current = camBgBlur
+  camBgColorRef.current = camBgColor
 
   // Stream / recorder refs
   const streamRef = useRef<MediaStream | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
   const webcamStreamRef = useRef<MediaStream | null>(null)
   const composerRef = useRef<Composer | null>(null)
+  const webcamFxRef = useRef<WebcamEffectsProcessor | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<number | null>(null)
@@ -244,6 +267,27 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
       cancelled = true
     }
   }, [bgCustomDataUrl])
+
+  // Same trick for the webcam-only background image.
+  useEffect(() => {
+    if (camBgImageDataUrl === null) {
+      camBgImageBitmapRef.current = null
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const blob = await (await fetch(camBgImageDataUrl)).blob()
+        const bmp = await createImageBitmap(blob)
+        if (!cancelled) camBgImageBitmapRef.current = bmp
+      } catch (err) {
+        console.warn('[recording] webcam bg image decode failed:', err)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [camBgImageDataUrl])
 
   // -----------------------------------------------------------------
   // Source enumeration
@@ -342,6 +386,10 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
   }, [])
 
   const stopAllTracks = () => {
+    if (webcamFxRef.current !== null) {
+      webcamFxRef.current.stop()
+      webcamFxRef.current = null
+    }
     if (composerRef.current !== null) {
       composerRef.current.stop()
       composerRef.current = null
@@ -387,6 +435,8 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
       screenStreamRef.current = screenStream
 
       let webcamStream: MediaStream | null = null
+      let webcamSourceVideo: HTMLVideoElement | null = null
+      let webcamProcessedCanvas: HTMLCanvasElement | null = null
       if (includeWebcam) {
         try {
           const cam: MediaTrackConstraints =
@@ -395,6 +445,28 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
               : { width: 1280, height: 720 }
           webcamStream = await navigator.mediaDevices.getUserMedia({ video: cam, audio: false })
           webcamStreamRef.current = webcamStream
+
+          // Hidden <video> element that owns the webcam stream. We
+          // always create one because both the composer (for dims) and
+          // the effects processor (for ML inference) need it.
+          webcamSourceVideo = document.createElement('video')
+          webcamSourceVideo.srcObject = webcamStream
+          webcamSourceVideo.muted = true
+          webcamSourceVideo.playsInline = true
+          await webcamSourceVideo.play()
+
+          // Start the effects processor ALWAYS when webcam is on — the
+          // mode ref controls whether it segments or just passes through.
+          // This lets the user toggle Flou / Image / Couleur LIVE during
+          // recording without recreating the recorder.
+          const fx = await startWebcamEffects(webcamSourceVideo, {
+            modeRef: camBgModeRef,
+            blurRef: camBgBlurRef,
+            imageBitmapRef: camBgImageBitmapRef,
+            colorRef: camBgColorRef
+          })
+          webcamFxRef.current = fx
+          webcamProcessedCanvas = fx.canvas
         } catch (err) {
           console.warn('[recording] webcam denied:', err)
         }
@@ -417,14 +489,19 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
       const needsCompose = webcamStream !== null || bgKindRef.current !== 'none'
       let videoStreamForRecorder: MediaStream
       if (needsCompose) {
-        const composer = await startComposer(screenStream, webcamStream, {
-          cornerRef,
-          shapeRef,
-          sizeRef,
-          bgKindRef,
-          bgPresetIdRef,
-          bgCustomBitmapRef
-        })
+        const composer = await startComposer(
+          screenStream,
+          webcamSourceVideo,
+          webcamProcessedCanvas,
+          {
+            cornerRef,
+            shapeRef,
+            sizeRef,
+            bgKindRef,
+            bgPresetIdRef,
+            bgCustomBitmapRef
+          }
+        )
         composerRef.current = composer
         videoStreamForRecorder = composer.stream
       } else {
@@ -620,6 +697,14 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
               webcamSize={webcamSize}
               onSelectSize={setWebcamSize}
               webcamPreviewRef={webcamPreviewRef}
+              camBgMode={camBgMode}
+              onCamBgMode={setCamBgMode}
+              camBgBlur={camBgBlur}
+              onCamBgBlur={setCamBgBlur}
+              camBgImageDataUrl={camBgImageDataUrl}
+              onCamBgImage={setCamBgImageDataUrl}
+              camBgColor={camBgColor}
+              onCamBgColor={setCamBgColor}
               bgKind={bgKind}
               onSelectBgKind={setBgKind}
               bgPresetId={bgPresetId}
@@ -779,6 +864,14 @@ interface PickerViewProps {
   webcamSize: WebcamSize
   onSelectSize(s: WebcamSize): void
   webcamPreviewRef: React.RefObject<HTMLVideoElement>
+  camBgMode: CamBgMode
+  onCamBgMode(m: CamBgMode): void
+  camBgBlur: BlurIntensity
+  onCamBgBlur(b: BlurIntensity): void
+  camBgImageDataUrl: string | null
+  onCamBgImage(url: string | null): void
+  camBgColor: string
+  onCamBgColor(c: string): void
   bgKind: BackgroundKind
   onSelectBgKind(k: BackgroundKind): void
   bgPresetId: string
@@ -821,6 +914,14 @@ function PickerView(props: PickerViewProps) {
           size={props.webcamSize}
           onSelectSize={props.onSelectSize}
           previewRef={props.webcamPreviewRef}
+          camBgMode={props.camBgMode}
+          onCamBgMode={props.onCamBgMode}
+          camBgBlur={props.camBgBlur}
+          onCamBgBlur={props.onCamBgBlur}
+          camBgImageDataUrl={props.camBgImageDataUrl}
+          onCamBgImage={props.onCamBgImage}
+          camBgColor={props.camBgColor}
+          onCamBgColor={props.onCamBgColor}
         />
         <BackgroundConfig
           kind={props.bgKind}
@@ -1014,6 +1115,14 @@ interface WebcamConfigProps {
   size: WebcamSize
   onSelectSize(s: WebcamSize): void
   previewRef: React.RefObject<HTMLVideoElement>
+  camBgMode: CamBgMode
+  onCamBgMode(m: CamBgMode): void
+  camBgBlur: BlurIntensity
+  onCamBgBlur(b: BlurIntensity): void
+  camBgImageDataUrl: string | null
+  onCamBgImage(url: string | null): void
+  camBgColor: string
+  onCamBgColor(c: string): void
 }
 
 function WebcamConfig({
@@ -1028,7 +1137,15 @@ function WebcamConfig({
   onSelectShape,
   size,
   onSelectSize,
-  previewRef
+  previewRef,
+  camBgMode,
+  onCamBgMode,
+  camBgBlur,
+  onCamBgBlur,
+  camBgImageDataUrl,
+  onCamBgImage,
+  camBgColor,
+  onCamBgColor
 }: WebcamConfigProps) {
   return (
     <section
@@ -1181,6 +1298,143 @@ function WebcamConfig({
               )}
             </div>
           </div>
+        </div>
+
+        {/* Webcam-only background — Aucun / Flou / Image / Couleur.
+            Powered by MediaPipe selfie-segmentation (offline, bundled).
+            Applies LIVE during recording; the user can swap modes from
+            the recording bar without restarting. */}
+        <div className="mt-2 flex flex-col gap-2 rounded-2xl bg-white/40 p-2.5 ring-1 ring-white/55">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Wand2 className="h-3 w-3 text-coral-500" />
+            <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-sea-700/70">
+              Arrière-plan caméra
+            </span>
+            <div className="ml-auto flex flex-wrap gap-1">
+              {([
+                { id: 'none', label: 'Aucun' },
+                { id: 'blur', label: 'Flou' },
+                { id: 'image', label: 'Image' },
+                { id: 'color', label: 'Couleur' }
+              ] as const).map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => onCamBgMode(m.id)}
+                  aria-pressed={camBgMode === m.id}
+                  className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition-all ${
+                    camBgMode === m.id
+                      ? 'bg-coral-500 text-white shadow-glow-coral ring-1 ring-coral-300/40'
+                      : 'bg-white/70 text-sea-700 ring-1 ring-white/60 hover:bg-white/90'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {camBgMode === 'blur' && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold text-sea-700/70">Intensité</span>
+              {(['light', 'medium', 'strong'] as BlurIntensity[]).map((b) => (
+                <button
+                  key={b}
+                  type="button"
+                  onClick={() => onCamBgBlur(b)}
+                  aria-pressed={camBgBlur === b}
+                  className={`flex-1 rounded-full px-2 py-1 text-[10px] font-semibold transition-all ${
+                    camBgBlur === b
+                      ? 'bg-coral-500 text-white shadow-glow-coral ring-1 ring-coral-300/50'
+                      : 'bg-white/70 text-sea-700 ring-1 ring-white/60 hover:bg-white/90'
+                  }`}
+                >
+                  {b === 'light' ? 'Léger' : b === 'medium' ? 'Moyen' : 'Fort'}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {camBgMode === 'image' && (
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="cam-bg-upload"
+                className="btn-glass cursor-pointer !py-1.5 !text-[10px]"
+                title="Choisir une image pour le fond caméra"
+              >
+                <Upload className="h-3 w-3" />
+                {camBgImageDataUrl === null ? 'Importer' : 'Changer'}
+              </label>
+              <input
+                id="cam-bg-upload"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file === undefined) return
+                  const reader = new FileReader()
+                  reader.onload = () => {
+                    if (typeof reader.result === 'string') onCamBgImage(reader.result)
+                  }
+                  reader.readAsDataURL(file)
+                }}
+                className="hidden"
+              />
+              {camBgImageDataUrl !== null && (
+                <div className="relative h-10 w-14 overflow-hidden rounded ring-1 ring-white/60">
+                  <img
+                    src={camBgImageDataUrl}
+                    alt="Aperçu fond caméra"
+                    className="h-full w-full object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => onCamBgImage(null)}
+                    aria-label="Retirer"
+                    className="absolute right-0 top-0 flex h-3.5 w-3.5 items-center justify-center rounded-bl bg-coral-500 text-white"
+                  >
+                    <X className="h-2 w-2" />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {camBgMode === 'color' && (
+            <div className="flex items-center gap-2">
+              <Palette className="h-3 w-3 text-sea-700/70" />
+              <label
+                htmlFor="cam-bg-color"
+                className="inline-flex h-7 w-12 cursor-pointer overflow-hidden rounded-md ring-1 ring-white/60"
+                style={{ background: camBgColor }}
+                title="Couleur de fond"
+              >
+                <input
+                  id="cam-bg-color"
+                  type="color"
+                  value={camBgColor}
+                  onChange={(e) => onCamBgColor(e.target.value)}
+                  className="sr-only"
+                />
+              </label>
+              <span className="font-mono text-[10px] text-sea-700/70">{camBgColor}</span>
+              <button
+                type="button"
+                onClick={() => onCamBgColor('#00B140')}
+                className="rounded-full bg-white/70 px-2 py-1 text-[10px] font-semibold text-sea-700 ring-1 ring-white/60 hover:bg-white/90"
+                title="Vert chroma (greenscreen)"
+              >
+                Chroma
+              </button>
+            </div>
+          )}
+
+          {camBgMode !== 'none' && (
+            <p className="text-[10px] leading-snug text-cream-800/60">
+              Segmentation MediaPipe locale, aucune donnée n&apos;est envoyée. Le rendu apparaît
+              sur l&apos;aperçu d&apos;enregistrement.
+            </p>
+          )}
         </div>
       </div>
     </section>
@@ -1668,7 +1922,15 @@ interface Composer {
 
 async function startComposer(
   screenStream: MediaStream,
-  webcamStream: MediaStream | null,
+  /** Pre-created webcam <video> element owned by RecordingPanel. The
+   *  composer ONLY reads dimensions from it; the pixels drawn into the
+   *  PiP come from `webcamCanvas` (the FX-processed surface) — which
+   *  is identical to this video when the effect mode is 'none'. */
+  webcamVideo: HTMLVideoElement | null,
+  /** Always present when webcamVideo is present: the canvas produced
+   *  by startWebcamEffects(). Mirrors the video at the source res,
+   *  with optional background blur / replace / color applied. */
+  webcamCanvas: HTMLCanvasElement | null,
   opts: ComposerOptions
 ): Promise<Composer> {
   const screenVideo = document.createElement('video')
@@ -1683,13 +1945,11 @@ async function startComposer(
   // captures as a flash on the very first second of the file.
   await waitForFirstFrame(screenVideo)
 
-  let webcamVideo: HTMLVideoElement | null = null
-  if (webcamStream !== null) {
-    webcamVideo = document.createElement('video')
-    webcamVideo.srcObject = webcamStream
-    webcamVideo.muted = true
-    webcamVideo.playsInline = true
-    await webcamVideo.play()
+  // The caller (RecordingPanel) already owns and started the webcam
+  // <video> so the FX processor can use it as its segmentation input.
+  // We just wait for its first frame so drawImage() doesn't pull a
+  // black raster on the first composer pass.
+  if (webcamVideo !== null) {
     await waitForFirstFrame(webcamVideo)
   }
 
@@ -1772,8 +2032,12 @@ async function startComposer(
       ctx.restore()
     }
 
-    // Webcam overlay (always on top, both with and without background)
+    // Webcam overlay (always on top, both with and without background).
+    // The visible image is either the raw video element or the processed
+    // canvas from startWebcamEffects() — dimensions stay anchored to the
+    // raw video so the aspect ratio is correct either way.
     if (webcamVideo !== null && webcamVideo.readyState >= 2) {
+      const camSource: CanvasImageSource = webcamCanvas ?? webcamVideo
       const baseEdge = Math.min(w, h)
       const ratio = WEBCAM_SIZE_RATIO[opts.sizeRef.current]
       const camW = Math.floor(baseEdge * ratio * 1.6)
@@ -1794,7 +2058,7 @@ async function startComposer(
       ctx.clip()
       ctx.translate(cx + camW, cy)
       ctx.scale(-1, 1)
-      ctx.drawImage(webcamVideo, 0, 0, camW, camH)
+      ctx.drawImage(camSource, 0, 0, camW, camH)
       ctx.restore()
 
       if (shape === 'glass') {
