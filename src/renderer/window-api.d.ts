@@ -53,6 +53,26 @@ declare global {
       scaleFactor: number
     } | null>
 
+    // ---------- Recording ----------
+    recordingListSources(): Promise<
+      Array<{
+        id: string
+        name: string
+        kind: 'screen' | 'window'
+        thumbnail: string | null
+        appIcon: string | null
+      }>
+    >
+    recordingSaveBlob(payload: {
+      bytes: Uint8Array
+      suggestedName: string
+    }): Promise<{ path: string; dir: string }>
+    recordingRevealInFolder(filePath: string): Promise<void>
+    recordingChooseSavePath(defaultName: string): Promise<string | null>
+    recordingExportMp4(
+      webmPath: string
+    ): Promise<{ ok: true; path: string } | { ok: false; reason: string }>
+
     setCursorHighlight(enabled: boolean): void
     setCursorColor(hex: string): void
     setCursorSettings(settings: {

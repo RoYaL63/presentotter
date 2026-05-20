@@ -7,9 +7,12 @@ import {
   Settings as SettingsIcon,
   ShieldCheck,
   Sparkles,
+  Video,
   Wand2
 } from 'lucide-react'
 import { SanitizerPopup } from './SanitizerPopup'
+import { RecordingPanel } from './RecordingPanel'
+import { Mascot } from './components/Mascot'
 import { Library } from './pages/Library'
 import { Tools } from './pages/Tools'
 import { Settings } from './pages/Settings'
@@ -122,11 +125,11 @@ function TopNav({ current, onSelect }: TopNavProps) {
         aria-label="Retour à l'accueil"
       >
         <span
-          className="otter-clay otter-aqua relative flex h-10 w-10 items-center justify-center text-xl"
+          className="otter-clay otter-aqua relative flex h-12 w-12 items-center justify-center overflow-hidden"
           style={{ borderRadius: 16 }}
           aria-hidden
         >
-          🦦
+          <Mascot size={42} />
         </span>
         <span className="font-display tracking-tight text-lg">
           Present<span className="text-coral-400">Otter</span>
@@ -166,6 +169,7 @@ function AccueilSection() {
   const apiRef = useRef<PresentOtterAPI | undefined>(window.api)
   const [toolbarOn, setToolbarOn] = useState(false)
   const [sanitizerOpen, setSanitizerOpen] = useState(false)
+  const [recordingOpen, setRecordingOpen] = useState(false)
   const navigate = useNavStore((s) => s.navigate)
 
   useEffect(() => {
@@ -186,11 +190,11 @@ function AccueilSection() {
   return (
     <section className="mx-auto flex h-full max-w-4xl flex-col items-center justify-start gap-10 px-8 py-12">
       <header className="flex flex-col items-center gap-4 text-center">
-        <div
-          className="otter-clay otter-aqua animate-bubble-slow relative flex h-20 w-20 items-center justify-center text-4xl"
-          aria-hidden
-        >
-          🦦
+        <div className="relative" aria-hidden>
+          {/* Soft halo behind the mascot — sits on the mesh and reads
+              as a halo of light around the loutre. */}
+          <div className="absolute inset-0 -z-10 rounded-full bg-coral-200/40 blur-3xl" />
+          <Mascot size={160} animate />
         </div>
         <h1 className="font-display text-5xl font-black tracking-tight text-sea-700">
           Present<span className="text-coral-400">Otter</span>
@@ -243,7 +247,14 @@ function AccueilSection() {
         </span>
       </div>
 
-      <div className="grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <ActionCard
+          icon={Video}
+          title="Enregistrer l'écran"
+          description="Capture écran, fenêtre, micro + audio système"
+          onClick={() => setRecordingOpen(true)}
+          highlight
+        />
         <ActionCard
           icon={ShieldCheck}
           title="Sanitizer manuel"
@@ -284,6 +295,7 @@ function AccueilSection() {
       </footer>
 
       {sanitizerOpen && <SanitizerPopup onClose={() => setSanitizerOpen(false)} />}
+      {recordingOpen && <RecordingPanel onClose={() => setRecordingOpen(false)} />}
     </section>
   )
 }
@@ -293,24 +305,45 @@ interface ActionCardProps {
   title: string
   description: string
   onClick(): void
+  /** Surface the card as the primary call-to-action on the page. */
+  highlight?: boolean
 }
 
-function ActionCard({ icon: Icon, title, description, onClick }: ActionCardProps) {
+function ActionCard({ icon: Icon, title, description, onClick, highlight = false }: ActionCardProps) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="otter-glass otter-aqua group flex items-start gap-3 p-4 text-left transition-all duration-300 hover:-translate-y-0.5 hover:shadow-glow-aqua"
+      className={`group flex items-start gap-3 p-4 text-left transition-all duration-300 hover:-translate-y-0.5 ${
+        highlight
+          ? 'otter-clay-coral otter-aqua text-white shadow-glow-coral'
+          : 'otter-glass otter-aqua hover:shadow-glow-aqua'
+      }`}
+      style={highlight ? { borderRadius: 24 } : undefined}
     >
       <div
-        className="otter-clay flex h-11 w-11 flex-shrink-0 items-center justify-center text-sea-700 transition-colors group-hover:text-coral-500"
-        style={{ borderRadius: 14 }}
+        className={
+          highlight
+            ? 'flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-white/25 text-white'
+            : 'otter-clay flex h-11 w-11 flex-shrink-0 items-center justify-center text-sea-700 transition-colors group-hover:text-coral-500'
+        }
+        style={highlight ? undefined : { borderRadius: 14 }}
       >
         <Icon className="h-5 w-5" strokeWidth={1.75} />
       </div>
       <div className="relative">
-        <p className="text-sm font-bold text-sea-700">{title}</p>
-        <p className="mt-1 text-xs leading-snug text-cream-800/65">{description}</p>
+        <p className={highlight ? 'text-sm font-bold text-white' : 'text-sm font-bold text-sea-700'}>
+          {title}
+        </p>
+        <p
+          className={
+            highlight
+              ? 'mt-1 text-xs leading-snug text-white/85'
+              : 'mt-1 text-xs leading-snug text-cream-800/65'
+          }
+        >
+          {description}
+        </p>
       </div>
     </button>
   )

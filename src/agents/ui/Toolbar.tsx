@@ -19,6 +19,7 @@ import {
   X
 } from 'lucide-react'
 import { SanitizerPopup } from './SanitizerPopup'
+import { Mascot } from './components/Mascot'
 import { SanitizerLiveEngine, type ScanResult } from './sanitizer-live'
 import { useToolSettingsStore, type ToolId as SettingsToolId } from './stores/useToolSettingsStore'
 
@@ -249,9 +250,10 @@ export function Toolbar() {
           type="button"
           onClick={handleRestore}
           aria-label="Déployer la toolbar"
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-otter-400 to-otter-600 text-2xl shadow-glow-otter-lg ring-1 ring-white/30 animate-fade-in-up transition-transform duration-200 hover:scale-110 active:scale-95"
+          className="otter-clay otter-aqua animate-fade-in-up flex h-14 w-14 items-center justify-center overflow-hidden transition-transform duration-200 hover:scale-110 active:scale-95"
+          style={{ borderRadius: 999 }}
         >
-          🦦
+          <Mascot size={42} />
         </button>
       </div>
     )
@@ -283,11 +285,11 @@ export function Toolbar() {
 
         {/* Logo — clay cream loutre, aqua sheen */}
         <div
-          className="otter-clay otter-aqua animate-bubble-slow relative mr-0.5 flex h-8 w-8 items-center justify-center text-base"
+          className="otter-clay otter-aqua animate-bubble-slow relative mr-0.5 flex h-8 w-8 items-center justify-center overflow-hidden"
           style={{ borderRadius: 12 }}
           aria-hidden
         >
-          🦦
+          <Mascot size={26} />
         </div>
 
         <div className="h-7 w-px bg-white/[0.08]" aria-hidden />

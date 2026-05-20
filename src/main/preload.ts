@@ -56,6 +56,31 @@ const api = {
     scaleFactor: number
   } | null> => ipcRenderer.invoke('live:acquire-target'),
 
+  // ---------- Recording ----------
+
+  recordingListSources: (): Promise<
+    Array<{
+      id: string
+      name: string
+      kind: 'screen' | 'window'
+      thumbnail: string | null
+      appIcon: string | null
+    }>
+  > => ipcRenderer.invoke('recording:list-sources'),
+  recordingSaveBlob: (payload: {
+    bytes: Uint8Array
+    suggestedName: string
+  }): Promise<{ path: string; dir: string }> =>
+    ipcRenderer.invoke('recording:save-blob', payload),
+  recordingRevealInFolder: (filePath: string): Promise<void> =>
+    ipcRenderer.invoke('recording:reveal-in-folder', filePath),
+  recordingChooseSavePath: (defaultName: string): Promise<string | null> =>
+    ipcRenderer.invoke('recording:choose-save-path', defaultName),
+  recordingExportMp4: (
+    webmPath: string
+  ): Promise<{ ok: true; path: string } | { ok: false; reason: string }> =>
+    ipcRenderer.invoke('recording:export-mp4', webmPath),
+
   /** Push a fresh set of live-mask rectangles to the overlay. */
   setLiveMasks: (zones: Array<{ x: number; y: number; width: number; height: number; label: string }>) =>
     ipcRenderer.send('overlay:set-live-masks', zones),
