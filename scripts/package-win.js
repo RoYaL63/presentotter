@@ -54,12 +54,17 @@ const IGNORE_PATTERNS = [
   /^\/build($|\/)/,
   /^\/src\/agents\/.*\/(__tests__|tests)\//,
 
-  // Native deps the alpha doesn't ship (renderer uses mock adapters)
+  // Native deps the alpha doesn't ship (renderer uses mock adapters).
+  // uiohook-napi IS shipped — it powers the triple-Alt global gesture
+  // from src/main/triple-alt-detector.ts, so do NOT add it here. We do
+  // trim its non-win32-x64 prebuilds further down (saves ~3 MB).
   /^\/node_modules\/better-sqlite3($|\/)/,
-  /^\/node_modules\/uiohook-napi($|\/)/,
   /^\/node_modules\/fluent-ffmpeg($|\/)/,
   /^\/node_modules\/tesseract\.js-core($|\/)/,
   /^\/node_modules\/@types($|\/)/,
+  // Strip every uiohook-napi prebuild except win32-x64 — the only one
+  // this Windows-only bundle can ever load.
+  /^\/node_modules\/uiohook-napi\/prebuilds\/(?!win32-x64)/,
 
   // Dev / build-only deps that have no runtime role
   /^\/node_modules\/electron-builder($|\/)/,
@@ -113,7 +118,10 @@ async function main() {
     arch: 'x64',
     out: path.join(projectRoot, 'release'),
     overwrite: true,
-    asar: true,
+    // Native .node binaries must live OUTSIDE asar so dlopen() can mmap
+    // them — uiohook-napi.node would otherwise fail with "Cannot find
+    // module" at runtime when Electron tries to load the prebuild.
+    asar: { unpack: '**/*.{node,dll}' },
     appVersion: '0.1.0',
     appCopyright: 'Copyright © 2025 OTTERWISE Solutions',
     // Trim Chromium locale .pak files down to French + English. Each .pak
