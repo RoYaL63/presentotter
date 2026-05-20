@@ -375,13 +375,16 @@ export function Overlay() {
               width: mask.width,
               height: mask.height,
               background:
-                'repeating-linear-gradient(135deg, rgba(28,42,64,0.96) 0px, rgba(28,42,64,0.96) 6px, rgba(38,52,76,0.96) 6px, rgba(38,52,76,0.96) 12px)',
-              backdropFilter: 'blur(20px) saturate(1.4)',
-              WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
-              border: '1.5px dashed rgba(239, 68, 68, 0.9)',
-              borderRadius: 5,
+                // Otter-morphism mask: deep-sea base with cream stripes,
+                // visually reads "frosted protective shield" rather than
+                // the previous near-black bar.
+                'repeating-linear-gradient(135deg, rgba(13,53,72,0.95) 0px, rgba(13,53,72,0.95) 7px, rgba(245,230,211,0.92) 7px, rgba(245,230,211,0.92) 14px)',
+              backdropFilter: 'blur(22px) saturate(1.5)',
+              WebkitBackdropFilter: 'blur(22px) saturate(1.5)',
+              border: '1.5px dashed rgba(255, 139, 123, 0.95)', // coral pop
+              borderRadius: 8,
               boxShadow:
-                'inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(0,0,0,0.45), 0 4px 14px rgba(0,0,0,0.35)',
+                'inset 0 1px 0 rgba(255,255,255,0.18), 0 0 0 1px rgba(255,139,123,0.35), 0 6px 18px rgba(13,53,72,0.40)',
               pointerEvents: 'none',
               overflow: 'hidden'
             }}
@@ -395,7 +398,7 @@ export function Overlay() {
                   left: 4,
                   fontSize: 10,
                   fontWeight: 700,
-                  color: 'rgba(254, 226, 226, 1)',
+                  color: '#FFE0D9', // coral-100 — readable on the dark stripes
                   textShadow: '0 1px 2px rgba(0,0,0,0.9)',
                   letterSpacing: 0.3,
                   pointerEvents: 'none',

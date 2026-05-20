@@ -34,19 +34,21 @@ const TOOLS = [
 
 type ToolId = (typeof TOOLS)[number]['id']
 
+// Otter-morphism palette swatches — coral first because it's the signature
+// CTA color and the most common annotation choice during demos.
 const COLORS: ReadonlyArray<{ hex: string; label: string }> = [
-  { hex: '#ef4444', label: 'Rouge' },
-  { hex: '#f97316', label: 'Orange' },
-  { hex: '#eab308', label: 'Jaune' },
-  { hex: '#22d3ee', label: 'Cyan' },
-  { hex: '#3b82f6', label: 'Bleu' },
-  { hex: '#a855f7', label: 'Violet' },
-  { hex: '#ffffff', label: 'Blanc' }
+  { hex: '#FF8B7B', label: 'Coral' },
+  { hex: '#FFC857', label: 'Sunray' },
+  { hex: '#4A7C59', label: 'Kelp' },
+  { hex: '#B8E0E8', label: 'Aqua' },
+  { hex: '#1B5E7B', label: 'Deep Sea' },
+  { hex: '#C89E76', label: 'Caramel' },
+  { hex: '#F5E6D3', label: 'Cream' }
 ]
 
 export function Toolbar() {
   const [tool, setTool] = useState<ToolId>('select')
-  const [color, setColor] = useState<string>('#ef4444')
+  const [color, setColor] = useState<string>('#FF8B7B')
   const [strokeWidth, setStrokeWidth] = useState<number>(4)
   const [opacity] = useState<number>(1)
   const [minimized, setMinimized] = useState(false)
@@ -279,8 +281,12 @@ export function Toolbar() {
           <GripVertical className="h-3.5 w-3.5" strokeWidth={1.5} />
         </div>
 
-        {/* Logo */}
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-otter-400 to-otter-600 text-base shadow-glow-otter ring-1 ring-otter-300/40 mr-0.5" aria-hidden>
+        {/* Logo — clay cream loutre, aqua sheen */}
+        <div
+          className="otter-clay otter-aqua animate-bubble-slow relative mr-0.5 flex h-8 w-8 items-center justify-center text-base"
+          style={{ borderRadius: 12 }}
+          aria-hidden
+        >
           🦦
         </div>
 
@@ -301,10 +307,10 @@ export function Toolbar() {
                 aria-pressed={active}
                 aria-label={`${label} (${shortcut})`}
                 title={`${label} — ${shortcut}`}
-                className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-200 ${
+                className={`relative flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-200 otter-aqua ${
                   active
-                    ? 'bg-gradient-to-br from-otter-400 to-otter-600 text-white shadow-glow-otter ring-1 ring-otter-300/40'
-                    : 'text-otter-200/80 hover:bg-white/[0.06] hover:text-otter-50'
+                    ? 'bg-gradient-to-br from-coral-400 to-coral-500 text-white shadow-glow-coral ring-1 ring-coral-300/50'
+                    : 'text-sea-200/85 hover:bg-white/[0.06] hover:text-white'
                 }`}
               >
                 {active && (
@@ -412,16 +418,16 @@ export function Toolbar() {
                 : 'Activer le Sanitizer LIVE · scan continu de l\'écran'
             }
             aria-label="Sanitizer LIVE"
-            className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-200 ${
+            className={`relative flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-200 otter-aqua ${
               liveOn
-                ? 'bg-gradient-to-br from-otter-400 to-otter-600 text-white shadow-glow-otter ring-1 ring-otter-300/40'
-                : 'text-otter-300 hover:bg-otter-500/15 hover:text-otter-200'
+                ? 'bg-gradient-to-br from-coral-400 to-coral-500 text-white shadow-glow-coral ring-1 ring-coral-300/50'
+                : 'text-sea-200 hover:bg-white/[0.06] hover:text-white'
             }`}
           >
             <Radar className={`relative h-4 w-4 ${liveOn ? 'animate-pulse' : ''}`} strokeWidth={2} />
             {liveOn && liveStatus !== null && liveStatus.count > 0 && (
               <span
-                className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white tabular-nums shadow-glow-red"
+                className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-coral-500 px-1 text-[9px] font-bold text-white tabular-nums shadow-glow-coral"
                 aria-label={`${liveStatus.count} secret(s) détecté(s)`}
               >
                 {liveStatus.count}

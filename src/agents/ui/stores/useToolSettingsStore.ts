@@ -56,17 +56,20 @@ export interface ToolSettingsState {
 
 const STORAGE_KEY = 'presentotter:tool-settings:v1'
 
+// Factory defaults built around the otter-morphism palette: coral for
+// emphasis tools, deep-sea for structure shapes, cream for text accents,
+// sunray for spotlight focus. Users can override any of these in Outils.
 const FACTORY_DEFAULTS: Record<ToolId, ToolDefaults> = {
-  pencil: { color: '#ef4444', strokeWidth: 4, opacity: 1 },
-  rectangle: { color: '#22d3ee', strokeWidth: 3, opacity: 1 },
-  circle: { color: '#a855f7', strokeWidth: 3, opacity: 1 },
-  arrow: { color: '#f97316', strokeWidth: 5, opacity: 1 },
-  text: { color: '#ffffff', strokeWidth: 6, opacity: 1 },
-  spotlight: { color: '#eab308', strokeWidth: 4, opacity: 0.6 }
+  pencil: { color: '#FF8B7B', strokeWidth: 4, opacity: 1 }, // coral pop
+  rectangle: { color: '#1B5E7B', strokeWidth: 3, opacity: 1 }, // deep-sea
+  circle: { color: '#4A7C59', strokeWidth: 3, opacity: 1 }, // kelp green
+  arrow: { color: '#FF8B7B', strokeWidth: 5, opacity: 1 }, // coral pop
+  text: { color: '#F5E6D3', strokeWidth: 6, opacity: 1 }, // cream
+  spotlight: { color: '#FFC857', strokeWidth: 4, opacity: 0.6 } // sunray
 }
 
 const FACTORY_CURSOR: CursorSettings = {
-  color: '#22d3ee',
+  color: '#FF8B7B', // coral pop — signature CTA accent
   style: 'meteor',
   trailLengthMs: 900,
   intensity: 1

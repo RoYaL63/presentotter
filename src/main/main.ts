@@ -73,7 +73,9 @@ function createHomeWindow(): BrowserWindow {
     height: 700,
     minWidth: 840,
     minHeight: 560,
-    backgroundColor: '#050a14',
+    // Glacier — the otter-morphism light base. Avoids the harsh black
+    // splash between window-create and renderer-paint.
+    backgroundColor: '#E8F4F8',
     title: 'PresentOtter',
     show: false,
     webPreferences: {

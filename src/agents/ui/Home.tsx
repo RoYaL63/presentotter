@@ -17,17 +17,17 @@ import { useNavStore, type PageName } from './stores/useNavStore'
 import { registerUIEventListeners } from './eventListeners'
 
 /**
- * Home — the ONE-AND-ONLY window of PresentOtter.
+ * Home — the ONE-AND-ONLY framed window of PresentOtter.
  *
- * Holds four sections in a single React tree:
- *   - Accueil    (the original landing: toggle floating toolbar + brand)
- *   - Outils     (per-tool defaults editor + cursor settings)
- *   - Bibliothèque (recordings library list)
- *   - Paramètres (general app settings)
+ * Visually it's the only surface that is NOT transparent over the user's
+ * desktop, so it gets the full otter-morphism light treatment:
+ *   - Mesh aquatique background (glacier → cream radial mix)
+ *   - Liquid Glass cards (white frosted, deep-sea text)
+ *   - Coral Pop clay CTA for the primary action
+ *   - Bubble float on the loutre mascot
  *
- * No more secondary "console" BrowserWindow — every section lives here.
- * Closing this window quits the app; the floating toolbar / overlays live
- * in their own borderless windows and are toggled from the Accueil section.
+ * The toolbar + overlays (transparent windows) keep the dark Otter Glass
+ * variant so icons stay legible over any user desktop background.
  */
 
 type SectionId = Extract<PageName, 'home' | 'tools' | 'library' | 'settings'>
@@ -43,43 +43,39 @@ export function Home() {
   const currentPage = useNavStore((s) => s.currentPage)
   const navigate = useNavStore((s) => s.navigate)
 
-  // Coerce any legacy/unsupported PageName (recording/preview) to 'home'.
   const section: SectionId = (
     ['home', 'tools', 'library', 'settings'] as SectionId[]
   ).includes(currentPage as SectionId)
     ? (currentPage as SectionId)
     : 'home'
 
-  // Wire up the global event listeners (capture/library/export → stores) once
-  // for the lifetime of the window — keeps the Library section in sync with
-  // whatever the floating toolbar and the agents emit on the event bus.
   useEffect(() => {
     const teardown = registerUIEventListeners()
     return teardown
   }, [])
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-deep-950 font-sans antialiased text-otter-50">
-      {/* Floating background orbs (decorative, behind everything) */}
+    <div className="relative h-screen w-screen overflow-hidden otter-mesh font-sans antialiased text-sea-700">
+      {/* Floating bubbles — aqua-mist, cream, coral. Pure decoration. */}
       <div className="liquid-bg">
         <div
-          className="liquid-orb animate-orb-float-1 bg-otter-500"
+          className="liquid-orb animate-orb-float-1 bg-sea-200"
           style={{ width: '520px', height: '520px', top: '-160px', left: '-120px' }}
           aria-hidden
         />
         <div
-          className="liquid-orb animate-orb-float-2 bg-fur-500"
+          className="liquid-orb animate-orb-float-2 bg-cream-100"
           style={{ width: '380px', height: '380px', top: '50%', right: '-120px' }}
           aria-hidden
         />
         <div
-          className="liquid-orb animate-orb-float-3 bg-otter-300"
+          className="liquid-orb animate-orb-float-3 bg-coral-200"
           style={{
             width: '440px',
             height: '440px',
             bottom: '-160px',
             left: '35%',
-            opacity: 0.22
+            opacity: 0.35
           }}
           aria-hidden
         />
@@ -118,26 +114,26 @@ interface TopNavProps {
 
 function TopNav({ current, onSelect }: TopNavProps) {
   return (
-    <header className="glass glass-shine sticky top-0 z-30 flex items-center justify-between px-6 py-3 rounded-none border-x-0 border-t-0">
+    <header className="otter-glass sticky top-0 z-30 mx-4 mt-4 flex items-center justify-between px-5 py-3">
       <button
         type="button"
         onClick={() => onSelect('home')}
-        className="group flex items-center gap-3 text-base font-semibold text-otter-50 transition-transform duration-200 hover:scale-[1.02]"
+        className="group flex items-center gap-3 text-base font-bold text-sea-700 transition-transform duration-200 hover:scale-[1.02]"
         aria-label="Retour à l'accueil"
       >
         <span
-          className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-otter-400 to-otter-600 text-xl shadow-glow-otter ring-1 ring-otter-300/40"
+          className="otter-clay otter-aqua relative flex h-10 w-10 items-center justify-center text-xl"
+          style={{ borderRadius: 16 }}
           aria-hidden
         >
           🦦
-          <span className="absolute inset-0 rounded-xl bg-gradient-to-tr from-white/30 to-transparent" />
         </span>
-        <span className="font-display tracking-tight">
-          Present<span className="text-otter-400">Otter</span>
+        <span className="font-display tracking-tight text-lg">
+          Present<span className="text-coral-400">Otter</span>
         </span>
       </button>
 
-      <nav className="flex items-center gap-1.5" aria-label="Navigation principale">
+      <nav className="flex items-center gap-1" aria-label="Navigation principale">
         {SECTIONS.map(({ id, label, Icon }) => {
           const active = current === id
           return (
@@ -146,20 +142,14 @@ function TopNav({ current, onSelect }: TopNavProps) {
               type="button"
               onClick={() => onSelect(id)}
               aria-current={active ? 'page' : undefined}
-              className={`relative flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition-all duration-200 ${
+              className={`relative flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
                 active
-                  ? 'bg-white/[0.1] text-otter-50 shadow-glass-sm ring-1 ring-otter-400/30'
-                  : 'text-otter-200/70 hover:bg-white/[0.05] hover:text-otter-50'
+                  ? 'bg-white/70 text-sea-700 shadow-glass-sm ring-1 ring-coral-400/40'
+                  : 'text-sea-700/70 hover:bg-white/40 hover:text-sea-700'
               }`}
             >
               <Icon className="h-4 w-4" strokeWidth={2} />
               <span>{label}</span>
-              {active && (
-                <span
-                  className="absolute inset-x-3 -bottom-px h-px bg-gradient-to-r from-transparent via-otter-400 to-transparent"
-                  aria-hidden
-                />
-              )}
             </button>
           )
         })}
@@ -169,8 +159,8 @@ function TopNav({ current, onSelect }: TopNavProps) {
 }
 
 /**
- * Accueil section — toggle the floating toolbar, glance at status,
- * and shortcuts to manual sanitizer / library / etc.
+ * Accueil — toggle the floating toolbar + quick access cards.
+ * Pure otter-morphism: cream clay, coral CTA, aqua sheen.
  */
 function AccueilSection() {
   const apiRef = useRef<PresentOtterAPI | undefined>(window.api)
@@ -194,20 +184,20 @@ function AccueilSection() {
   }
 
   return (
-    <section className="mx-auto flex h-full max-w-4xl flex-col items-center justify-start gap-8 px-8 py-12">
-      <header className="flex flex-col items-center gap-3 text-center">
+    <section className="mx-auto flex h-full max-w-4xl flex-col items-center justify-start gap-10 px-8 py-12">
+      <header className="flex flex-col items-center gap-4 text-center">
         <div
-          className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-otter-400 to-otter-600 text-3xl shadow-glow-otter-lg ring-1 ring-otter-300/40"
+          className="otter-clay otter-aqua animate-bubble-slow relative flex h-20 w-20 items-center justify-center text-4xl"
           aria-hidden
         >
           🦦
         </div>
-        <h1 className="text-4xl font-bold tracking-tight">
-          Present<span className="text-otter-400">Otter</span>
+        <h1 className="font-display text-5xl font-black tracking-tight text-sea-700">
+          Present<span className="text-coral-400">Otter</span>
         </h1>
-        <p className="max-w-md text-sm text-otter-200/70">
+        <p className="max-w-md text-sm leading-relaxed text-cream-800/70">
           Annote, surligne et masque les secrets en direct par-dessus
-          n&apos;importe quelle application pendant tes partages d&apos;écran.
+          n&apos;importe quelle app pendant tes partages d&apos;écran.
         </p>
       </header>
 
@@ -215,40 +205,41 @@ function AccueilSection() {
         type="button"
         onClick={toggleToolbar}
         aria-pressed={toolbarOn}
-        className={`group relative flex flex-col items-center gap-3 rounded-3xl px-12 py-8 transition-all duration-300 ease-out ${
-          toolbarOn
-            ? 'bg-gradient-to-br from-otter-400 to-otter-600 text-white shadow-glow-otter-lg ring-1 ring-otter-300/40 hover:-translate-y-0.5'
-            : 'glass glass-shine hover:bg-white/[0.08] hover:-translate-y-0.5'
+        className={`group relative flex flex-col items-center gap-3 px-14 py-9 transition-all duration-300 ease-out otter-aqua ${
+          toolbarOn ? 'otter-clay-sea' : 'otter-clay-coral'
         }`}
+        style={{ borderRadius: 36 }}
       >
-        {toolbarOn && (
-          <span
-            className="absolute inset-0 rounded-3xl bg-gradient-to-tr from-white/30 to-transparent pointer-events-none"
-            aria-hidden
-          />
-        )}
         <Power
-          className={`relative h-10 w-10 transition-transform duration-300 ${toolbarOn ? 'scale-110' : 'group-hover:scale-110'}`}
+          className={`relative h-12 w-12 transition-transform duration-300 ${
+            toolbarOn ? 'scale-110' : 'group-hover:scale-110'
+          }`}
           strokeWidth={1.5}
         />
-        <span className="relative text-base font-semibold tracking-tight">
-          {toolbarOn ? 'Désactiver la barre d\'outils' : 'Activer la barre d\'outils'}
+        <span className="relative text-base font-bold tracking-tight">
+          {toolbarOn ? 'Désactiver la barre' : 'Activer la barre d\'outils'}
         </span>
-        <span className="relative text-xs text-otter-50/70">
+        <span className="relative text-xs opacity-90">
           {toolbarOn
-            ? 'La barre flotte au-dessus de toutes tes apps'
-            : 'Affiche la toolbar flottante au-dessus de toutes tes apps'}
+            ? 'La toolbar flotte au-dessus de tes apps'
+            : 'Affiche la toolbar flottante au-dessus de tes apps'}
         </span>
       </button>
 
-      <div className="flex items-center gap-2 text-xs text-otter-200/60">
-        <span
-          className={`relative h-2 w-2 rounded-full ${toolbarOn ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'bg-otter-700'}`}
-          aria-hidden
-        />
-        <span>
-          Toolbar {toolbarOn ? 'active' : 'inactive'} · l&apos;app reste ouverte
-          tant que cette fenêtre est ouverte
+      <div className="flex items-center gap-2">
+        <span className="otter-badge">
+          <span
+            className={`relative h-2 w-2 rounded-full ${
+              toolbarOn
+                ? 'bg-kelp-500 shadow-[0_0_8px_rgba(74,124,89,0.55)]'
+                : 'bg-cream-400'
+            }`}
+            aria-hidden
+          />
+          Toolbar {toolbarOn ? 'active' : 'inactive'}
+        </span>
+        <span className="text-[11px] text-cream-800/55">
+          · triple-tap <kbd className="font-mono text-cream-800">Alt</kbd> pour le curseur en évidence
         </span>
       </div>
 
@@ -273,20 +264,20 @@ function AccueilSection() {
         />
       </div>
 
-      <div className="grid w-full max-w-2xl grid-cols-2 gap-3 text-xs text-otter-200/60 sm:grid-cols-4">
+      <div className="grid w-full max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4">
         <Feature icon={Wand2} label="Annotations" />
         <Feature icon={ShieldCheck} label="Sanitizer LIVE" />
         <Feature icon={Crosshair} label="Curseur tracé" />
         <Feature icon={Sparkles} label="Multi-écran" />
       </div>
 
-      <footer className="mt-auto flex items-center gap-2 text-[11px] text-otter-200/40">
-        <span>PresentOtter v0.1 · OTTERWISE</span>
+      <footer className="mt-auto flex items-center gap-2 text-[11px] text-cream-800/50">
+        <span>PresentOtter v0.1 · 🦦 Otterwise Solutions</span>
         <span aria-hidden>·</span>
         <button
           type="button"
           onClick={() => navigate('settings')}
-          className="inline-flex items-center gap-1 hover:text-otter-200"
+          className="inline-flex items-center gap-1 transition-colors hover:text-sea-700"
         >
           <SettingsIcon className="h-3 w-3" /> Paramètres
         </button>
@@ -309,14 +300,17 @@ function ActionCard({ icon: Icon, title, description, onClick }: ActionCardProps
     <button
       type="button"
       onClick={onClick}
-      className="glass glass-interactive group flex items-start gap-3 rounded-2xl p-4 text-left"
+      className="otter-glass otter-aqua group flex items-start gap-3 p-4 text-left transition-all duration-300 hover:-translate-y-0.5 hover:shadow-glow-aqua"
     >
-      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-white/[0.06] border border-white/[0.1] text-otter-200 transition-colors group-hover:text-otter-100">
+      <div
+        className="otter-clay flex h-11 w-11 flex-shrink-0 items-center justify-center text-sea-700 transition-colors group-hover:text-coral-500"
+        style={{ borderRadius: 14 }}
+      >
         <Icon className="h-5 w-5" strokeWidth={1.75} />
       </div>
-      <div>
-        <p className="text-sm font-semibold text-otter-50">{title}</p>
-        <p className="mt-0.5 text-xs text-otter-200/60">{description}</p>
+      <div className="relative">
+        <p className="text-sm font-bold text-sea-700">{title}</p>
+        <p className="mt-1 text-xs leading-snug text-cream-800/65">{description}</p>
       </div>
     </button>
   )
@@ -329,8 +323,8 @@ interface FeatureProps {
 
 function Feature({ icon: Icon, label }: FeatureProps) {
   return (
-    <div className="flex items-center gap-2 rounded-xl bg-white/[0.04] border border-white/[0.06] px-3 py-2">
-      <Icon className="h-3.5 w-3.5 text-otter-300" strokeWidth={1.75} />
+    <div className="otter-badge !rounded-2xl !py-2.5 justify-center">
+      <Icon className="h-3.5 w-3.5 text-coral-400" strokeWidth={2} />
       <span>{label}</span>
     </div>
   )
