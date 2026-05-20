@@ -28,7 +28,7 @@ Délai constaté : **1 à 7 jours** (review humain). Une fois validé, le hash e
 ```
 Chemin local : C:\Users\maill\Documents\Presentotter\release\PresentOtter-Setup-0.1.0.exe
 Taille       : 72.89 MB
-SHA-256      : D51F8091D3E09BC95C244C0C12610CE9D51C5BEEFF4C0A5B385B53991DB38BF3
+SHA-256      : 2AA8DFBC23034593C73762543871787FD139B0E3BC9397F84F352C18DBDC10A2
 ```
 
 ### 2. Binaire principal (déployé par l'installeur)
@@ -36,7 +36,7 @@ SHA-256      : D51F8091D3E09BC95C244C0C12610CE9D51C5BEEFF4C0A5B385B53991DB38BF3
 ```
 Chemin local : C:\Users\maill\Documents\Presentotter\release\PresentOtter-win32-x64\PresentOtter.exe
 Taille       : 168.10 MB
-SHA-256      : B7665A0BB699AA596AE9609A6104AF6E05FEECB99D208EBCF636C0CCCAFC71E1
+SHA-256      : 12AE6770283011B22DC2E0C38ECEC1FCBC2110F599A987524A151C29993CB6F4
 ```
 
 > ⚠️ Si tu rebuild l'app après la soumission, les hash changent et il faut re-soumettre. Évite donc de rebuilder tant que la review n'est pas validée par mail.
