@@ -25,6 +25,7 @@ OTTERCAST_PRD.md
 PRESENTOTTER_CLAUDE_SKILLS.md
 .claude/settings.local.json
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 
 # Defense-in-depth — files that historically tend to contain credentials.
 # Note: this does NOT replace a proper secrets manager. Never store live
