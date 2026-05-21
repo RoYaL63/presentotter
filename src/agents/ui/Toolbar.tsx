@@ -103,7 +103,13 @@ export function Toolbar() {
         }
       }
       api.setTool(target)
-      api.setOverlayInteractive(target !== 'select')
+      // Spotlight is a passive viewer aid — the user should still be
+      // able to click the highlighted app underneath. So spotlight is
+      // treated as 'select' for interactivity: overlay click-through,
+      // no pointer capture. The spotlight visual still renders because
+      // it reads from the global cursor poll, not from canvas events.
+      const needsInteractive = target !== 'select' && target !== 'spotlight'
+      api.setOverlayInteractive(needsInteractive)
       // Spotlight follows the cursor live → tell main to (a) flip the
       // poll on/off and (b) broadcast the active flag to overlays so
       // they know whether to paint the dark wash + clear circle.
@@ -296,19 +302,17 @@ export function Toolbar() {
       style={{ background: 'transparent' }}
     >
       <div
-        className="glass glass-shine flex items-center gap-1.5 px-6 py-2 animate-fade-in-up"
+        className="glass glass-shine flex items-center gap-1.5 px-7 py-2.5 animate-fade-in-up"
         style={
           {
-            // Allow the user to drag the whole toolbar by default; specific
-            // controls opt out via `no-drag` below.
+            // Allow the user to drag the whole toolbar by default;
+            // specific controls opt out via `no-drag` below.
             WebkitAppRegion: 'drag',
-            // Capsule corners — the two ends round-off into the desktop so
-            // the bar reads as a single floating chip rather than a card.
-            // Inset highlight gives the top edge a soft sheen without the
-            // 64px halo the old shadow-glass-lg produced on transparent
-            // windows (the halo had nothing to land on and ended up looking
-            // like a strange aura).
-            borderRadius: 9999,
+            // Explicit pixel radius rather than 9999 — the clamp value
+            // is more deterministic across DPI scales, so the curves
+            // always render the same way and never get cropped at the
+            // window's hard edge.
+            borderRadius: 36,
             boxShadow:
               '0 6px 18px rgba(7, 33, 47, 0.32), 0 2px 6px rgba(7, 33, 47, 0.22), inset 0 1px 0 rgba(184, 224, 232, 0.18)'
           } as React.CSSProperties

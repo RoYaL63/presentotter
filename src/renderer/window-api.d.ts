@@ -56,6 +56,9 @@ declare global {
       ) => void
     ): () => void
     onClearLiveOcrWords(cb: () => void): () => void
+    onSetToolbarRect(
+      cb: (rect: { x: number; y: number; width: number; height: number } | null) => void
+    ): () => void
     liveAcquireTarget(): Promise<{
       sourceId: string
       displayId: number

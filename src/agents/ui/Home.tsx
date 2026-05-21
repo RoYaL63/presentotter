@@ -299,12 +299,24 @@ function AccueilSection() {
       </div>
 
       {/* SHORTCUTS — inline cheat sheet so the user discovers them
-          without opening the help modal. Six most-used bindings shown
-          in a row; the rest is one click away. */}
+          without opening the help modal. The Escape chip is rendered
+          first and styled larger because exiting a tool is the action
+          most users reach for; the rest is one click away. */}
       <div className="otter-glass otter-aqua flex flex-wrap items-center gap-2 px-3 py-2 text-[11px] text-sea-700">
         <Keyboard className="h-3.5 w-3.5 flex-shrink-0 text-coral-500" strokeWidth={2} />
         <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-sea-700/70">
           Raccourcis
+        </span>
+        {/* Pinned Escape chip — emphasized so the user can't miss it.
+            Coral background, bigger kbd, label "Quitter l'outil". */}
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full bg-coral-500 px-2.5 py-1 text-white ring-1 ring-coral-300/50 shadow-glow-coral"
+          title="Sortir de l'outil actif et revenir en passe-through"
+        >
+          <kbd className="rounded bg-white/95 px-2 py-0.5 font-mono text-[11px] font-bold text-coral-700 ring-1 ring-coral-700/15">
+            Échap
+          </kbd>
+          <span className="text-[11px] font-bold">Quitter l&apos;outil</span>
         </span>
         <ShortcutChip combo={['Alt', 'P']} label="Crayon" />
         <ShortcutChip combo={['Alt', 'R']} label="Rectangle" />

@@ -129,7 +129,11 @@ function createOverlayWindow(display: Display): BrowserWindow {
     maximizable: false,
     fullscreenable: false,
     skipTaskbar: true,
-    focusable: false,
+    // Born focusable so the text-tool inline input can receive keystrokes
+    // when we ask main to focus the window. Windows doesn't reliably apply
+    // a later setFocusable(true) after the window is already shown.
+    // Click-through is controlled by setIgnoreMouseEvents alone.
+    focusable: true,
     alwaysOnTop: true,
     hasShadow: false,
     show: false,
@@ -156,6 +160,9 @@ function createOverlayWindow(display: Display): BrowserWindow {
     if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
       toolbarWindow.moveTop()
     }
+    // Make sure THIS overlay knows where the toolbar is so its
+    // no-draw zone is correct on first render.
+    broadcastToolbarBounds()
   })
   win.on('closed', () => {
     overlayWindows.delete(display.id)
@@ -172,15 +179,37 @@ function spawnOverlayForAllDisplays(): void {
   }
 }
 
+/**
+ * Push the current toolbar bounds (screen coordinates) to every
+ * overlay. Overlays use this to ignore pointer-down events whose
+ * position falls inside the toolbar's rectangle — otherwise a stroke
+ * started while the cursor is over the toolbar would render UNDER the
+ * toolbar window, which looks like the pencil "writes through the bar".
+ */
+function broadcastToolbarBounds(): void {
+  if (toolbarWindow === null || toolbarWindow.isDestroyed()) {
+    forwardToOverlays('overlay:set-toolbar-rect', null)
+    return
+  }
+  const b = toolbarWindow.getBounds()
+  forwardToOverlays('overlay:set-toolbar-rect', {
+    x: b.x,
+    y: b.y,
+    width: b.width,
+    height: b.height
+  })
+}
+
 function createToolbarWindow(): BrowserWindow {
   const primary = screen.getPrimaryDisplay()
   const { x, width } = primary.workArea
-  // Window dimensions need slack on both axes so the inner capsule
-  // shape can draw its rounded ends without being clipped by the
-  // rectangular BrowserWindow frame. ~60 px of horizontal margin gives
-  // each side enough room for the 40 px radius.
-  const TOOLBAR_W = 1120
-  const TOOLBAR_H = 108
+  // Window dimensions: ~80 px of horizontal slack and ~24 px vertical
+  // so the inner 36 px radius corners always render fully inside the
+  // BrowserWindow frame. Earlier sizes (1040×100, 1120×108) had the
+  // content edge brushing the window edge on hi-DPI screens, which
+  // chopped the curve at the corner.
+  const TOOLBAR_W = 1180
+  const TOOLBAR_H = 112
 
   const win = new BrowserWindow({
     x: x + Math.floor((width - TOOLBAR_W) / 2),
@@ -211,7 +240,17 @@ function createToolbarWindow(): BrowserWindow {
 
   void win.loadURL(rendererUrl('toolbar'))
 
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => {
+    win.show()
+    broadcastToolbarBounds()
+  })
+  // Toolbar can be moved (drag region) or resized (minimize → restore).
+  // Each change needs to ripple to the overlays so their no-draw zone
+  // tracks the actual on-screen rectangle.
+  win.on('move', () => broadcastToolbarBounds())
+  win.on('resize', () => broadcastToolbarBounds())
+  win.on('show', () => broadcastToolbarBounds())
+  win.on('hide', () => forwardToOverlays('overlay:set-toolbar-rect', null))
   win.on('closed', () => {
     toolbarWindow = null
     // Closing the toolbar tears down overlays + cursor poll, but NOT the Home.
@@ -291,10 +330,10 @@ function setOverlaysInteractive(interactive: boolean): void {
     if (w.isDestroyed()) continue
     if (interactive) {
       w.setIgnoreMouseEvents(false)
-      w.setFocusable(true)
+      // Focusable stays TRUE (set at creation) so the text input
+      // accepts keystrokes when an overlay receives a focus request.
     } else {
       w.setIgnoreMouseEvents(true, { forward: true })
-      w.setFocusable(false)
     }
   }
   // On Windows, `alwaysOnTop: 'screen-saver'` on both the toolbar AND
@@ -502,7 +541,7 @@ function registerIpcHandlers(): void {
   })
   ipcMain.on('toolbar:restore', () => {
     if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
-    toolbarWindow.setSize(1120, 108, true)
+    toolbarWindow.setSize(1180, 112, true)
   })
 
   // Toolbar → Overlay(s)

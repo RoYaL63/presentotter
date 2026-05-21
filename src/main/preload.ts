@@ -126,6 +126,20 @@ const api = {
     return () => ipcRenderer.off('overlay:clear-live-ocr-words', handler)
   },
 
+  /** Overlay-side: receive the toolbar's current screen rectangle so
+   *  pointer-down events that land inside it can be skipped, keeping
+   *  strokes from being drawn underneath the toolbar window. */
+  onSetToolbarRect: (
+    cb: (rect: { x: number; y: number; width: number; height: number } | null) => void
+  ) => {
+    const handler = (
+      _e: unknown,
+      rect: { x: number; y: number; width: number; height: number } | null
+    ) => cb(rect)
+    ipcRenderer.on('overlay:set-toolbar-rect', handler)
+    return () => ipcRenderer.off('overlay:set-toolbar-rect', handler)
+  },
+
   /** Toggle whether the overlay catches pointer events (false = click-through). */
   setOverlayInteractive: (interactive: boolean) =>
     ipcRenderer.send('overlay:set-interactive', interactive),

@@ -77,6 +77,16 @@ export function Overlay() {
   // cursor-highlight visual (the user can have either, neither, or both).
   const spotlightActiveRef = useRef<boolean>(false)
   const spotlightStrokeRef = useRef<number>(4)
+  // Screen-space rectangle of the floating toolbar window (or null when
+  // hidden). When the user starts a stroke inside this rect, we skip it
+  // — otherwise the stroke would render UNDER the toolbar and look like
+  // the pencil writes "through" the buttons.
+  const toolbarRectRef = useRef<{
+    x: number
+    y: number
+    width: number
+    height: number
+  } | null>(null)
   // Live sanitizer masks render as DOM nodes (CSS backdrop-filter blur of the
   // pixels behind the overlay) rather than canvas fills — gives a real
   // frosted-glass blur on the secret, not an opaque black rectangle.
@@ -138,6 +148,9 @@ export function Overlay() {
       setOcrWords(words.length > 1000 ? words.slice(0, 1000) : words)
     })
     const off8c = api.onClearLiveOcrWords(() => setOcrWords([]))
+    const off8d = api.onSetToolbarRect((rect) => {
+      toolbarRectRef.current = rect
+    })
     const off9 = api.onCursorHighlight((enabled) => {
       cursorEnabledRef.current = enabled
       if (!enabled) {
@@ -237,6 +250,7 @@ export function Overlay() {
       off8()
       off8b()
       off8c()
+      off8d()
       off9()
       off9b()
       off10b()
@@ -385,6 +399,23 @@ export function Overlay() {
   // ----- Pointer interactions -----
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (tool === 'select') return
+    // If the click started inside the floating toolbar's screen area,
+    // do nothing. The toolbar lives in its own BrowserWindow so the
+    // click already routed there; ignoring it here also stops a stroke
+    // from being created underneath the toolbar.
+    const toolbarRect = toolbarRectRef.current
+    if (toolbarRect !== null) {
+      const screenX = e.clientX + window.screenX
+      const screenY = e.clientY + window.screenY
+      if (
+        screenX >= toolbarRect.x &&
+        screenX <= toolbarRect.x + toolbarRect.width &&
+        screenY >= toolbarRect.y &&
+        screenY <= toolbarRect.y + toolbarRect.height
+      ) {
+        return
+      }
+    }
     const target = e.currentTarget
     target.setPointerCapture(e.pointerId)
     const pt = { x: e.clientX, y: e.clientY }
