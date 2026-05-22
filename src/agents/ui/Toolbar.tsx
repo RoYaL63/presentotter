@@ -67,6 +67,14 @@ export function Toolbar() {
   const [showShareHint, setShowShareHint] = useState(true)
   const apiRef = useRef<PresentOtterAPI | undefined>(window.api)
   const engineRef = useRef<SanitizerLiveEngine | null>(null)
+  // Live masks need hysteresis: Tesseract OCR is non-deterministic and
+  // a single scan can miss a token that the previous scan caught. We
+  // keep each mask alive for STICKY_MASK_TTL_MS even if subsequent
+  // scans don't see it; a fresh detection at the same spot refreshes
+  // the TTL. Result: no flicker between scans.
+  const stickyMasksRef = useRef<
+    Array<LiveMask & { expiresAt: number }>
+  >([])
 
   // Per-tool defaults persisted via Tools page (auto-synced across windows
   // through the storage event hooked inside useToolSettingsStore).
@@ -169,17 +177,73 @@ export function Toolbar() {
   const handleClose = () => apiRef.current?.toolbarClose()
 
   const handleScanResult = useCallback((result: ScanResult) => {
+    const now = Date.now()
+    const STICKY_MASK_TTL_MS = 6000
+    // Match a mask from the previous run against a fresh one: same
+    // label AND centers within 30 px (in virtual-screen CSS coords).
+    // Loose enough to absorb tiny OCR jitter, tight enough to avoid
+    // mistaking two unrelated masks as the same.
+    const MATCH_DISTANCE_PX = 30
+    const sameRegion = (
+      a: LiveMask,
+      b: LiveMask & { expiresAt: number }
+    ): boolean => {
+      if (a.label !== b.label) return false
+      const acx = a.x + a.width / 2
+      const acy = a.y + a.height / 2
+      const bcx = b.x + b.width / 2
+      const bcy = b.y + b.height / 2
+      return Math.hypot(acx - bcx, acy - bcy) <= MATCH_DISTANCE_PX
+    }
+
+    const refreshedExpiry = now + STICKY_MASK_TTL_MS
+    const newSticky: Array<LiveMask & { expiresAt: number }> = []
+    // 1. Carry over previous masks that still have TTL left and are
+    //    NOT already represented in the fresh batch (we'll re-add
+    //    those next with refreshed positions).
+    for (const old of stickyMasksRef.current) {
+      if (old.expiresAt <= now) continue
+      const matched = result.masks.some((m) => sameRegion(m, old))
+      if (matched) continue // will be added by the fresh-mask loop below
+      newSticky.push(old)
+    }
+    // 2. Add (or refresh) every mask from the fresh scan.
+    for (const m of result.masks) {
+      newSticky.push({ ...m, expiresAt: refreshedExpiry })
+    }
+    stickyMasksRef.current = newSticky
+
+    // Status reflects what the LATEST scan actually saw, not the
+    // sticky carryover — useful to spot when OCR loses a region.
     setLiveStatus({
       count: result.masks.length,
       ms: result.scanDurationMs,
       words: result.wordCount,
       preview: result.preview,
-      at: Date.now()
+      at: now
     })
     setLiveError(null)
-    apiRef.current?.setLiveMasks(result.masks)
+    // Send the merged list (fresh + sticky) to the overlays so the
+    // user sees a stable masking even when individual scans wobble.
+    apiRef.current?.setLiveMasks(newSticky)
     apiRef.current?.setLiveOcrWords(result.ocrWords)
   }, [])
+
+  // Periodically prune expired sticky masks even if no new scan came
+  // in (e.g., user stopped looking at a page that had a secret on it).
+  useEffect(() => {
+    if (!liveOn) return
+    const id = window.setInterval(() => {
+      const now = Date.now()
+      const before = stickyMasksRef.current.length
+      const next = stickyMasksRef.current.filter((m) => m.expiresAt > now)
+      if (next.length !== before) {
+        stickyMasksRef.current = next
+        apiRef.current?.setLiveMasks(next)
+      }
+    }, 800)
+    return () => window.clearInterval(id)
+  }, [liveOn])
 
   // Push contextual flag changes to the running engine without restart.
   useEffect(() => {
@@ -194,6 +258,9 @@ export function Toolbar() {
       setLiveOn(false)
       setLiveStatus(null)
       setLivePhase(null)
+      // Empty the sticky pool — otherwise stopping and restarting
+      // LIVE in the same session would carry over stale masks.
+      stickyMasksRef.current = []
       api.clearLiveMasks()
       api.clearLiveOcrWords()
       if (engineRef.current) {
