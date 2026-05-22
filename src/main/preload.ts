@@ -303,7 +303,30 @@ const api = {
 
   // ---------- Misc ----------
 
-  appVersion: (): Promise<string> => ipcRenderer.invoke('app:version')
+  appVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
+
+  // ---------- Self-update ----------
+  checkForUpdate: (): Promise<{
+    currentVersion: string
+    latestVersion: string
+    upToDate: boolean
+    downloadUrl: string | null
+    downloadSizeMb: number | null
+    htmlUrl: string | null
+    publishedAt: string | null
+  }> => ipcRenderer.invoke('updates:check'),
+  downloadAndLaunchUpdate: (url: string): Promise<string> =>
+    ipcRenderer.invoke('updates:download-and-launch', url),
+  onUpdateProgress: (
+    cb: (p: { downloaded: number; total: number }) => void
+  ) => {
+    const handler = (
+      _e: unknown,
+      p: { downloaded: number; total: number }
+    ) => cb(p)
+    ipcRenderer.on('updates:download-progress', handler)
+    return () => ipcRenderer.off('updates:download-progress', handler)
+  }
 }
 
 contextBridge.exposeInMainWorld('api', api)

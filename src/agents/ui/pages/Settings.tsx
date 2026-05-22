@@ -1,19 +1,253 @@
-import { useState } from 'react'
-import { Film, Video } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Download,
+  ExternalLink,
+  Film,
+  Loader2,
+  RefreshCw,
+  Sparkles,
+  Video
+} from 'lucide-react'
 import type { CaptureConfig, ExportFormat } from '@interfaces'
+
+interface UpdateCheck {
+  currentVersion: string
+  latestVersion: string
+  upToDate: boolean
+  downloadUrl: string | null
+  downloadSizeMb: number | null
+  htmlUrl: string | null
+  publishedAt: string | null
+}
+
+type CheckState =
+  | { kind: 'idle' }
+  | { kind: 'checking' }
+  | { kind: 'result'; check: UpdateCheck }
+  | { kind: 'error'; message: string }
+
+type DownloadState =
+  | { kind: 'idle' }
+  | { kind: 'downloading'; downloaded: number; total: number }
+  | { kind: 'launching' }
+  | { kind: 'done'; path: string }
+  | { kind: 'error'; message: string }
 
 export function Settings() {
   const [fps, setFps] = useState<CaptureConfig['fps']>(30)
   const [format, setFormat] = useState<ExportFormat>('mp4')
+  const [check, setCheck] = useState<CheckState>({ kind: 'idle' })
+  const [download, setDownload] = useState<DownloadState>({ kind: 'idle' })
+
+  // The renderer never decides on a version on its own. The Vite-
+  // injected __APP_VERSION__ is the SAME source as the main process's
+  // app.getVersion() (both come from package.json#version), so the
+  // Home footer and this page always agree.
+  const buildVersion = __APP_VERSION__
+
+  // Wire up the download-progress events from main.
+  useEffect(() => {
+    const off = window.api?.onUpdateProgress(({ downloaded, total }) => {
+      setDownload((d) =>
+        d.kind === 'downloading' ? { kind: 'downloading', downloaded, total } : d
+      )
+    })
+    return off
+  }, [])
+
+  const handleCheck = useCallback(async () => {
+    if (window.api === undefined) return
+    setCheck({ kind: 'checking' })
+    try {
+      const res = await window.api.checkForUpdate()
+      setCheck({ kind: 'result', check: res })
+    } catch (err) {
+      setCheck({
+        kind: 'error',
+        message: err instanceof Error ? err.message : String(err)
+      })
+    }
+  }, [])
+
+  const handleDownload = useCallback(async () => {
+    if (window.api === undefined) return
+    if (check.kind !== 'result') return
+    const url = check.check.downloadUrl
+    if (url === null) return
+    setDownload({ kind: 'downloading', downloaded: 0, total: 0 })
+    try {
+      const path = await window.api.downloadAndLaunchUpdate(url)
+      setDownload({ kind: 'done', path })
+    } catch (err) {
+      setDownload({
+        kind: 'error',
+        message: err instanceof Error ? err.message : String(err)
+      })
+    }
+  }, [check])
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-8 p-8 lg:p-12">
       <header className="flex flex-col gap-1.5">
         <h1 className="text-4xl font-bold tracking-tight text-otter-50">Paramètres</h1>
         <p className="text-base text-otter-200/70">
-          Configure les valeurs par défaut de l'application.
+          Configure les valeurs par défaut de l&apos;application.
         </p>
       </header>
+
+      {/* About / version — large hero card at the top so the user
+          always sees which build is running. The Check + Download
+          buttons live right next to the number. */}
+      <div className="glass glass-shine flex flex-col gap-5 rounded-2xl p-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <span className="text-4xl" aria-hidden>🦦</span>
+            <div>
+              <p className="text-lg font-semibold text-otter-50">PresentOtter</p>
+              <p className="font-mono text-3xl font-black tracking-tight text-otter-50">
+                v{buildVersion}
+              </p>
+              <p className="mt-0.5 text-xs text-otter-200/60">
+                OTTERWISE Solutions · open-source MIT
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleCheck()}
+            disabled={check.kind === 'checking'}
+            className="inline-flex items-center gap-2 rounded-full bg-gradient-to-br from-coral-400 to-coral-500 px-5 py-2.5 text-sm font-bold text-white shadow-glow-coral ring-1 ring-coral-300/40 transition hover:from-coral-300 hover:to-coral-500 disabled:opacity-50"
+          >
+            {check.kind === 'checking' ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Vérification…
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4" />
+                Vérifier les mises à jour
+              </>
+            )}
+          </button>
+        </div>
+
+        {check.kind === 'error' && (
+          <div className="flex items-start gap-2 rounded-xl border border-red-400/40 bg-red-500/10 p-3 text-sm text-red-100">
+            <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-300" />
+            <div>
+              <p className="font-semibold">Impossible de vérifier la version</p>
+              <p className="text-xs text-red-200/75">{check.message}</p>
+              <p className="mt-1 text-[10px] text-red-200/55">
+                Pas de connexion internet ? Tu peux toujours télécharger manuellement
+                depuis github.com/RoYaL63/presentotter/releases.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {check.kind === 'result' && check.check.upToDate && (
+          <div className="flex items-start gap-2 rounded-xl border border-kelp-400/40 bg-kelp-400/10 p-3 text-sm text-kelp-100">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-kelp-300" />
+            <div>
+              <p className="font-semibold">Tu es à jour</p>
+              <p className="text-xs text-kelp-100/70">
+                Dernière version publiée :{' '}
+                <span className="font-mono">v{check.check.latestVersion}</span>
+              </p>
+            </div>
+          </div>
+        )}
+
+        {check.kind === 'result' && !check.check.upToDate && (
+          <div className="flex flex-col gap-3 rounded-xl border border-coral-400/45 bg-coral-500/10 p-4 text-sm text-coral-100">
+            <div className="flex items-start gap-2">
+              <Sparkles className="mt-0.5 h-4 w-4 flex-shrink-0 text-coral-300" />
+              <div className="flex-1">
+                <p className="font-semibold text-otter-50">
+                  Une nouvelle version est disponible :{' '}
+                  <span className="font-mono">v{check.check.latestVersion}</span>
+                </p>
+                <p className="mt-0.5 text-xs text-coral-100/80">
+                  {check.check.downloadSizeMb !== null
+                    ? `Setup.exe de ${check.check.downloadSizeMb} MB. `
+                    : ''}
+                  Le téléchargement se fait dans le dossier temporaire de Windows, puis
+                  l&apos;installeur s&apos;ouvre — suis le wizard pour finir.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {download.kind === 'idle' && check.check.downloadUrl !== null && (
+                <button
+                  type="button"
+                  onClick={() => void handleDownload()}
+                  className="inline-flex items-center gap-2 rounded-full bg-coral-500 px-4 py-2 text-sm font-bold text-white ring-1 ring-coral-300/50 shadow-glow-coral transition hover:bg-coral-400"
+                >
+                  <Download className="h-4 w-4" />
+                  Télécharger et installer
+                </button>
+              )}
+              {download.kind === 'downloading' && (
+                <div className="flex w-full flex-col gap-1.5">
+                  <div className="flex items-center gap-2 text-xs text-otter-100">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Téléchargement…{' '}
+                    {download.total > 0
+                      ? `${(download.downloaded / 1024 / 1024).toFixed(1)} / ${(
+                          download.total / 1024 / 1024
+                        ).toFixed(1)} MB`
+                      : `${(download.downloaded / 1024 / 1024).toFixed(1)} MB`}
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full bg-gradient-to-r from-coral-400 to-coral-500 transition-[width] duration-150"
+                      style={{
+                        width:
+                          download.total > 0
+                            ? `${Math.min(100, (download.downloaded / download.total) * 100)}%`
+                            : '12%'
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+              {download.kind === 'done' && (
+                <div className="inline-flex items-center gap-2 text-xs font-semibold text-kelp-200">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Installeur ouvert — suis le wizard.
+                </div>
+              )}
+              {download.kind === 'error' && (
+                <div className="inline-flex items-center gap-2 text-xs font-semibold text-red-200">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  {download.message}
+                </div>
+              )}
+              {check.check.htmlUrl !== null && (
+                <a
+                  href={check.check.htmlUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-auto inline-flex items-center gap-1 text-[11px] font-semibold text-otter-200/75 hover:text-otter-100"
+                >
+                  Voir les notes <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+
+        {check.kind === 'idle' && (
+          <p className="text-xs text-otter-200/60">
+            Clique sur « Vérifier les mises à jour » pour comparer ta version locale à
+            la dernière publiée sur GitHub. Rien n&apos;est téléchargé tant que tu ne le
+            demandes pas.
+          </p>
+        )}
+      </div>
 
       {/* Capture section */}
       <div className="glass glass-shine flex flex-col gap-5 rounded-2xl p-6">
@@ -77,20 +311,6 @@ export function Settings() {
             <option value="gif" className="bg-deep-900">GIF — social</option>
           </select>
         </div>
-      </div>
-
-      {/* About / version */}
-      <div className="glass-subtle flex items-center justify-between rounded-2xl p-5">
-        <div className="flex items-center gap-3 text-sm">
-          <span className="text-2xl" aria-hidden>🦦</span>
-          <div>
-            <p className="font-semibold text-otter-100">PresentOtter</p>
-            <p className="text-xs text-otter-200/60">v0.1.0-alpha · OTTERWISE Solutions</p>
-          </div>
-        </div>
-        <span className="rounded-full bg-otter-500/15 border border-otter-400/30 px-3 py-1 text-xs font-medium uppercase tracking-wider text-otter-300">
-          Pre-release
-        </span>
       </div>
     </section>
   )

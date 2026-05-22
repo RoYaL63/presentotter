@@ -14,6 +14,7 @@ import {
 import { promises as fsp, accessSync, constants as fsConstants } from 'node:fs'
 import path from 'path'
 import { startTripleAltDetector, stopTripleAltDetector } from './triple-alt-detector'
+import { checkForUpdate, downloadAndLaunch, type UpdateCheck } from './updater'
 
 /**
  * PresentOtter main process.
@@ -398,6 +399,19 @@ function registerIpcHandlers(): void {
   ipcMain.handle('window:get-role', (event) => getWindowRole(event.sender))
   ipcMain.handle('app:version', () => app.getVersion())
   ipcMain.handle('toolbar:is-enabled', () => toolbarWindow !== null && !toolbarWindow.isDestroyed())
+
+  // Updates — see src/main/updater.ts. The renderer triggers a check,
+  // we hit the GitHub Releases API. If the user opts in, we download
+  // the installer to %TEMP%\presentotter-updates\ and launch it.
+  ipcMain.handle('updates:check', async (): Promise<UpdateCheck> => {
+    return await checkForUpdate()
+  })
+  ipcMain.handle('updates:download-and-launch', async (event, url: string) => {
+    return await downloadAndLaunch(url, (downloaded, total) => {
+      // Progress fan-out so the renderer can drive a bar.
+      event.sender.send('updates:download-progress', { downloaded, total })
+    })
+  })
 
   /** Recording — enumerate capturable sources for the source picker.
    *  Returns small base64 thumbnails so the renderer can show a live

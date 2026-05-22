@@ -333,23 +333,36 @@ function AccueilSection() {
         </button>
       </div>
 
-      {/* FOOTER — version + tip + settings shortcut on a single row. */}
-      <footer className="mt-auto flex flex-wrap items-center justify-between gap-2 text-[11px] text-cream-800/60">
-        <span className="inline-flex items-center gap-1">
+      {/* FOOTER — version + tip + settings shortcut on a single row.
+          Version is INJECTED from package.json at build (vite define
+          __APP_VERSION__) so it can never drift from the actual
+          installed build. Click → opens the Settings → Mises à jour
+          section directly so the user can check / download. */}
+      <footer className="mt-auto flex flex-wrap items-center justify-between gap-3 text-xs text-cream-800/70">
+        <span className="inline-flex items-center gap-1.5">
           Triple-tap{' '}
-          <kbd className="rounded bg-white/55 px-1.5 py-0.5 font-mono text-[10px] text-sea-700 ring-1 ring-white/60">
+          <kbd className="rounded bg-white/55 px-2 py-0.5 font-mono text-[11px] font-semibold text-sea-700 ring-1 ring-white/60">
             Alt
           </kbd>{' '}
           pour le curseur en évidence
         </span>
         <span className="inline-flex items-center gap-2">
-          <span>PresentOtter v0.3 · 🦦 Otterwise</span>
           <button
             type="button"
             onClick={() => navigate('settings')}
-            className="inline-flex items-center gap-1 transition-colors hover:text-sea-700"
+            className="inline-flex items-center gap-1.5 rounded-full bg-white/55 px-3 py-1 font-semibold text-sea-700 ring-1 ring-white/65 transition hover:bg-white/85"
+            title="Voir les paramètres et chercher une mise à jour"
           >
-            <SettingsIcon className="h-3 w-3" /> Paramètres
+            <span>PresentOtter v{__APP_VERSION__}</span>
+            <span aria-hidden>·</span>
+            <span>🦦 Otterwise</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('settings')}
+            className="inline-flex items-center gap-1 text-sea-700/70 transition-colors hover:text-sea-700"
+          >
+            <SettingsIcon className="h-3.5 w-3.5" /> Paramètres
           </button>
         </span>
       </footer>

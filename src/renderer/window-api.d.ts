@@ -135,6 +135,19 @@ declare global {
     onOpenSanitizer(cb: () => void): () => void
     openShortcuts(): void
     onOpenShortcuts(cb: () => void): () => void
+    checkForUpdate(): Promise<{
+      currentVersion: string
+      latestVersion: string
+      upToDate: boolean
+      downloadUrl: string | null
+      downloadSizeMb: number | null
+      htmlUrl: string | null
+      publishedAt: string | null
+    }>
+    downloadAndLaunchUpdate(url: string): Promise<string>
+    onUpdateProgress(
+      cb: (p: { downloaded: number; total: number }) => void
+    ): () => void
   }
 
   interface Window {
