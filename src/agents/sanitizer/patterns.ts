@@ -82,6 +82,16 @@ export const PATTERNS: SanitizePatternWithType[] = [
     zoneType: 'api-key'
   },
   {
+    // Notion internal integration token — what you get in "Jeton
+    // d'intégration" → "Jeton d'accès" on a Notion workspace's API
+    // settings. The `ntn_` prefix is mandatory.
+    name: 'notion-integration-token',
+    regex: /\bntn_[A-Za-z0-9]{20,}\b/g,
+    replacement: '[REDACTED:notion-token]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
     name: 'aws-access-key',
     regex: /AKIA[0-9A-Z]{16}/g,
     replacement: '[REDACTED:aws-access-key]',

@@ -464,12 +464,18 @@ export class SanitizerLiveEngine {
     words: TesseractWord[]
   ): Array<{ x0: number; y0: number; x1: number; y1: number; label: string }> {
     const KEYWORDS =
-      /^(secret|secrets|password|passwords|mot|pwd|token|tokens|cle|clé|cles|clés|key|keys|credential|credentials|api[_-]?key|client[_-]?secret|access[_-]?token|bearer|auth)s?[:.;,]*$/i
-    // Values that pass the shape filter: alphanumeric + the small set of
-    // separator chars that appear in credentials. We KEEP `*` so a
-    // server-side-redacted `****tuy6` is still flagged when the label
-    // next to it says "secret".
+      /^(secret|secrets|password|passwords|mot|pwd|token|tokens|jeton|jetons|cle|clé|cles|clés|key|keys|credential|credentials|api[_-]?key|client[_-]?secret|access[_-]?token|bearer|auth)s?[:.;,]*$/i
+    // A candidate value must look credential-shaped, NOT like a normal
+    // word. Two rules combined:
+    //   - VALUE_RE  : allowed character set, ≥6 chars
+    //   - HAS_TOKEN_LIKE_CHAR : at least one digit OR one of _ - / + = . :
+    //     The second rule rules out plain French/English words like
+    //     "personne" / "disposant" / "toute" that happen to share a line
+    //     with the word "secret" in a flowing sentence ("Gardez-le
+    //     secret, car toute personne disposant…"). Real credentials
+    //     almost always contain either a digit or a separator.
     const VALUE_RE = /^[A-Za-z0-9_\-./+=:*]{6,}$/
+    const HAS_TOKEN_LIKE_CHAR = /[\d_\-./+=:*]/
     // Things that look like values but aren't credentials.
     const DATE_RE = /^\d{1,4}[-/]\d{1,2}([-/]\d{1,4})?$/
     const NUM_RE = /^\d+([.,]\d+)?$/
@@ -495,6 +501,7 @@ export class SanitizerLiveEngine {
         if (isFiller && !consumedNearbyKeyword) continue
         consumedNearbyKeyword = true
         if (!VALUE_RE.test(v.text)) continue
+        if (!HAS_TOKEN_LIKE_CHAR.test(v.text)) continue
         if (DATE_RE.test(v.text) || NUM_RE.test(v.text)) continue
         // Mask just this one value and stop — we don't want to keep
         // masking subsequent words on the same line.

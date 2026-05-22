@@ -50,6 +50,11 @@ const CASES: PatternCase[] = [
     negative: 'GOCSPX-short'
   },
   {
+    name: 'notion-integration-token',
+    positive: 'token=ntn_6348669676175nZEfrfLwC5lvXDuZpguLK9Vbmx08 end',
+    negative: 'ntn_short'
+  },
+  {
     name: 'aws-access-key',
     positive: 'AKIAIOSFODNN7EXAMPLE is the key',
     negative: 'AKIA-short or just AKIA123'
