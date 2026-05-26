@@ -178,23 +178,32 @@ export function Toolbar() {
 
   const handleScanResult = useCallback((result: ScanResult) => {
     const now = Date.now()
-    const STICKY_MASK_TTL_MS = 6000
-    // Match a mask from the previous run against a fresh one: same
-    // label AND centers within 30 px (in virtual-screen CSS coords).
-    // Loose enough to absorb tiny OCR jitter, tight enough to avoid
-    // mistaking two unrelated masks as the same.
-    const MATCH_DISTANCE_PX = 30
+    // 15 s sticky TTL (was 6 s). At 1 s scan cadence that's 15 chances
+    // to re-detect the same secret before its mask expires, so a streak
+    // of OCR misses no longer causes a visible flicker.
+    const STICKY_MASK_TTL_MS = 15000
+    // Match a fresh mask against a sticky one via bbox overlap. Since
+    // masks are now horizontal stripes (full row to the right edge),
+    // two masks on the same row will overlap massively and merge into
+    // a single refresh, regardless of label. We deliberately drop the
+    // strict label-equality check: OCR sometimes misreads characters
+    // around the secret, which flips a regex hit to a contextual hit
+    // and back, causing flicker. The position is what matters.
+    const MIN_OVERLAP_RATIO = 0.3
+    const overlapRatio = (a: LiveMask, b: LiveMask): number => {
+      const ix = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x))
+      const iy = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y))
+      const inter = ix * iy
+      if (inter === 0) return 0
+      const aArea = a.width * a.height
+      const bArea = b.width * b.height
+      const minArea = Math.min(aArea, bArea)
+      return minArea > 0 ? inter / minArea : 0
+    }
     const sameRegion = (
       a: LiveMask,
       b: LiveMask & { expiresAt: number }
-    ): boolean => {
-      if (a.label !== b.label) return false
-      const acx = a.x + a.width / 2
-      const acy = a.y + a.height / 2
-      const bcx = b.x + b.width / 2
-      const bcy = b.y + b.height / 2
-      return Math.hypot(acx - bcx, acy - bcy) <= MATCH_DISTANCE_PX
-    }
+    ): boolean => overlapRatio(a, b) >= MIN_OVERLAP_RATIO
 
     const refreshedExpiry = now + STICKY_MASK_TTL_MS
     const newSticky: Array<LiveMask & { expiresAt: number }> = []
@@ -277,7 +286,9 @@ export function Toolbar() {
       const engine = new SanitizerLiveEngine()
       engine.setContextual(sanitizerSettings.contextual)
       engineRef.current = engine
-      await engine.start(2000, handleScanResult, (phase) => setLivePhase(phase))
+      // 1 s cadence — see DEFAULT_INTERVAL_MS in sanitizer-live.ts for
+      // the rationale (paired with the 15 s sticky pool below).
+      await engine.start(1000, handleScanResult, (phase) => setLivePhase(phase))
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       console.error('[toolbar] live sanitizer failed to start:', err)

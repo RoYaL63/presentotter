@@ -85,7 +85,10 @@ interface CaptureTarget {
 }
 
 const MAX_SCAN_WIDTH = 1280
-const DEFAULT_INTERVAL_MS = 2000
+// 1 s cadence (was 2 s) shrinks the worst-case "secret visible" window.
+// Combined with the sticky pool (15 s TTL + overlap matching) on the
+// Toolbar side, a single missed scan no longer causes a flicker.
+const DEFAULT_INTERVAL_MS = 1000
 
 /**
  * getUserMedia constraints for Electron's desktop-capture pipeline.
@@ -333,6 +336,16 @@ export class SanitizerLiveEngine {
     const offY = t?.bounds.y ?? 0
     const toCssX = (px: number): number => (px * scaleX) / dpi + offX
     const toCssY = (px: number): number => (px * scaleY) / dpi + offY
+    // Right edge of the captured display in virtual-screen CSS space.
+    // Masks become horizontal stripes from the detected x position all
+    // the way to this edge. Two reasons:
+    //   1. OCR's bbox jitter between scans no longer pulls the mask off
+    //      the secret — even if the new bbox shifts a few px right, the
+    //      stripe still covers the original column.
+    //   2. Most secrets sit at the end of a labeled line ("Token: xyz"
+    //      or "Code: *****tuy6") with nothing useful to their right, so
+    //      over-masking the trailing whitespace is harmless.
+    const displayRightCss = offX + (t?.bounds.width ?? 0)
 
     // Build the flat OCR text + a char-range → word index lookup so we can
     // map each regex hit back to the words that produced it.
@@ -384,7 +397,12 @@ export class SanitizerLiveEngine {
         const PAD = 4
         const cssX = toCssX(x0) - PAD
         const cssY = toCssY(y0) - PAD
-        const cssW = (x1 - x0) * scaleX / dpi + PAD * 2
+        // Stripe to the right edge of the display rather than just
+        // covering the matched word — absorbs OCR x-jitter completely.
+        const cssW = Math.max(
+          (x1 - x0) * scaleX / dpi + PAD * 2,
+          displayRightCss - cssX
+        )
         const cssH = (y1 - y0) * scaleY / dpi + PAD * 2
         masks.push({
           x: Math.floor(cssX),
@@ -410,7 +428,11 @@ export class SanitizerLiveEngine {
       const PAD = 4
       const cssX = toCssX(ctxMask.x0) - PAD
       const cssY = toCssY(ctxMask.y0) - PAD
-      const cssW = (ctxMask.x1 - ctxMask.x0) * scaleX / dpi + PAD * 2
+      // Same stripe-to-right-edge trick as the regex pass above.
+      const cssW = Math.max(
+        (ctxMask.x1 - ctxMask.x0) * scaleX / dpi + PAD * 2,
+        displayRightCss - cssX
+      )
       const cssH = (ctxMask.y1 - ctxMask.y0) * scaleY / dpi + PAD * 2
       masks.push({
         x: Math.floor(cssX),
