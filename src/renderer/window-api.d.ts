@@ -24,8 +24,21 @@ declare global {
   }
 
   interface PresentOtterAPI {
-    getRole(): Promise<'home' | 'toolbar' | 'overlay' | 'console'>
+    getRole(): Promise<'home' | 'toolbar' | 'overlay' | 'console' | 'mirror'>
     appVersion(): Promise<string>
+
+    // ---------- Mirror window ----------
+    openMirror(): void
+    mirrorListDisplays(): Promise<
+      Array<{
+        displayId: number
+        sourceId: string
+        label: string
+        bounds: { x: number; y: number; width: number; height: number }
+        scaleFactor: number
+        isPrimary: boolean
+      }>
+    >
 
     enableToolbar(): void
     disableToolbar(): void

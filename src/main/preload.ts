@@ -21,7 +21,7 @@ export type ToolName =
 
 const api = {
   /** Identify which window this renderer belongs to. */
-  getRole: (): Promise<'home' | 'toolbar' | 'overlay' | 'console'> =>
+  getRole: (): Promise<'home' | 'toolbar' | 'overlay' | 'console' | 'mirror'> =>
     ipcRenderer.invoke('window:get-role'),
 
   // ---------- Home → toolbar lifecycle ----------
@@ -49,6 +49,25 @@ const api = {
 
   /** Ask main which display to capture and how to translate its pixels
    *  into the virtual-screen CSS coordinates used by the overlays. */
+  // ---------- Mirror window ----------
+
+  /** Open (or focus) the live Mirror window — the one the user shares
+   *  in Meet/Zoom when they're presenting in tab or window mode. */
+  openMirror: () => ipcRenderer.send('mirror:open'),
+
+  /** List every display PresentOtter can capture for the mirror, with
+   *  the desktopCapturer sourceId plus CSS bounds + DPI. */
+  mirrorListDisplays: (): Promise<
+    Array<{
+      displayId: number
+      sourceId: string
+      label: string
+      bounds: { x: number; y: number; width: number; height: number }
+      scaleFactor: number
+      isPrimary: boolean
+    }>
+  > => ipcRenderer.invoke('mirror:list-displays'),
+
   liveAcquireTarget: (): Promise<{
     sourceId: string
     displayId: number

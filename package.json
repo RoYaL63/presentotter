@@ -1,6 +1,6 @@
 {
   "name": "presentotter",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Open source screen recorder for no-code educators",
   "main": "dist/main/main.js",
   "homepage": "https://github.com/RoYaL63/presentotter",

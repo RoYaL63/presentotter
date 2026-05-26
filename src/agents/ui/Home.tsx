@@ -3,6 +3,7 @@ import {
   Home as HomeIcon,
   Keyboard,
   Library as LibraryIcon,
+  MonitorPlay,
   Power,
   Settings as SettingsIcon,
   ShieldCheck,
@@ -269,14 +270,21 @@ function AccueilSection() {
         </span>
       </button>
 
-      {/* QUICK ACTIONS — 4 cards on one row so the whole page fits. */}
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+      {/* QUICK ACTIONS — 5 cards on one row. Mirror sits next to Enregistrer
+          because both are about sharing/capturing the screen. */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
         <ActionCard
           icon={Video}
           title="Enregistrer"
           description="Écran, audio, webcam, fond"
           onClick={() => setRecordingOpen(true)}
           highlight
+        />
+        <ActionCard
+          icon={MonitorPlay}
+          title="Miroir Meet"
+          description="Fenêtre à partager dans Meet/Zoom"
+          onClick={() => apiRef.current?.openMirror()}
         />
         <ActionCard
           icon={ShieldCheck}

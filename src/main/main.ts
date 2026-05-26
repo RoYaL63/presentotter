@@ -43,6 +43,15 @@ import { checkForUpdate, downloadAndLaunch, type UpdateCheck } from './updater'
 let homeWindow: BrowserWindow | null = null
 let toolbarWindow: BrowserWindow | null = null
 const overlayWindows = new Map<number, BrowserWindow>() // keyed by Display.id
+/**
+ * Mirror window — a normal framed Chrome window that displays a live
+ * composite of the captured screen (which DWM already composes with our
+ * transparent overlay, so annotations & cursor halo are baked in). The
+ * user shares THIS window in Meet/Zoom so participants see annotations
+ * even in tab/window-share modes where the system would otherwise
+ * filter out our floating overlays.
+ */
+let mirrorWindow: BrowserWindow | null = null
 let cursorInterval: ReturnType<typeof setInterval> | null = null
 let cursorHighlightOn = false
 /** True while the spotlight tool is selected. Drives the same cursor
@@ -54,7 +63,7 @@ const isDev = !app.isPackaged
 const DEV_URL = 'http://localhost:5173'
 const CURSOR_POLL_MS = 16
 
-function rendererUrl(hash: 'home' | 'toolbar' | 'overlay'): string {
+function rendererUrl(hash: 'home' | 'toolbar' | 'overlay' | 'mirror'): string {
   if (isDev) {
     return `${DEV_URL}/#${hash}`
   }
@@ -62,9 +71,12 @@ function rendererUrl(hash: 'home' | 'toolbar' | 'overlay'): string {
   return `file://${filePath}#${hash}`
 }
 
-function getWindowRole(wc: WebContents): 'home' | 'toolbar' | 'overlay' {
+function getWindowRole(
+  wc: WebContents
+): 'home' | 'toolbar' | 'overlay' | 'mirror' {
   if (homeWindow && wc.id === homeWindow.webContents.id) return 'home'
   if (toolbarWindow && wc.id === toolbarWindow.webContents.id) return 'toolbar'
+  if (mirrorWindow && wc.id === mirrorWindow.webContents.id) return 'mirror'
   for (const w of overlayWindows.values()) {
     if (w.webContents.id === wc.id) return 'overlay'
   }
@@ -292,6 +304,72 @@ function closeToolbarAndOverlays(): void {
   }
   overlayWindows.clear()
   stopCursorTracking()
+}
+
+// ============================================================================
+// Mirror window — live composite for Meet/Zoom "Share a window" mode
+// ============================================================================
+//
+// Meet & Zoom can capture either (a) the whole screen, (b) a specific
+// window, or (c) a Chrome tab. In modes (b) and (c) the OS feeds only
+// the pixels of the chosen HWND/tab — our floating overlay (which lives
+// in its OWN window on top of everything else) is filtered out by the
+// capture pipeline. The user sees their cursor halo and pencil strokes
+// locally, but participants see nothing.
+//
+// The mirror is a normal framed Chrome window that displays a live
+// MediaStream of the screen, captured via desktopCapturer + getUserMedia
+// in the renderer. Because DWM composes the screen WITH the transparent
+// overlay before any capture API reads pixels, the mirror's framebuffer
+// already contains the annotations + cursor halo. The user shares the
+// mirror window in Meet ("Une fenêtre" → "PresentOtter Mirror") and the
+// participants see the composited result.
+//
+// Limitations:
+//   - ~100-150ms extra latency (capture → mirror → re-capture by Meet).
+//   - On a single-monitor setup, placing the mirror on the same display
+//     it's capturing creates a visible feedback loop. The UI invites the
+//     user to drag it into a corner / use a second monitor.
+
+function createMirrorWindow(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 720,
+    minWidth: 640,
+    minHeight: 360,
+    title: 'PresentOtter Mirror',
+    backgroundColor: '#0A1419',
+    // Normal Chrome window — frame, resizable, not always-on-top. The
+    // whole point is that Meet/Zoom see this as a regular HWND they
+    // can capture in "window-share" mode.
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      backgroundThrottling: false
+    }
+  })
+
+  void win.loadURL(rendererUrl('mirror'))
+
+  win.once('ready-to-show', () => win.show())
+  win.on('closed', () => {
+    mirrorWindow = null
+  })
+
+  return win
+}
+
+function openMirrorWindow(): void {
+  if (mirrorWindow !== null && !mirrorWindow.isDestroyed()) {
+    if (mirrorWindow.isMinimized()) mirrorWindow.restore()
+    mirrorWindow.show()
+    mirrorWindow.focus()
+    return
+  }
+  mirrorWindow = createMirrorWindow()
 }
 
 /**
@@ -541,6 +619,40 @@ function registerIpcHandlers(): void {
       bounds: display.bounds,
       scaleFactor: display.scaleFactor
     }
+  })
+
+  /** Open (or focus) the Mirror window so the user can share it in Meet. */
+  ipcMain.on('mirror:open', () => {
+    openMirrorWindow()
+  })
+
+  /**
+   * Mirror window asks for the list of capturable displays. Each entry
+   * carries the desktopCapturer sourceId (for getUserMedia) + the CSS
+   * bounds + DPI so the renderer can choose the right one and render at
+   * the matching aspect ratio.
+   */
+  ipcMain.handle('mirror:list-displays', async () => {
+    const displays = screen.getAllDisplays()
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: 0, height: 0 }
+    })
+    return displays.map((d) => {
+      const wanted = String(d.id)
+      const match = sources.find(
+        (s: Electron.DesktopCapturerSource & { display_id?: string }) =>
+          s.display_id === wanted
+      ) ?? sources[0]
+      return {
+        displayId: d.id,
+        sourceId: match?.id ?? '',
+        label: match?.name ?? `Écran ${d.id}`,
+        bounds: d.bounds,
+        scaleFactor: d.scaleFactor,
+        isPrimary: d.id === screen.getPrimaryDisplay().id
+      }
+    })
   })
 
   // Home → main: toggle toolbar
