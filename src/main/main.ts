@@ -5,6 +5,7 @@ import {
   dialog,
   globalShortcut,
   ipcMain,
+  Menu,
   screen,
   session,
   shell,
@@ -917,6 +918,13 @@ function setupDisplayHotPlug(): void {
 app
   .whenReady()
   .then(() => {
+    // Kill the default application menu (File / Edit / View / Window /
+    // Help). With frame:false on the toolbar the menu was leaking
+    // through as a thin band underneath the capsule whenever Alt was
+    // pressed — Windows pops the menu mnemonic overlay on Alt, and our
+    // global Alt+P / Alt+R shortcuts trigger that path. Nuking the
+    // menu entirely also speeds up Alt-shortcuts a hair.
+    Menu.setApplicationMenu(null)
     configureDisplayMedia()
     registerIpcHandlers()
     homeWindow = createHomeWindow()
