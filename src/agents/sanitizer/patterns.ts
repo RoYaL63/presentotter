@@ -43,9 +43,12 @@ export const PATTERNS: SanitizePatternWithType[] = [
   {
     // Catches OpenAI (`sk-XXX`), Stripe (`sk_live_XXX`, `sk_test_XXX`),
     // and any other vendor that uses an `sk` prefix followed by `-` or `_`.
-    // 16+ chars after the prefix to avoid matching `sk-foo` in a sentence.
+    // Body allows `-` so multi-segment tokens like `sk-proj-abc-xyz` and
+    // Anthropic-style `sk-ant-xxx` (when the more specific regex misses
+    // them) still get caught here. 16+ body chars rule out `sk-foo` in a
+    // sentence.
     name: 'sk-prefixed-key',
-    regex: /\bsk[-_][A-Za-z0-9_]{16,}\b/g,
+    regex: /\bsk[-_][A-Za-z0-9_-]{16,}\b/g,
     replacement: '[REDACTED:sk-key]',
     confidence: 0.95,
     zoneType: 'api-key'

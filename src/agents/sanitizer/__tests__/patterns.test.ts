@@ -105,7 +105,11 @@ const CASES: PatternCase[] = [
   },
   {
     name: 'openai-project-key',
-    positive: 'OPENAI_API_KEY=sk-proj-aBcDeF1234567890abcdef1234567890',
+    // Real OpenAI project keys contain internal hyphens (e.g.,
+    // `sk-proj--XX_y--XYZ...`). Cover that shape explicitly so any
+    // future tweak to the regex doesn't regress on it.
+    positive:
+      'OPENAI_API_KEY=sk-proj--aBcD_y--XtWcE1On8RmxBptXfJF1234567890',
     negative: 'sk-proj-tiny'
   },
   {
