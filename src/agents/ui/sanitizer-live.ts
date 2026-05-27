@@ -84,11 +84,15 @@ interface CaptureTarget {
   scaleFactor: number
 }
 
-const MAX_SCAN_WIDTH = 1280
-// 1 s cadence (was 2 s) shrinks the worst-case "secret visible" window.
-// Combined with the sticky pool (15 s TTL + overlap matching) on the
-// Toolbar side, a single missed scan no longer causes a flicker.
-const DEFAULT_INTERVAL_MS = 1000
+// 960 px (was 1280) shaves ~30% off every Tesseract pass while keeping
+// 1080p text at ~8-10 px high — still well within Tesseract's reliable
+// zone with PSM 11 (sparse text).
+const MAX_SCAN_WIDTH = 960
+// 250 ms cadence (was 1 s) means the engine notices a frame change in
+// at most a quarter second. Hash check is ~3 ms so the extra ticks
+// cost almost nothing — the heavy OCR only runs when something
+// actually changed.
+const DEFAULT_INTERVAL_MS = 250
 // Tiny thumbnail used to fingerprint each frame. 16×9 = 144 cells is
 // enough to detect "the user moved their mouse / scrolled" vs "the
 // screen is the same as 1 s ago" without burning real CPU.
@@ -99,11 +103,11 @@ const SIGNATURE_H = 9
 // pass, real content changes (text scrolling, new app) get caught.
 const SIGNATURE_TOLERANCE = 10
 // Even if the signature says "nothing changed", we force a real OCR
-// every N skips so any drift the 16x9 thumbnail averaged out (a tiny
-// secret typed in one cell, low-contrast text) can't hide forever.
-// At 1 s cadence this means a worst-case 5 s delay for a missed
-// change — still way under the sticky pool's 15 s TTL.
-const FORCE_OCR_EVERY_N_SKIPS = 5
+// after this many ms elapsed since the last real one. A tiny secret
+// typed into a single 16x9 cell could be averaged out otherwise.
+// At 250 ms cadence + 5 s anti-drift, idle CPU stays low while
+// no secret can hide longer than ~5 s.
+const FORCE_OCR_AFTER_MS = 5000
 // JPEG quality used for the OCR input. PNG was paying ~50 ms per
 // frame for lossless encoding we don't need; JPEG at 0.6 is plenty
 // for Tesseract and shaves 30-50 ms per scan.
@@ -137,7 +141,10 @@ export class SanitizerLiveEngine {
    *  skip the expensive OCR step when the screen hasn't changed. */
   private sigCanvas: HTMLCanvasElement
   private lastSignature: Uint8Array | null = null
-  private skipCount = 0
+  /** Wall-clock ts of the last real OCR. Used by the anti-drift force
+   *  path so we re-OCR at least every FORCE_OCR_AFTER_MS even when the
+   *  frame signature reports "stable". */
+  private lastOcrAt = 0
   private interval: number | null = null
   private running = false
   private scanInFlight = false
@@ -192,7 +199,7 @@ export class SanitizerLiveEngine {
   async stop(): Promise<void> {
     this.running = false
     this.lastSignature = null
-    this.skipCount = 0
+    this.lastOcrAt = 0
     if (this.interval !== null) {
       window.clearInterval(this.interval)
       this.interval = null
@@ -340,28 +347,29 @@ export class SanitizerLiveEngine {
     // If the screen looks identical to the last scan, skip the OCR
     // entirely. The Toolbar's sticky pool (15 s TTL) keeps any masks
     // from the last real scan visible, so the user sees zero change
-    // and we save 600-1500 ms of CPU + worker memory churn.
+    // and we save 500-1500 ms of CPU + worker memory churn.
     //
-    // Safety net: even when the signature reports "no change", force a
-    // real OCR every FORCE_OCR_EVERY_N_SKIPS ticks. A tiny secret typed
-    // into one cell could get averaged out by the 16x9 thumbnail; the
-    // forced pass guarantees worst-case 5 s detection latency.
+    // Safety net: time-based forced OCR. Even when the signature says
+    // "stable", we re-OCR after FORCE_OCR_AFTER_MS to catch a tiny
+    // change the 16x9 thumbnail averaged out (e.g., one cell of text
+    // updated with a secret).
+    const now = performance.now()
     const sig = this.computeFrameSignature(this.video)
     const sigStable =
       sig !== null &&
       this.lastSignature !== null &&
       this.signaturesMatch(sig, this.lastSignature)
-    if (sigStable && this.skipCount < FORCE_OCR_EVERY_N_SKIPS - 1) {
-      this.skipCount++
-      debug(`frame stable (skip #${this.skipCount}) — OCR avoided`)
+    const sinceLastOcr = now - this.lastOcrAt
+    if (sigStable && sinceLastOcr < FORCE_OCR_AFTER_MS) {
+      debug(`frame stable (${sinceLastOcr.toFixed(0)} ms since last OCR) — skipping`)
       onStatus?.('idle')
       return null
     }
     if (sig !== null) this.lastSignature = sig
     if (sigStable) {
-      debug(`forced OCR after ${this.skipCount} skips (anti-drift)`)
+      debug(`anti-drift forced OCR after ${sinceLastOcr.toFixed(0)} ms`)
     }
-    this.skipCount = 0
+    this.lastOcrAt = now
     // ----------------------------------------------------------------
 
     this.scanInFlight = true

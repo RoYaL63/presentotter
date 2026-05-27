@@ -309,9 +309,11 @@ export function Toolbar() {
       const engine = new SanitizerLiveEngine()
       engine.setContextual(sanitizerSettings.contextual)
       engineRef.current = engine
-      // 1 s cadence — see DEFAULT_INTERVAL_MS in sanitizer-live.ts for
-      // the rationale (paired with the 15 s sticky pool below).
-      await engine.start(1000, handleScanResult, (phase) => setLivePhase(phase))
+      // Let the engine use its DEFAULT_INTERVAL_MS (250 ms in v0.5.12+):
+      // the hash-skip path means most ticks bail out in ~3 ms, and the
+      // 4× faster tick rate cuts the worst-case "secret visible" window
+      // by ~750 ms vs the old 1 s cadence.
+      await engine.start(undefined, handleScanResult, (phase) => setLivePhase(phase))
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       console.error('[toolbar] live sanitizer failed to start:', err)
