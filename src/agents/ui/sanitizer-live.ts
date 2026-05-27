@@ -89,6 +89,25 @@ const MAX_SCAN_WIDTH = 1280
 // Combined with the sticky pool (15 s TTL + overlap matching) on the
 // Toolbar side, a single missed scan no longer causes a flicker.
 const DEFAULT_INTERVAL_MS = 1000
+// Tiny thumbnail used to fingerprint each frame. 16×9 = 144 cells is
+// enough to detect "the user moved their mouse / scrolled" vs "the
+// screen is the same as 1 s ago" without burning real CPU.
+const SIGNATURE_W = 16
+const SIGNATURE_H = 9
+// Per-cell luminance delta tolerated as "no visible change". 10 means
+// roughly 4% of the 0-255 range — small mouse moves and AA jitter
+// pass, real content changes (text scrolling, new app) get caught.
+const SIGNATURE_TOLERANCE = 10
+// Even if the signature says "nothing changed", we force a real OCR
+// every N skips so any drift the 16x9 thumbnail averaged out (a tiny
+// secret typed in one cell, low-contrast text) can't hide forever.
+// At 1 s cadence this means a worst-case 5 s delay for a missed
+// change — still way under the sticky pool's 15 s TTL.
+const FORCE_OCR_EVERY_N_SKIPS = 5
+// JPEG quality used for the OCR input. PNG was paying ~50 ms per
+// frame for lossless encoding we don't need; JPEG at 0.6 is plenty
+// for Tesseract and shaves 30-50 ms per scan.
+const OCR_JPEG_QUALITY = 0.6
 
 /**
  * getUserMedia constraints for Electron's desktop-capture pipeline.
@@ -114,6 +133,11 @@ export class SanitizerLiveEngine {
   private stream: MediaStream | null = null
   private video: HTMLVideoElement | null = null
   private canvas: HTMLCanvasElement
+  /** Tiny 16×9 thumbnail used to fingerprint each frame so we can
+   *  skip the expensive OCR step when the screen hasn't changed. */
+  private sigCanvas: HTMLCanvasElement
+  private lastSignature: Uint8Array | null = null
+  private skipCount = 0
   private interval: number | null = null
   private running = false
   private scanInFlight = false
@@ -124,6 +148,9 @@ export class SanitizerLiveEngine {
 
   constructor() {
     this.canvas = document.createElement('canvas')
+    this.sigCanvas = document.createElement('canvas')
+    this.sigCanvas.width = SIGNATURE_W
+    this.sigCanvas.height = SIGNATURE_H
   }
 
   setContextual(enabled: boolean): void {
@@ -164,6 +191,8 @@ export class SanitizerLiveEngine {
   /** Stop the loop, release the screen capture stream and terminate Tesseract. */
   async stop(): Promise<void> {
     this.running = false
+    this.lastSignature = null
+    this.skipCount = 0
     if (this.interval !== null) {
       window.clearInterval(this.interval)
       this.interval = null
@@ -242,6 +271,59 @@ export class SanitizerLiveEngine {
     // Default to English; users can add 'fra' later via settings. Tesseract
     // downloads traineddata on first init (~3-5 MB cached after that).
     this.worker = await createWorker('eng')
+    // PSM 11 = sparse text in no particular order. Way better than the
+    // default PSM 3 for our use case: screenshots aren't documents, they
+    // contain scattered UI labels + values, and PSM 11 finds them faster
+    // AND with better accuracy than treating the screen as a page.
+    // OEM 1 = LSTM only — already the default in tesseract.js v5 but
+    // we make it explicit so future upgrades can't silently regress.
+    await (this.worker as unknown as {
+      setParameters: (p: Record<string, string>) => Promise<void>
+    }).setParameters({
+      tessedit_pageseg_mode: '11',
+      tessedit_ocr_engine_mode: '1'
+    })
+  }
+
+  /**
+   * Cheap perceptual hash of the current video frame: render a 16×9
+   * thumbnail and pull mean luminance per pixel. ~2 ms vs the 600-1500
+   * ms a full OCR scan takes — so as long as the screen hasn't visibly
+   * changed since last time, we can skip the OCR completely and let the
+   * sticky pool on the Toolbar side keep the masks visible.
+   *
+   * Why luminance and not full RGB?
+   *   - 1 byte/cell instead of 3 → smaller comparison
+   *   - Mouse moves over the same content barely shift luminance
+   *   - Catches real changes (new windows, scrolling, dialog popups)
+   */
+  private computeFrameSignature(video: HTMLVideoElement): Uint8Array | null {
+    const ctx = this.sigCanvas.getContext('2d', { willReadFrequently: true })
+    if (ctx === null) return null
+    ctx.drawImage(video, 0, 0, SIGNATURE_W, SIGNATURE_H)
+    const pixels = ctx.getImageData(0, 0, SIGNATURE_W, SIGNATURE_H).data
+    const sig = new Uint8Array(SIGNATURE_W * SIGNATURE_H)
+    for (let i = 0; i < sig.length; i++) {
+      const px = i * 4
+      // ITU-R BT.601 luma. Cheaper than BT.709 and good enough at
+      // 16×9 resolution.
+      sig[i] = Math.round(
+        0.299 * (pixels[px] ?? 0) +
+          0.587 * (pixels[px + 1] ?? 0) +
+          0.114 * (pixels[px + 2] ?? 0)
+      )
+    }
+    return sig
+  }
+
+  private signaturesMatch(a: Uint8Array, b: Uint8Array): boolean {
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+      if (Math.abs((a[i] ?? 0) - (b[i] ?? 0)) > SIGNATURE_TOLERANCE) {
+        return false
+      }
+    }
+    return true
   }
 
   private async scanOnce(
@@ -253,6 +335,35 @@ export class SanitizerLiveEngine {
       return null
     }
     if (this.scanInFlight) return null
+
+    // ---- Frame-stable shortcut --------------------------------------
+    // If the screen looks identical to the last scan, skip the OCR
+    // entirely. The Toolbar's sticky pool (15 s TTL) keeps any masks
+    // from the last real scan visible, so the user sees zero change
+    // and we save 600-1500 ms of CPU + worker memory churn.
+    //
+    // Safety net: even when the signature reports "no change", force a
+    // real OCR every FORCE_OCR_EVERY_N_SKIPS ticks. A tiny secret typed
+    // into one cell could get averaged out by the 16x9 thumbnail; the
+    // forced pass guarantees worst-case 5 s detection latency.
+    const sig = this.computeFrameSignature(this.video)
+    const sigStable =
+      sig !== null &&
+      this.lastSignature !== null &&
+      this.signaturesMatch(sig, this.lastSignature)
+    if (sigStable && this.skipCount < FORCE_OCR_EVERY_N_SKIPS - 1) {
+      this.skipCount++
+      debug(`frame stable (skip #${this.skipCount}) — OCR avoided`)
+      onStatus?.('idle')
+      return null
+    }
+    if (sig !== null) this.lastSignature = sig
+    if (sigStable) {
+      debug(`forced OCR after ${this.skipCount} skips (anti-drift)`)
+    }
+    this.skipCount = 0
+    // ----------------------------------------------------------------
+
     this.scanInFlight = true
     onStatus?.('scanning')
     const startedAt = performance.now()
@@ -288,8 +399,35 @@ export class SanitizerLiveEngine {
       onStatus?.('idle')
       return out
     } catch (err) {
-      console.error('[sanitizer-live] scan failed:', err)
-      throw err
+      console.error('[sanitizer-live] scan failed, recovering worker:', err)
+      // Worker is in an unknown state after a recognize() failure. Kill
+      // it, then re-create immediately so the next interval tick has
+      // something to run on. Sticky masks on the Toolbar side absorb
+      // the 200-400 ms gap while createWorker() spins up.
+      if (this.worker !== null) {
+        try {
+          await this.worker.terminate()
+        } catch {
+          // ignore — already dead
+        }
+        this.worker = null
+      }
+      // Also force a fresh signature so the next frame goes through OCR
+      // even if it looks identical to the last good one.
+      this.lastSignature = null
+      // Best-effort respawn. If THIS also fails, the engine will keep
+      // retrying on every interval tick until the user toggles LIVE.
+      if (this.running) {
+        try {
+          await this.ensureWorker()
+        } catch (respawnErr) {
+          console.error(
+            '[sanitizer-live] worker respawn failed, will retry next tick:',
+            respawnErr
+          )
+        }
+      }
+      return null
     } finally {
       this.scanInFlight = false
     }
@@ -314,8 +452,10 @@ export class SanitizerLiveEngine {
     ctx.drawImage(video, 0, 0, dstW, dstH)
     // The scale factor from the (downscaled) OCR coordinates back to
     // (full-screen) overlay coordinates is the inverse of the downscale.
+    // JPEG q=0.6 is plenty for OCR — PNG was paying lossless encode
+    // cost on every frame for nothing.
     return {
-      dataUrl: this.canvas.toDataURL('image/png'),
+      dataUrl: this.canvas.toDataURL('image/jpeg', OCR_JPEG_QUALITY),
       scaleX: 1 / scale,
       scaleY: 1 / scale
     }
