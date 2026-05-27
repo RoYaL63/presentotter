@@ -6,7 +6,6 @@ import {
   Eraser,
   GripVertical,
   HelpCircle,
-  Info,
   Layout,
   Minus,
   MousePointer2,
@@ -64,7 +63,6 @@ export function Toolbar() {
   const [livePhase, setLivePhase] = useState<'acquiring' | 'loading-ocr' | 'scanning' | 'idle' | null>(null)
   const [liveError, setLiveError] = useState<string | null>(null)
   const [cursorOn, setCursorOn] = useState(false)
-  const [showShareHint, setShowShareHint] = useState(true)
   const apiRef = useRef<PresentOtterAPI | undefined>(window.api)
   const engineRef = useRef<SanitizerLiveEngine | null>(null)
   // Live masks need hysteresis: Tesseract OCR is non-deterministic and
@@ -735,28 +733,6 @@ export function Toolbar() {
               · &ldquo;{liveStatus.preview}&rdquo;
             </span>
           )}
-        </div>
-      )}
-
-      {showShareHint && (
-        <div
-          role="status"
-          className="pointer-events-auto absolute top-[100px] left-1/2 -translate-x-1/2 flex items-start gap-2.5 rounded-xl border border-otter-400/30 bg-deep-950/70 backdrop-blur-xl px-3.5 py-2 text-[11px] text-otter-100/90 shadow-glass animate-fade-in-up max-w-md"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        >
-          <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-otter-300" strokeWidth={2} />
-          <span className="leading-snug">
-            Pour que tes annotations apparaissent dans Meet/Zoom, partage{' '}
-            <strong className="text-otter-50">l'écran entier</strong> (pas un onglet).
-          </span>
-          <button
-            type="button"
-            onClick={() => setShowShareHint(false)}
-            className="ml-1 text-otter-200/60 hover:text-otter-100"
-            aria-label="Fermer l'info"
-          >
-            ✕
-          </button>
         </div>
       )}
 
