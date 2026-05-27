@@ -44,6 +44,7 @@ declare global {
     isToolbarEnabled(): Promise<boolean>
     onToolbarStatus(cb: (status: { enabled: boolean }) => void): () => void
     toolbarSetHeight(height: number): void
+    toolbarSetPosition(x: number, y: number): void
 
     setTool(tool: ToolName): void
     setColor(hex: string): void

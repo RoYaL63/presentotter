@@ -35,6 +35,11 @@ const api = {
   toolbarSetHeight: (height: number) =>
     ipcRenderer.send('toolbar:set-height', height),
 
+  /** Reposition the toolbar window — used by the minimized bubble's
+   *  drag handler so the user can park the mascot anywhere on screen. */
+  toolbarSetPosition: (x: number, y: number) =>
+    ipcRenderer.send('toolbar:set-position', { x, y }),
+
   onToolbarStatus: (cb: (status: { enabled: boolean }) => void) => {
     const handler = (_e: unknown, status: { enabled: boolean }) => cb(status)
     ipcRenderer.on('home:toolbar-status', handler)

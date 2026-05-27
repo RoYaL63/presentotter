@@ -600,6 +600,32 @@ function registerIpcHandlers(): void {
     const safe = Math.max(112, Math.min(400, Math.floor(height)))
     toolbarWindow.setBounds({ x: b.x, y: b.y, width: b.width, height: safe })
   })
+  /**
+   * Renderer asks to relocate the toolbar window. Used by the minimized
+   * bubble so the user can drag it anywhere on screen. We clamp to the
+   * union of every display's work area so the bubble can't be parked
+   * off-screen and lost.
+   */
+  ipcMain.on('toolbar:set-position', (_e, point: { x: number; y: number }) => {
+    if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
+    if (typeof point?.x !== 'number' || typeof point?.y !== 'number') return
+    const b = toolbarWindow.getBounds()
+    // Build a clamping box from the union of all displays so the bubble
+    // can land on any monitor but never disappear entirely off-screen.
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const d of screen.getAllDisplays()) {
+      const a = d.workArea
+      if (a.x < minX) minX = a.x
+      if (a.y < minY) minY = a.y
+      if (a.x + a.width > maxX) maxX = a.x + a.width
+      if (a.y + a.height > maxY) maxY = a.y + a.height
+    }
+    // Keep at least 24 px of the window on-screen on each axis.
+    const margin = 24
+    const cx = Math.max(minX - b.width + margin, Math.min(maxX - margin, Math.floor(point.x)))
+    const cy = Math.max(minY - b.height + margin, Math.min(maxY - margin, Math.floor(point.y)))
+    toolbarWindow.setBounds({ x: cx, y: cy, width: b.width, height: b.height })
+  })
 
   // Toolbar → Overlay(s)
   ipcMain.on('overlay:set-tool', (_e, tool: string) =>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowUpRight,
   Check,
@@ -382,19 +382,7 @@ export function Toolbar() {
   }
 
   if (minimized) {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center" style={{ background: 'transparent' }}>
-        <button
-          type="button"
-          onClick={handleRestore}
-          aria-label="Déployer la toolbar"
-          className="otter-clay otter-aqua animate-fade-in-up flex h-14 w-14 items-center justify-center overflow-hidden transition-transform duration-200 hover:scale-110 active:scale-95"
-          style={{ borderRadius: 999 }}
-        >
-          <Mascot size={42} />
-        </button>
-      </div>
-    )
+    return <MinimizedBubble onRestore={handleRestore} api={apiRef.current} />
   }
 
   return (
@@ -820,6 +808,106 @@ export function Toolbar() {
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Minimized state of the toolbar — a 56×56 bubble showing the mascot.
+ *
+ * Mouse contract:
+ *   - Press, release without moving more than DRAG_THRESHOLD_PX
+ *       → treated as click → restore the full toolbar.
+ *   - Press, drag, release
+ *       → moves the toolbar window via IPC (toolbar:set-position) so
+ *         the user can park the bubble anywhere on screen.
+ *
+ * We can't use the native -webkit-app-region: drag trick because we
+ * also need a click handler — a draggable region swallows pointer
+ * events. So we drive the window position manually from pointer events
+ * and rely on the move-vs-click distance to decide intent on release.
+ */
+interface MinimizedBubbleProps {
+  onRestore(): void
+  api: PresentOtterAPI | undefined
+}
+
+function MinimizedBubble({ onRestore, api }: MinimizedBubbleProps): React.ReactElement {
+  // Track the pointer-down state so we can:
+  //   1. Compute window deltas during move
+  //   2. Decide click vs drag on release (distance threshold)
+  const dragState = useRef<{
+    pointerId: number
+    // Pointer position at press, in SCREEN coords. We compute screen
+    // coords as window.screenX + clientX so we can later translate the
+    // pointer's current screen position into a new window origin.
+    startScreenX: number
+    startScreenY: number
+    // Window origin at press — what we'll add the cursor delta to.
+    startWinX: number
+    startWinY: number
+    moved: boolean
+  } | null>(null)
+
+  const DRAG_THRESHOLD_PX = 4
+
+  const onPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return
+    e.currentTarget.setPointerCapture(e.pointerId)
+    dragState.current = {
+      pointerId: e.pointerId,
+      startScreenX: window.screenX + e.clientX,
+      startScreenY: window.screenY + e.clientY,
+      startWinX: window.screenX,
+      startWinY: window.screenY,
+      moved: false
+    }
+  }
+
+  const onPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const s = dragState.current
+    if (s === null || e.pointerId !== s.pointerId) return
+    const curScreenX = window.screenX + e.clientX
+    const curScreenY = window.screenY + e.clientY
+    const dx = curScreenX - s.startScreenX
+    const dy = curScreenY - s.startScreenY
+    if (!s.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return
+    s.moved = true
+    api?.toolbarSetPosition(s.startWinX + dx, s.startWinY + dy)
+  }
+
+  const onPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const s = dragState.current
+    dragState.current = null
+    if (s === null || e.pointerId !== s.pointerId) return
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {
+      // pointer already released (Windows quirk on cross-window drags)
+    }
+    if (!s.moved) onRestore()
+  }
+
+  return (
+    <div
+      className="flex h-screen w-screen items-center justify-center"
+      style={{ background: 'transparent' }}
+    >
+      <button
+        type="button"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={() => {
+          dragState.current = null
+        }}
+        aria-label="Déployer la toolbar (clic) ou déplacer (glisser)"
+        title="Clic pour déployer · glisser pour déplacer"
+        className="otter-clay otter-aqua animate-fade-in-up flex h-14 w-14 items-center justify-center overflow-hidden transition-transform duration-200 hover:scale-110 active:scale-95 cursor-grab active:cursor-grabbing"
+        style={{ borderRadius: 999 }}
+      >
+        <Mascot size={42} />
+      </button>
     </div>
   )
 }

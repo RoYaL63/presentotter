@@ -999,10 +999,20 @@ function drawSpotlight(
   const outer = 90 + Math.max(1, Math.min(16, strokeWidth)) * 15
   const inner = outer * 0.55 // sharp clear area inside, then soft fall-off
 
+  // Bulletproof wash size: take the larger of the passed CSS size and
+  // the real pixel-buffer size (back-converted to logical px). Earlier,
+  // when window.innerWidth got out of sync with the canvas pixel buffer
+  // (race between resize event and rAF, or a stale transform), the wash
+  // only covered part of the screen — exactly the "rectangle gris
+  // partiel" the user was reporting. With the max() this can't happen.
+  const dpr = window.devicePixelRatio || 1
+  const fullW = Math.max(canvasW, ctx.canvas.width / dpr)
+  const fullH = Math.max(canvasH, ctx.canvas.height / dpr)
+
   // 1. Dark wash everywhere.
   ctx.save()
   ctx.fillStyle = 'rgba(7, 33, 47, 0.62)'
-  ctx.fillRect(0, 0, canvasW, canvasH)
+  ctx.fillRect(0, 0, fullW, fullH)
 
   // 2. Punch the spotlight hole. destination-out removes the canvas
   //    alpha where we draw; the radial gradient gives a soft edge.
