@@ -556,7 +556,69 @@ export class SanitizerLiveEngine {
       }
     }
 
-    // Contextual pass — masks any 6+ char value that sits on the same
+    // Reassembly pass — Tesseract sometimes splits a single token at
+    // its hyphens / underscores / dots. The spaced text above won't
+    // contain "sk-proj-XYZ" if OCR returned ["sk-proj", "-XYZ"] as two
+    // tokens. We re-test the patterns on a per-line text built WITHOUT
+    // separators between adjacent words, recovering those splits. The
+    // mergeOverlappingMasks call at the end dedupes any overlap with
+    // the spaced pass.
+    const linesGroups = groupWordsByLine(words)
+    for (const lineWords of linesGroups) {
+      let lineText = ''
+      const lineRanges: Array<{ start: number; end: number; idx: number }> = []
+      for (const lw of lineWords) {
+        const start = lineText.length
+        lineText += lw.word.text
+        lineRanges.push({ start, end: lineText.length, idx: lw.idx })
+      }
+      if (lineText.length === 0) continue
+      for (const pattern of PATTERNS) {
+        pattern.regex.lastIndex = 0
+        let match: RegExpExecArray | null
+        while ((match = pattern.regex.exec(lineText)) !== null) {
+          const ms = match.index
+          const me = ms + match[0].length
+          const touched = lineRanges.filter((r) => r.start < me && r.end > ms)
+          if (touched.length === 0) {
+            if (match[0].length === 0) pattern.regex.lastIndex += 1
+            continue
+          }
+          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+          for (const r of touched) {
+            const w = words[r.idx]
+            if (!w) continue
+            const b = w.bbox
+            if (b.x0 < x0) x0 = b.x0
+            if (b.y0 < y0) y0 = b.y0
+            if (b.x1 > x1) x1 = b.x1
+            if (b.y1 > y1) y1 = b.y1
+          }
+          if (x0 === Infinity) {
+            if (match[0].length === 0) pattern.regex.lastIndex += 1
+            continue
+          }
+          const PAD = 4
+          const cssX = toCssX(x0) - PAD
+          const cssY = toCssY(y0) - PAD
+          const cssW = Math.max(
+            (x1 - x0) * scaleX / dpi + PAD * 2,
+            displayRightCss - cssX
+          )
+          const cssH = (y1 - y0) * scaleY / dpi + PAD * 2
+          masks.push({
+            x: Math.floor(cssX),
+            y: Math.floor(cssY),
+            width: Math.ceil(cssW),
+            height: Math.ceil(cssH),
+            label: `joined:${pattern.name}`
+          })
+          if (match[0].length === 0) pattern.regex.lastIndex += 1
+        }
+      }
+    }
+
+    // Contextual pass — masks any 8+ char value that sits on the same
     // line as a secret-label keyword (secret / mot de passe / token /
     // credential / key / clé / etc., FR + EN). This catches things the
     // pure-regex pass misses, e.g. provider-specific formats we don't
@@ -619,8 +681,10 @@ export class SanitizerLiveEngine {
    * Look for secret-y label words (FR + EN) and mask the next 1-3 words
    * on the same line that look like a credential value. "Same line" is
    * baselines within half the keyword's height. "Credential-like" is
-   * any 6+ char run of base64/url-safe/asterisk characters that is
-   * neither a date nor a plain number.
+   * any 8+ char run of base64/url-safe/asterisk characters that is
+   * neither a date nor a plain number AND mixes at least 2 character
+   * classes (case + digits) so plain English/French words next to a
+   * label don't get masked.
    */
   private detectContextualSecrets(
     words: TesseractWord[]
@@ -628,19 +692,28 @@ export class SanitizerLiveEngine {
     const KEYWORDS =
       /^(secret|secrets|password|passwords|mot|pwd|token|tokens|jeton|jetons|cle|clé|cles|clés|key|keys|credential|credentials|api[_-]?key|client[_-]?secret|access[_-]?token|bearer|auth)s?[:.;,]*$/i
     // A candidate value must look credential-shaped, NOT like a normal
-    // word. Two rules combined:
-    //   - VALUE_RE  : allowed character set, ≥6 chars
+    // word. Three rules combined:
+    //   - VALUE_RE  : allowed character set, ≥8 chars (was 6 — too short
+    //                 caught short codes that turned out to be IDs).
     //   - HAS_TOKEN_LIKE_CHAR : at least one digit OR one of _ - / + = . :
-    //     The second rule rules out plain French/English words like
-    //     "personne" / "disposant" / "toute" that happen to share a line
-    //     with the word "secret" in a flowing sentence ("Gardez-le
-    //     secret, car toute personne disposant…"). Real credentials
-    //     almost always contain either a digit or a separator.
-    const VALUE_RE = /^[A-Za-z0-9_\-./+=:*]{6,}$/
+    //     Rules out plain French/English words like "personne" / "toute"
+    //     that share a line with the word "secret" in a flowing sentence.
+    //   - MIXES_CLASSES : >=2 of {upper, lower, digit}. Real tokens are
+    //     random-looking; "Camelcase" or "lowercaseword" is probably text.
+    const VALUE_RE = /^[A-Za-z0-9_\-./+=:*]{8,}$/
     const HAS_TOKEN_LIKE_CHAR = /[\d_\-./+=:*]/
     // Things that look like values but aren't credentials.
     const DATE_RE = /^\d{1,4}[-/]\d{1,2}([-/]\d{1,4})?$/
     const NUM_RE = /^\d+([.,]\d+)?$/
+    const mixesClasses = (s: string): boolean => {
+      let upper = 0, lower = 0, digit = 0
+      for (const c of s) {
+        if (c >= 'A' && c <= 'Z') upper = 1
+        else if (c >= 'a' && c <= 'z') lower = 1
+        else if (c >= '0' && c <= '9') digit = 1
+      }
+      return upper + lower + digit >= 2
+    }
     const out: Array<{ x0: number; y0: number; x1: number; y1: number; label: string }> = []
     for (let i = 0; i < words.length; i++) {
       const kw = words[i]
@@ -648,9 +721,11 @@ export class SanitizerLiveEngine {
       if (!KEYWORDS.test(kw.text)) continue
       const refY = (kw.bbox.y0 + kw.bbox.y1) / 2
       const lineTol = Math.max(8, (kw.bbox.y1 - kw.bbox.y0) * 0.5)
-      // Scan up to 6 words to the right on the same horizontal line.
+      // Scan up to 4 words to the right on the same horizontal line
+      // (was 6 — the longer reach kept masking unrelated content
+      // further down the sentence).
       let consumedNearbyKeyword = false
-      for (let j = i + 1; j < Math.min(i + 7, words.length); j++) {
+      for (let j = i + 1; j < Math.min(i + 5, words.length); j++) {
         const v = words[j]
         if (!v || !v.bbox) continue
         const vy = (v.bbox.y0 + v.bbox.y1) / 2
@@ -665,6 +740,7 @@ export class SanitizerLiveEngine {
         if (!VALUE_RE.test(v.text)) continue
         if (!HAS_TOKEN_LIKE_CHAR.test(v.text)) continue
         if (DATE_RE.test(v.text) || NUM_RE.test(v.text)) continue
+        if (!mixesClasses(v.text)) continue
         // Mask just this one value and stop — we don't want to keep
         // masking subsequent words on the same line.
         out.push({
@@ -714,4 +790,49 @@ function rectsOverlap(a: LiveMask, b: LiveMask): boolean {
     a.y < b.y + b.height &&
     a.y + a.height > b.y
   )
+}
+
+/**
+ * Cluster OCR words into visual lines based on Y proximity. Used by
+ * the reassembly pass to join adjacent words that Tesseract may have
+ * split apart inside a single token (typical at `-`, `_`, `.` chars).
+ *
+ * Each group keeps the original index into `words` so the mask
+ * builder can still look up bboxes from the source array.
+ */
+function groupWordsByLine(
+  words: TesseractWord[]
+): Array<Array<{ word: TesseractWord; idx: number }>> {
+  if (words.length === 0) return []
+  const indexed = words
+    .map((w, idx) => (w && w.bbox ? { word: w, idx } : null))
+    .filter((v): v is { word: TesseractWord; idx: number } => v !== null)
+  // Sort by Y so we can do a single pass and append to whichever line
+  // the next word is closest to.
+  indexed.sort((a, b) => a.word.bbox.y0 - b.word.bbox.y0)
+  const lines: Array<Array<{ word: TesseractWord; idx: number }>> = []
+  for (const it of indexed) {
+    const yC = (it.word.bbox.y0 + it.word.bbox.y1) / 2
+    const h = it.word.bbox.y1 - it.word.bbox.y0
+    const tol = Math.max(8, h * 0.5)
+    // Look at the most recent line — words come pre-sorted by Y, so
+    // anything new will land in the last line or start a new one.
+    const last = lines[lines.length - 1]
+    if (last !== undefined) {
+      const ref = last[last.length - 1]
+      if (ref !== undefined) {
+        const refYc = (ref.word.bbox.y0 + ref.word.bbox.y1) / 2
+        if (Math.abs(refYc - yC) <= tol) {
+          last.push(it)
+          continue
+        }
+      }
+    }
+    lines.push([it])
+  }
+  // X-sort within each line so concatenation reflects reading order.
+  for (const line of lines) {
+    line.sort((a, b) => a.word.bbox.x0 - b.word.bbox.x0)
+  }
+  return lines
 }
