@@ -18,6 +18,7 @@ import { Mascot } from './components/Mascot'
 import { Library } from './pages/Library'
 import { Tools } from './pages/Tools'
 import { Settings } from './pages/Settings'
+import { Mirror } from './Mirror'
 import { useNavStore, type PageName } from './stores/useNavStore'
 import { registerUIEventListeners } from './eventListeners'
 
@@ -35,12 +36,13 @@ import { registerUIEventListeners } from './eventListeners'
  * variant so icons stay legible over any user desktop background.
  */
 
-type SectionId = Extract<PageName, 'home' | 'tools' | 'library' | 'settings'>
+type SectionId = Extract<PageName, 'home' | 'tools' | 'library' | 'mirror' | 'settings'>
 
 const SECTIONS: ReadonlyArray<{ id: SectionId; label: string; Icon: typeof HomeIcon }> = [
   { id: 'home', label: 'Accueil', Icon: HomeIcon },
   { id: 'tools', label: 'Outils', Icon: Sparkles },
   { id: 'library', label: 'Bibliothèque', Icon: LibraryIcon },
+  { id: 'mirror', label: 'Miroir Meet', Icon: MonitorPlay },
   { id: 'settings', label: 'Paramètres', Icon: SettingsIcon }
 ]
 
@@ -49,7 +51,7 @@ export function Home() {
   const navigate = useNavStore((s) => s.navigate)
 
   const section: SectionId = (
-    ['home', 'tools', 'library', 'settings'] as SectionId[]
+    ['home', 'tools', 'library', 'mirror', 'settings'] as SectionId[]
   ).includes(currentPage as SectionId)
     ? (currentPage as SectionId)
     : 'home'
@@ -104,6 +106,8 @@ function renderSection(section: SectionId): ReactElement {
       return <Tools />
     case 'library':
       return <Library />
+    case 'mirror':
+      return <Mirror />
     case 'settings':
       return <Settings />
     case 'home':
@@ -283,8 +287,8 @@ function AccueilSection() {
         <ActionCard
           icon={MonitorPlay}
           title="Miroir Meet"
-          description="Fenêtre à partager dans Meet/Zoom"
-          onClick={() => apiRef.current?.openMirror()}
+          description="Page à partager dans Meet/Zoom"
+          onClick={() => navigate('mirror')}
         />
         <ActionCard
           icon={ShieldCheck}

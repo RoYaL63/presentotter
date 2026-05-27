@@ -21,7 +21,7 @@ export type ToolName =
 
 const api = {
   /** Identify which window this renderer belongs to. */
-  getRole: (): Promise<'home' | 'toolbar' | 'overlay' | 'console' | 'mirror'> =>
+  getRole: (): Promise<'home' | 'toolbar' | 'overlay' | 'console'> =>
     ipcRenderer.invoke('window:get-role'),
 
   // ---------- Home → toolbar lifecycle ----------
@@ -29,6 +29,11 @@ const api = {
   enableToolbar: () => ipcRenderer.send('toolbar:enable'),
   disableToolbar: () => ipcRenderer.send('toolbar:disable'),
   isToolbarEnabled: (): Promise<boolean> => ipcRenderer.invoke('toolbar:is-enabled'),
+
+  /** Grow / shrink the toolbar window vertically — used by the inline
+   *  color popover so it has room to render under the capsule. */
+  toolbarSetHeight: (height: number) =>
+    ipcRenderer.send('toolbar:set-height', height),
 
   onToolbarStatus: (cb: (status: { enabled: boolean }) => void) => {
     const handler = (_e: unknown, status: { enabled: boolean }) => cb(status)
@@ -49,11 +54,7 @@ const api = {
 
   /** Ask main which display to capture and how to translate its pixels
    *  into the virtual-screen CSS coordinates used by the overlays. */
-  // ---------- Mirror window ----------
-
-  /** Open (or focus) the live Mirror window — the one the user shares
-   *  in Meet/Zoom when they're presenting in tab or window mode. */
-  openMirror: () => ipcRenderer.send('mirror:open'),
+  // ---------- Mirror page (embedded in Home) ----------
 
   /** List every display PresentOtter can capture for the mirror, with
    *  the desktopCapturer sourceId plus CSS bounds + DPI. */

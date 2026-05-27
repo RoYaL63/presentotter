@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Monitor, Play, Power, Sparkles } from 'lucide-react'
-import { Mascot } from './components/Mascot'
 
 /**
  * Mirror window — a normal Chrome window that displays a LIVE feed of
@@ -146,27 +145,22 @@ export function Mirror(): JSX.Element {
   const isLive = streamState.kind === 'live'
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-deep-950 text-otter-50">
-      {/* Header — visible only when idle so the live feed gets the most
-          real estate possible once the user is broadcasting. */}
-      {!isLive && (
-        <header className="flex items-center gap-3 border-b border-white/[0.06] px-5 py-3">
-          <Mascot size={36} />
-          <div className="flex-1">
-            <h1 className="text-base font-bold leading-tight">
-              PresentOtter Mirror
-            </h1>
-            <p className="text-[11px] text-otter-200/65 leading-tight">
-              Fenêtre à partager dans Meet / Zoom · les annotations + curseur custom
-              sont déjà inclus
-            </p>
-          </div>
-        </header>
-      )}
+    <section className="mx-auto flex h-full w-full max-w-6xl flex-col gap-4 p-6 lg:p-8 text-sea-700">
+      {/* Page intro — light surface to match the Home theme. The
+          deep-themed video stage lives in the card below. */}
+      <header className="flex flex-col gap-1">
+        <h1 className="text-3xl font-bold tracking-tight">
+          Miroir Meet
+        </h1>
+        <p className="text-sm text-cream-800/75">
+          Page à partager dans Meet / Zoom (mode « Une fenêtre »). Les annotations,
+          le curseur custom et les masques du sanitizer sont déjà composités dedans.
+        </p>
+      </header>
 
-      {/* Video stage — always present so the <video> element keeps the
-          same reference across state transitions. */}
-      <div className="relative flex-1 overflow-hidden bg-black">
+      {/* Video stage — keeps the dark surface so the live feed reads
+          cleanly without the otter mesh background bleeding through. */}
+      <div className="relative flex-1 min-h-0 overflow-hidden rounded-2xl bg-black ring-1 ring-deep-950/40 shadow-glass">
         <video
           ref={videoRef}
           className="h-full w-full object-contain"
@@ -302,6 +296,6 @@ export function Mirror(): JSX.Element {
           </div>
         )}
       </div>
-    </div>
+    </section>
   )
 }

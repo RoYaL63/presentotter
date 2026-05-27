@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowUpRight,
+  Check,
   Circle,
   Crosshair,
   Eraser,
@@ -9,6 +10,7 @@ import {
   Layout,
   Minus,
   MousePointer2,
+  Palette,
   Pencil,
   Radar,
   ShieldCheck,
@@ -63,6 +65,9 @@ export function Toolbar() {
   const [livePhase, setLivePhase] = useState<'acquiring' | 'loading-ocr' | 'scanning' | 'idle' | null>(null)
   const [liveError, setLiveError] = useState<string | null>(null)
   const [cursorOn, setCursorOn] = useState(false)
+  // Color picker pops out from the toolbar capsule. We resize the
+  // host window so the popover never gets clipped by the bottom edge.
+  const [colorPickerOpen, setColorPickerOpen] = useState(false)
   const apiRef = useRef<PresentOtterAPI | undefined>(window.api)
   const engineRef = useRef<SanitizerLiveEngine | null>(null)
   // Live masks need hysteresis: Tesseract OCR is non-deterministic and
@@ -128,6 +133,26 @@ export function Toolbar() {
     setColor(hex)
     apiRef.current?.setColor(hex)
   }, [])
+
+  /** Toggle the color popover and resize the toolbar window so the
+   *  popover doesn't get clipped at the bottom edge. We grow to 180 px
+   *  while open, snap back to 112 px on close. */
+  const toggleColorPicker = useCallback(() => {
+    setColorPickerOpen((open) => {
+      const next = !open
+      apiRef.current?.toolbarSetHeight(next ? 180 : 112)
+      return next
+    })
+  }, [])
+
+  const pickColor = useCallback(
+    (hex: string) => {
+      sendColor(hex)
+      setColorPickerOpen(false)
+      apiRef.current?.toolbarSetHeight(112)
+    },
+    [sendColor]
+  )
 
   const sendStroke = useCallback((w: number) => {
     setStrokeWidth(w)
@@ -465,29 +490,72 @@ export function Toolbar() {
 
         <div className="h-7 w-px bg-white/[0.08]" aria-hidden />
 
-        {/* Color swatches */}
+        {/* Color button — single swatch + chevron-style ring that
+            opens a popover with the full palette. Big space saver vs
+            7 swatches inline. */}
         <div
-          className="flex items-center gap-1"
+          className="relative flex items-center"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          {COLORS.map(({ hex, label }) => {
-            const active = color === hex
-            return (
-              <button
-                key={hex}
-                type="button"
-                onClick={() => sendColor(hex)}
-                aria-label={`Couleur ${label}`}
-                title={label}
-                className={`relative h-5 w-5 rounded-full transition-all duration-200 ${
-                  active
-                    ? 'ring-2 ring-white/80 ring-offset-2 ring-offset-deep-900 scale-110'
-                    : 'ring-1 ring-white/30 hover:scale-105'
-                }`}
-                style={{ backgroundColor: hex }}
-              />
-            )
-          })}
+          <button
+            type="button"
+            onClick={toggleColorPicker}
+            aria-expanded={colorPickerOpen}
+            aria-label="Choisir une couleur"
+            title="Couleur du trait"
+            className={`relative flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-200 ${
+              colorPickerOpen
+                ? 'bg-white/[0.10] ring-1 ring-white/30'
+                : 'hover:bg-white/[0.06]'
+            }`}
+          >
+            <span
+              className="absolute inset-1.5 rounded-md ring-1 ring-white/40 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.25)]"
+              style={{ backgroundColor: color }}
+              aria-hidden
+            />
+            <Palette
+              className="relative h-3 w-3 text-white/90 mix-blend-overlay"
+              strokeWidth={2.4}
+              aria-hidden
+            />
+          </button>
+
+          {colorPickerOpen && (
+            <div
+              role="dialog"
+              aria-label="Palette de couleurs"
+              className="glass glass-shine absolute top-full left-1/2 z-50 mt-3 flex -translate-x-1/2 items-center gap-2 rounded-full px-3 py-2 shadow-glass animate-fade-in-up"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            >
+              {COLORS.map(({ hex, label }) => {
+                const active = color === hex
+                return (
+                  <button
+                    key={hex}
+                    type="button"
+                    onClick={() => pickColor(hex)}
+                    aria-label={`Couleur ${label}`}
+                    title={label}
+                    className={`relative h-6 w-6 rounded-full transition-all duration-150 ${
+                      active
+                        ? 'ring-2 ring-white/90 ring-offset-2 ring-offset-deep-900 scale-110'
+                        : 'ring-1 ring-white/30 hover:scale-110'
+                    }`}
+                    style={{ backgroundColor: hex }}
+                  >
+                    {active && (
+                      <Check
+                        className="absolute inset-0 m-auto h-3.5 w-3.5 text-white drop-shadow"
+                        strokeWidth={3}
+                        aria-hidden
+                      />
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         <div className="h-7 w-px bg-white/[0.08]" aria-hidden />
