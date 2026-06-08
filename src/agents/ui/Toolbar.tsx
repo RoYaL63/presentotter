@@ -13,6 +13,7 @@ import {
   Palette,
   Pencil,
   Radar,
+  RotateCcw,
   ShieldCheck,
   Square,
   Sun,
@@ -68,6 +69,18 @@ export function Toolbar() {
   // Color picker pops out from the toolbar capsule. We resize the
   // host window so the popover never gets clipped by the bottom edge.
   const [colorPickerOpen, setColorPickerOpen] = useState(false)
+  // Layout orientation: 'horizontal' is the historical floating
+  // capsule, 'vertical' is a side-dock column the user can park
+  // against the right edge of any display so the toolbar stops
+  // blocking the screen content below it.
+  const [orientation, setOrientation] = useState<'horizontal' | 'vertical'>(() => {
+    try {
+      const stored = localStorage.getItem('po-toolbar-orientation')
+      return stored === 'vertical' ? 'vertical' : 'horizontal'
+    } catch {
+      return 'horizontal'
+    }
+  })
   const apiRef = useRef<PresentOtterAPI | undefined>(window.api)
   const engineRef = useRef<SanitizerLiveEngine | null>(null)
   // Live masks need hysteresis: Tesseract OCR is non-deterministic and
@@ -149,10 +162,50 @@ export function Toolbar() {
     (hex: string) => {
       sendColor(hex)
       setColorPickerOpen(false)
-      apiRef.current?.toolbarSetHeight(112)
+      apiRef.current?.toolbarSetHeight(orientation === 'vertical' ? 700 : 112)
     },
-    [sendColor]
+    [sendColor, orientation]
   )
+
+  /**
+   * Toggle horizontal capsule ↔ vertical side-dock. The window is
+   * resized AND repositioned in a single atomic IPC so we don't
+   * flash the old shape at the wrong location.
+   *
+   * Vertical mode snaps to the right edge of the display the toolbar
+   * is currently on; horizontal mode lands top-centre of the same
+   * display. The clamp in main.ts is a backstop in case the chosen
+   * coordinates would push the window off-screen on a small display.
+   */
+  const toggleOrientation = useCallback(async () => {
+    const api = apiRef.current
+    if (!api) return
+    const next: 'horizontal' | 'vertical' =
+      orientation === 'horizontal' ? 'vertical' : 'horizontal'
+    setOrientation(next)
+    try {
+      localStorage.setItem('po-toolbar-orientation', next)
+    } catch {
+      // localStorage disabled — fine, the setting just won't persist.
+    }
+    // Close the color popover if open so its absolute position doesn't
+    // sit in the old layout's coordinate space.
+    setColorPickerOpen(false)
+    const disp = await api.toolbarCurrentDisplayBounds()
+    if (next === 'vertical') {
+      const W = 88
+      const H = 700
+      const x = disp ? disp.workArea.x + disp.workArea.width - W - 12 : 24
+      const y = disp ? disp.workArea.y + Math.max(24, Math.floor((disp.workArea.height - H) / 2)) : 24
+      api.toolbarSetBounds({ x, y, width: W, height: H })
+    } else {
+      const W = 1180
+      const H = 112
+      const x = disp ? disp.workArea.x + Math.floor((disp.workArea.width - W) / 2) : 24
+      const y = disp ? disp.workArea.y + 24 : 24
+      api.toolbarSetBounds({ x, y, width: W, height: H })
+    }
+  }, [orientation])
 
   const sendStroke = useCallback((w: number) => {
     setStrokeWidth(w)
@@ -387,13 +440,30 @@ export function Toolbar() {
     return <MinimizedBubble onRestore={handleRestore} api={apiRef.current} />
   }
 
+  const isVertical = orientation === 'vertical'
+  // Layout swaps: when vertical, the wrapper centres the capsule in the
+  // narrow window, the capsule itself stacks its content with flex-col,
+  // and dividers rotate from a vertical line to a horizontal bar.
+  const wrapperCls = isVertical
+    ? 'flex h-screen w-screen items-start justify-center px-2 py-3'
+    : 'flex h-screen w-screen items-center justify-center px-3 py-2'
+  const capsuleCls = isVertical
+    ? 'glass glass-shine flex flex-col items-center gap-1.5 py-7 px-2.5 animate-fade-in-up'
+    : 'glass glass-shine flex items-center gap-1.5 px-7 py-2.5 animate-fade-in-up'
+  const dividerCls = isVertical ? 'w-7 h-px bg-white/[0.08]' : 'h-7 w-px bg-white/[0.08]'
+  const dividerInlineCls = isVertical
+    ? 'my-1 w-7 h-px bg-white/[0.08]'
+    : 'mx-1 h-7 w-px bg-white/[0.08]'
+  // Groups of buttons (tools, actions, cursor area) need to stack in
+  // vertical mode just like the parent capsule.
+  const groupCls = isVertical
+    ? 'flex flex-col items-center gap-1'
+    : 'flex items-center gap-1'
+
   return (
-    <div
-      className="flex h-screen w-screen items-center justify-center px-3 py-2"
-      style={{ background: 'transparent' }}
-    >
+    <div className={wrapperCls} style={{ background: 'transparent' }}>
       <div
-        className="glass glass-shine flex items-center gap-1.5 px-7 py-2.5 animate-fade-in-up"
+        className={capsuleCls}
         style={
           {
             // Allow the user to drag the whole toolbar by default;
@@ -432,11 +502,11 @@ export function Toolbar() {
           <Mascot size={30} />
         </button>
 
-        <div className="h-7 w-px bg-white/[0.08]" aria-hidden />
+        <div className={dividerCls} aria-hidden />
 
         {/* Tools */}
         <div
-          className="flex items-center gap-1"
+          className={groupCls}
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           {TOOLS.map(({ id, label, shortcut, Icon }) => {
@@ -478,7 +548,7 @@ export function Toolbar() {
           })}
         </div>
 
-        <div className="h-7 w-px bg-white/[0.08]" aria-hidden />
+        <div className={dividerCls} aria-hidden />
 
         {/* Color button — single swatch + chevron-style ring that
             opens a popover with the full palette. Big space saver vs
@@ -515,7 +585,11 @@ export function Toolbar() {
             <div
               role="dialog"
               aria-label="Palette de couleurs"
-              className="glass glass-shine absolute top-full left-1/2 z-50 mt-3 flex -translate-x-1/2 items-center gap-2 rounded-full px-3 py-2 shadow-glass animate-fade-in-up"
+              className={
+                isVertical
+                  ? 'glass glass-shine absolute right-full top-1/2 z-50 mr-3 flex -translate-y-1/2 flex-col items-center gap-2 rounded-full px-2 py-3 shadow-glass animate-fade-in-up'
+                  : 'glass glass-shine absolute top-full left-1/2 z-50 mt-3 flex -translate-x-1/2 items-center gap-2 rounded-full px-3 py-2 shadow-glass animate-fade-in-up'
+              }
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             >
               {COLORS.map(({ hex, label }) => {
@@ -548,36 +622,41 @@ export function Toolbar() {
           )}
         </div>
 
-        <div className="h-7 w-px bg-white/[0.08]" aria-hidden />
+        {/* Stroke slider is hidden in vertical mode — it needs ~80 px of
+            horizontal real estate which doesn't fit the 88 px-wide
+            side-dock. The value remains adjustable from Home → Tools. */}
+        {!isVertical && (
+          <>
+            <div className={dividerCls} aria-hidden />
+            <div
+              className="flex items-center gap-2 px-1"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            >
+              <label className="flex items-center gap-1.5" title="Épaisseur du trait">
+                <span className="text-[10px] uppercase tracking-wider text-otter-200/60">px</span>
+                <input
+                  type="range"
+                  min={1}
+                  max={16}
+                  step={1}
+                  value={strokeWidth}
+                  onChange={(e) => sendStroke(Number(e.target.value))}
+                  aria-label="Épaisseur"
+                  className="h-1 w-14 cursor-pointer accent-otter-400"
+                />
+                <span className="w-4 text-right text-[10px] font-medium text-otter-300 tabular-nums">
+                  {strokeWidth}
+                </span>
+              </label>
+            </div>
+          </>
+        )}
 
-        {/* Stroke + opacity sliders */}
-        <div
-          className="flex items-center gap-2 px-1"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        >
-          <label className="flex items-center gap-1.5" title="Épaisseur du trait">
-            <span className="text-[10px] uppercase tracking-wider text-otter-200/60">px</span>
-            <input
-              type="range"
-              min={1}
-              max={16}
-              step={1}
-              value={strokeWidth}
-              onChange={(e) => sendStroke(Number(e.target.value))}
-              aria-label="Épaisseur"
-              className="h-1 w-14 cursor-pointer accent-otter-400"
-            />
-            <span className="w-4 text-right text-[10px] font-medium text-otter-300 tabular-nums">
-              {strokeWidth}
-            </span>
-          </label>
-        </div>
-
-        <div className="h-7 w-px bg-white/[0.08]" aria-hidden />
+        <div className={dividerCls} aria-hidden />
 
         {/* Action buttons (undo, clear, console, minimize, close) */}
         <div
-          className="flex items-center gap-1"
+          className={groupCls}
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           <button
@@ -599,7 +678,7 @@ export function Toolbar() {
             <Eraser className="h-4 w-4" strokeWidth={2} />
           </button>
 
-          <div className="mx-1 h-7 w-px bg-white/[0.08]" aria-hidden />
+          <div className={dividerInlineCls} aria-hidden />
 
           {/* LIVE Sanitizer toggle — scans the screen with OCR and masks secrets
               on the overlay in real time. Visible to anyone watching your
@@ -642,7 +721,11 @@ export function Toolbar() {
           </button>
 
           <div
-            className="relative flex items-center"
+            className={
+              isVertical
+                ? 'relative flex flex-col items-center'
+                : 'relative flex items-center'
+            }
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           >
             <button
@@ -671,7 +754,11 @@ export function Toolbar() {
               <Crosshair className="h-4 w-4" strokeWidth={2} />
             </button>
             <label
-              className="ml-0.5 inline-flex h-8 w-5 items-center justify-center rounded-md cursor-pointer hover:bg-white/[0.05]"
+              className={
+                isVertical
+                  ? 'mt-0.5 inline-flex h-8 w-5 items-center justify-center rounded-md cursor-pointer hover:bg-white/[0.05]'
+                  : 'ml-0.5 inline-flex h-8 w-5 items-center justify-center rounded-md cursor-pointer hover:bg-white/[0.05]'
+              }
               title="Couleur du curseur"
             >
               <span
@@ -687,32 +774,34 @@ export function Toolbar() {
                 className="sr-only"
               />
             </label>
-            {/* Cursor size — applies to the highlight halo + particle
-                base size. Sits right next to the color picker so the
-                "personnaliser le curseur" controls are grouped. */}
-            <label
-              className="ml-1 inline-flex h-8 items-center gap-1 rounded-md px-1 hover:bg-white/[0.05]"
-              title="Taille du curseur"
-            >
-              <span className="text-[9px] uppercase tracking-wider text-otter-200/55">
-                ×
-              </span>
-              <input
-                type="range"
-                min={0.5}
-                max={2}
-                step={0.1}
-                value={cursorSettings.size}
-                onChange={(e) =>
-                  setStoredCursor({ size: Number(e.target.value) })
-                }
-                aria-label="Taille du curseur"
-                className="h-1 w-12 cursor-pointer accent-coral-400"
-              />
-              <span className="w-5 text-right text-[9px] font-medium text-otter-200/70 tabular-nums">
-                {cursorSettings.size.toFixed(1)}
-              </span>
-            </label>
+            {/* Cursor size — hidden in vertical mode for the same
+                reason as the stroke slider. Still tweakable from
+                Home → Tools. */}
+            {!isVertical && (
+              <label
+                className="ml-1 inline-flex h-8 items-center gap-1 rounded-md px-1 hover:bg-white/[0.05]"
+                title="Taille du curseur"
+              >
+                <span className="text-[9px] uppercase tracking-wider text-otter-200/55">
+                  ×
+                </span>
+                <input
+                  type="range"
+                  min={0.5}
+                  max={2}
+                  step={0.1}
+                  value={cursorSettings.size}
+                  onChange={(e) =>
+                    setStoredCursor({ size: Number(e.target.value) })
+                  }
+                  aria-label="Taille du curseur"
+                  className="h-1 w-12 cursor-pointer accent-coral-400"
+                />
+                <span className="w-5 text-right text-[9px] font-medium text-otter-200/70 tabular-nums">
+                  {cursorSettings.size.toFixed(1)}
+                </span>
+              </label>
+            )}
           </div>
 
           <button
@@ -732,6 +821,19 @@ export function Toolbar() {
             className="flex h-8 w-8 items-center justify-center rounded-lg text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
           >
             <Layout className="h-4 w-4" strokeWidth={2} />
+          </button>
+          <button
+            type="button"
+            onClick={() => void toggleOrientation()}
+            title={
+              isVertical
+                ? 'Repasser en barre horizontale (haut d\'écran)'
+                : 'Passer en colonne verticale (bord droit d\'écran)'
+            }
+            aria-label="Changer l'orientation de la toolbar"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
+          >
+            <RotateCcw className="h-4 w-4" strokeWidth={2} />
           </button>
           <button
             type="button"

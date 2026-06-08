@@ -45,6 +45,11 @@ declare global {
     onToolbarStatus(cb: (status: { enabled: boolean }) => void): () => void
     toolbarSetHeight(height: number): void
     toolbarSetPosition(x: number, y: number): void
+    toolbarSetBounds(b: { x: number; y: number; width: number; height: number }): void
+    toolbarCurrentDisplayBounds(): Promise<{
+      workArea: { x: number; y: number; width: number; height: number }
+      scaleFactor: number
+    } | null>
 
     setTool(tool: ToolName): void
     setColor(hex: string): void

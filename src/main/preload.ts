@@ -40,6 +40,18 @@ const api = {
   toolbarSetPosition: (x: number, y: number) =>
     ipcRenderer.send('toolbar:set-position', { x, y }),
 
+  /** Atomic resize+reposition. Used by the vertical-dock toggle so the
+   *  orientation change applies without a flash of the wrong shape. */
+  toolbarSetBounds: (b: { x: number; y: number; width: number; height: number }) =>
+    ipcRenderer.send('toolbar:set-bounds', b),
+
+  /** Get the workArea of the display the toolbar currently sits on so
+   *  the renderer can snap to the right/left edge of THAT screen. */
+  toolbarCurrentDisplayBounds: (): Promise<{
+    workArea: { x: number; y: number; width: number; height: number }
+    scaleFactor: number
+  } | null> => ipcRenderer.invoke('toolbar:current-display-bounds'),
+
   onToolbarStatus: (cb: (status: { enabled: boolean }) => void) => {
     const handler = (_e: unknown, status: { enabled: boolean }) => cb(status)
     ipcRenderer.on('home:toolbar-status', handler)

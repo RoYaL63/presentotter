@@ -14,7 +14,11 @@ import {
 } from 'electron'
 import { promises as fsp, accessSync, constants as fsConstants } from 'node:fs'
 import path from 'path'
-import { startTripleAltDetector, stopTripleAltDetector } from './triple-alt-detector'
+import {
+  startTripleAltDetector,
+  stopTripleAltDetector,
+  setEscapeHandler
+} from './triple-alt-detector'
 import { checkForUpdate, downloadAndLaunch, type UpdateCheck } from './updater'
 
 /**
@@ -61,6 +65,34 @@ function rendererUrl(hash: 'home' | 'toolbar' | 'overlay'): string {
   }
   const filePath = path.join(__dirname, '..', 'renderer', 'index.html')
   return `file://${filePath}#${hash}`
+}
+
+/**
+ * Clamp a (x, y, w, h) rectangle so the resulting window stays within
+ * the union of every display's workArea, keeping at least MARGIN px on
+ * each axis visible. Used by every toolbar resize/move path so a
+ * mid-screen drag, a minimize→restore round-trip, or an orientation
+ * flip can never park the window off-screen.
+ */
+function clampToolbarPosition(
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): { x: number; y: number } {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const d of screen.getAllDisplays()) {
+    const a = d.workArea
+    if (a.x < minX) minX = a.x
+    if (a.y < minY) minY = a.y
+    if (a.x + a.width > maxX) maxX = a.x + a.width
+    if (a.y + a.height > maxY) maxY = a.y + a.height
+  }
+  if (!Number.isFinite(minX)) return { x, y } // no displays — bail
+  const MARGIN = 24
+  const cx = Math.max(minX - width + MARGIN, Math.min(maxX - MARGIN, x))
+  const cy = Math.max(minY - height + MARGIN, Math.min(maxY - MARGIN, y))
+  return { x: cx, y: cy }
 }
 
 function getWindowRole(
@@ -587,44 +619,83 @@ function registerIpcHandlers(): void {
   })
   ipcMain.on('toolbar:restore', () => {
     if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
-    toolbarWindow.setSize(1180, 112, true)
+    const b = toolbarWindow.getBounds()
+    // Restore to whatever the renderer asked for last (horizontal default).
+    // The restore IPC sets size, the renderer separately drives orientation
+    // via toolbar:set-bounds when applicable.
+    const W = 1180
+    const H = 112
+    const { x, y } = clampToolbarPosition(b.x, b.y, W, H)
+    toolbarWindow.setBounds({ x, y, width: W, height: H })
   })
   /**
    * Renderer asks to resize the toolbar window vertically. Used by the
    * color popover so it can render below the capsule without being
-   * clipped at the bottom edge.
+   * clipped at the bottom edge. The clamp keeps the resized window
+   * fully on-screen even if the capsule was near a screen edge.
    */
   ipcMain.on('toolbar:set-height', (_e, height: number) => {
     if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
     const b = toolbarWindow.getBounds()
-    const safe = Math.max(112, Math.min(400, Math.floor(height)))
-    toolbarWindow.setBounds({ x: b.x, y: b.y, width: b.width, height: safe })
+    const safeH = Math.max(80, Math.min(900, Math.floor(height)))
+    const { x, y } = clampToolbarPosition(b.x, b.y, b.width, safeH)
+    toolbarWindow.setBounds({ x, y, width: b.width, height: safeH })
   })
   /**
    * Renderer asks to relocate the toolbar window. Used by the minimized
-   * bubble so the user can drag it anywhere on screen. We clamp to the
-   * union of every display's work area so the bubble can't be parked
-   * off-screen and lost.
+   * bubble + (eventually) vertical-dock snap. The clamp keeps the
+   * window on-screen even if the user dragged it past a display edge.
    */
   ipcMain.on('toolbar:set-position', (_e, point: { x: number; y: number }) => {
     if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
     if (typeof point?.x !== 'number' || typeof point?.y !== 'number') return
     const b = toolbarWindow.getBounds()
-    // Build a clamping box from the union of all displays so the bubble
-    // can land on any monitor but never disappear entirely off-screen.
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-    for (const d of screen.getAllDisplays()) {
-      const a = d.workArea
-      if (a.x < minX) minX = a.x
-      if (a.y < minY) minY = a.y
-      if (a.x + a.width > maxX) maxX = a.x + a.width
-      if (a.y + a.height > maxY) maxY = a.y + a.height
+    const { x, y } = clampToolbarPosition(Math.floor(point.x), Math.floor(point.y), b.width, b.height)
+    toolbarWindow.setBounds({ x, y, width: b.width, height: b.height })
+  })
+  /**
+   * Atomic resize+position: used by the vertical-dock toggle so we go
+   * from "horizontal at (X, Y)" to "vertical at right edge of current
+   * display" in a single window operation (avoiding a flash of the
+   * old shape at the wrong position).
+   */
+  ipcMain.on(
+    'toolbar:set-bounds',
+    (_e, b: { x: number; y: number; width: number; height: number }) => {
+      if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
+      if (
+        typeof b?.x !== 'number' ||
+        typeof b?.y !== 'number' ||
+        typeof b?.width !== 'number' ||
+        typeof b?.height !== 'number'
+      ) {
+        return
+      }
+      const safeW = Math.max(60, Math.min(2000, Math.floor(b.width)))
+      const safeH = Math.max(60, Math.min(2000, Math.floor(b.height)))
+      const { x, y } = clampToolbarPosition(
+        Math.floor(b.x),
+        Math.floor(b.y),
+        safeW,
+        safeH
+      )
+      toolbarWindow.setBounds({ x, y, width: safeW, height: safeH })
     }
-    // Keep at least 24 px of the window on-screen on each axis.
-    const margin = 24
-    const cx = Math.max(minX - b.width + margin, Math.min(maxX - margin, Math.floor(point.x)))
-    const cy = Math.max(minY - b.height + margin, Math.min(maxY - margin, Math.floor(point.y)))
-    toolbarWindow.setBounds({ x: cx, y: cy, width: b.width, height: b.height })
+  )
+  /**
+   * Renderer asks for the bounds of the display the toolbar is on
+   * right now. Used by the vertical-dock toggle to snap to that
+   * display's right edge.
+   */
+  ipcMain.handle('toolbar:current-display-bounds', () => {
+    if (toolbarWindow === null || toolbarWindow.isDestroyed()) return null
+    const b = toolbarWindow.getBounds()
+    // Center point of the window — the display containing that point
+    // is the "current" display.
+    const cx = b.x + Math.floor(b.width / 2)
+    const cy = b.y + Math.floor(b.height / 2)
+    const d = screen.getDisplayNearestPoint({ x: cx, y: cy })
+    return { workArea: d.workArea, scaleFactor: d.scaleFactor }
   })
 
   // Toolbar → Overlay(s)
@@ -768,7 +839,10 @@ function registerGlobalShortcuts(): void {
         else toolbarWindow.show()
       }
     },
-    { accel: 'Escape', fn: () => selectToolFromShortcut('select') }
+    // Escape is handled via uiohook (see setEscapeHandler in startup)
+    // rather than globalShortcut because the latter silently fails when
+    // another running app owns the accelerator — which is the rule
+    // rather than the exception for Escape.
   ]
 
   for (const { accel, fn } of bindings) {
@@ -887,6 +961,12 @@ app
     registerGlobalShortcuts()
     setupDisplayHotPlug()
     startTripleAltDetector(handleTripleAlt)
+    // Backup Escape handler via uiohook: Electron's globalShortcut
+    // for Escape silently fails when another running app already owns
+    // the accelerator (Chrome, Word, anything with a modal). uiohook
+    // taps the raw OS stream so we always see the press, and crucially
+    // doesn't consume it — the focused app still receives Escape.
+    setEscapeHandler(() => selectToolFromShortcut('select'))
   })
   .catch((err: unknown) => {
     console.error('[main] startup failed:', err)

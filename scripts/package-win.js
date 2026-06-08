@@ -115,6 +115,20 @@ async function main() {
   const appVersion = String(pkg.version)
   console.log(`[package-win] Packaging from ${projectRoot} (v${appVersion})`)
 
+  // Use locally cached Electron binaries when available so a GitHub
+  // outage (e.g. 504 on SHASUMS256.txt) doesn't block the build. The
+  // @electron/get cache root is what we point at; packager picks up the
+  // matching `electron-v<X>-win32-x64.zip` for the current dep version.
+  const electronCache =
+    process.env['ELECTRON_CACHE'] ||
+    path.join(process.env['LOCALAPPDATA'] || '', 'electron', 'Cache')
+  const cacheHasZip =
+    electronCache &&
+    fs.existsSync(electronCache) &&
+    fs
+      .readdirSync(electronCache)
+      .some((f) => /^electron-v[\d.]+-win32-x64\.zip$/.test(f))
+
   const out = await packager({
     dir: projectRoot,
     name: 'PresentOtter',
@@ -122,6 +136,7 @@ async function main() {
     arch: 'x64',
     out: path.join(projectRoot, 'release'),
     overwrite: true,
+    ...(cacheHasZip ? { electronZipDir: electronCache } : {}),
     // Native .node binaries must live OUTSIDE asar so dlopen() can mmap
     // them — uiohook-napi.node would otherwise fail with "Cannot find
     // module" at runtime when Electron tries to load the prebuild.
