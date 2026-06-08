@@ -194,7 +194,11 @@ export function Toolbar() {
     const disp = await api.toolbarCurrentDisplayBounds()
     if (next === 'vertical') {
       const W = 88
-      const H = 700
+      // 820 px gives enough room for every button at gap-1.5 + dividers
+      // + py-7 padding. Below ~780 the bottom buttons (rotate, minimize,
+      // close) get clipped, which is what made the previous build look
+      // like the bar was "cut" and unrecoverable.
+      const H = 820
       const x = disp ? disp.workArea.x + disp.workArea.width - W - 12 : 24
       const y = disp ? disp.workArea.y + Math.max(24, Math.floor((disp.workArea.height - H) / 2)) : 24
       api.toolbarSetBounds({ x, y, width: W, height: H })
@@ -431,9 +435,25 @@ export function Toolbar() {
     setMinimized(true)
     apiRef.current?.toolbarMinimize()
   }
+  /**
+   * Restore the toolbar to its full shape — and crucially, to the
+   * shape matching the CURRENT orientation. The legacy `toolbarRestore`
+   * IPC always hard-coded the horizontal dimensions, so coming back
+   * from the minimized bubble while orientation was 'vertical' would
+   * leave the window at 1180×112 with vertical layout inside — narrow
+   * column rendered into a wide capsule. We send set-bounds with the
+   * orientation-aware size + the bubble's current position so the
+   * shape lands where the user expects.
+   */
   const handleRestore = () => {
     setMinimized(false)
-    apiRef.current?.toolbarRestore()
+    const x = window.screenX
+    const y = window.screenY
+    if (orientation === 'vertical') {
+      apiRef.current?.toolbarSetBounds({ x, y, width: 88, height: 820 })
+    } else {
+      apiRef.current?.toolbarRestore()
+    }
   }
 
   if (minimized) {
@@ -447,8 +467,12 @@ export function Toolbar() {
   const wrapperCls = isVertical
     ? 'flex h-screen w-screen items-start justify-center px-2 py-3'
     : 'flex h-screen w-screen items-center justify-center px-3 py-2'
+  // Vertical: tighter padding + overflow-y-auto as a safety net for
+  // small screens where the full content can't fit. The user can still
+  // scroll to reach a button if their screen is too short to show
+  // everything. Horizontal keeps its original spacing.
   const capsuleCls = isVertical
-    ? 'glass glass-shine flex flex-col items-center gap-1.5 py-7 px-2.5 animate-fade-in-up'
+    ? 'glass glass-shine flex flex-col items-center gap-1 py-3 px-2.5 animate-fade-in-up max-h-full overflow-y-auto'
     : 'glass glass-shine flex items-center gap-1.5 px-7 py-2.5 animate-fade-in-up'
   const dividerCls = isVertical ? 'w-7 h-px bg-white/[0.08]' : 'h-7 w-px bg-white/[0.08]'
   const dividerInlineCls = isVertical
@@ -500,6 +524,24 @@ export function Toolbar() {
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           <Mascot size={30} />
+        </button>
+
+        {/* Orientation toggle — placed at the TOP so even if the vertical
+            bar gets visually truncated on a short screen, the user can
+            always reach the button to switch back to horizontal. */}
+        <button
+          type="button"
+          onClick={() => void toggleOrientation()}
+          title={
+            isVertical
+              ? 'Repasser en barre horizontale (haut d\'écran)'
+              : 'Passer en colonne verticale (bord droit d\'écran)'
+          }
+          aria-label="Changer l'orientation de la toolbar"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          <RotateCcw className="h-4 w-4" strokeWidth={2} />
         </button>
 
         <div className={dividerCls} aria-hidden />
@@ -804,37 +846,33 @@ export function Toolbar() {
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={() => apiRef.current?.openShortcuts()}
-            title="Tous les raccourcis clavier — s'ouvre dans la fenêtre principale"
-            aria-label="Aide raccourcis"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
-          >
-            <HelpCircle className="h-4 w-4" strokeWidth={2} />
-          </button>
-          <button
-            type="button"
-            onClick={handleConsole}
-            title="Ouvrir la console · bibliothèque, paramètres"
-            aria-label="Ouvrir la console"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
-          >
-            <Layout className="h-4 w-4" strokeWidth={2} />
-          </button>
-          <button
-            type="button"
-            onClick={() => void toggleOrientation()}
-            title={
-              isVertical
-                ? 'Repasser en barre horizontale (haut d\'écran)'
-                : 'Passer en colonne verticale (bord droit d\'écran)'
-            }
-            aria-label="Changer l'orientation de la toolbar"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
-          >
-            <RotateCcw className="h-4 w-4" strokeWidth={2} />
-          </button>
+          {/* Help + console buttons are hidden in vertical mode because
+              clicking the mascot already brings the Home window forward
+              (where shortcuts + console live). Saves ~64 px in the
+              column for the buttons that actually matter (rotate,
+              minimize, close). */}
+          {!isVertical && (
+            <>
+              <button
+                type="button"
+                onClick={() => apiRef.current?.openShortcuts()}
+                title="Tous les raccourcis clavier — s'ouvre dans la fenêtre principale"
+                aria-label="Aide raccourcis"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
+              >
+                <HelpCircle className="h-4 w-4" strokeWidth={2} />
+              </button>
+              <button
+                type="button"
+                onClick={handleConsole}
+                title="Ouvrir la console · bibliothèque, paramètres"
+                aria-label="Ouvrir la console"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-otter-200/80 transition-all hover:bg-white/[0.06] hover:text-otter-50"
+              >
+                <Layout className="h-4 w-4" strokeWidth={2} />
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={handleMinimize}
