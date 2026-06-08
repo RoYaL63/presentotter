@@ -485,7 +485,22 @@ export function Toolbar() {
     : 'flex items-center gap-1'
 
   return (
-    <div className={wrapperCls} style={{ background: 'transparent' }}>
+    <div
+      className={wrapperCls}
+      style={
+        {
+          background: 'transparent',
+          // Drag from ANY edge of the toolbar window, not just the
+          // grip handle or the centre of the glass capsule. The
+          // transparent margin around the capsule (the part of the
+          // toolbar window that's invisible) becomes draggable too,
+          // so the user can grab whichever edge is closest to their
+          // cursor. Individual buttons inside the capsule still opt
+          // out via `no-drag` so they remain clickable.
+          WebkitAppRegion: 'drag'
+        } as React.CSSProperties
+      }
+    >
       <div
         className={capsuleCls}
         style={
