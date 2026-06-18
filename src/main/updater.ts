@@ -69,13 +69,34 @@ export async function checkForUpdate(): Promise<UpdateCheck> {
 }
 
 /**
- * Download the given .exe to %TEMP%\presentotter-updates\ then launch
- * it with the user's default shell handler (Windows runs it).
+ * Result of an in-app update attempt. `path` is always populated once
+ * the download succeeds; `launched` tells the renderer whether the
+ * shell actually ran the installer (false → Smart App Control / WDAC
+ * blocked, the renderer should offer to open Explorer at the file
+ * so the user can right-click → Properties → Unblock manually).
+ */
+export interface UpdateLaunchResult {
+  /** Absolute path of the downloaded .exe on disk. */
+  path: string
+  /** True if `shell.openPath` reported success. False means Windows
+   *  rejected the launch (most commonly because the binary doesn't
+   *  have an established reputation with Smart App Control). */
+  launched: boolean
+  /** When `launched` is false, the underlying shell error string so
+   *  we can surface it in the UI. */
+  launchError?: string
+}
+
+/**
+ * Download the given .exe to %TEMP%\presentotter-updates\ then try to
+ * launch it via the OS shell. Returns the file path + whether the
+ * launch actually went through. Never throws on launch failure — the
+ * renderer needs the path so it can offer "open the folder" instead.
  */
 export async function downloadAndLaunch(
   url: string,
   onProgress?: (downloaded: number, total: number) => void
-): Promise<string> {
+): Promise<UpdateLaunchResult> {
   const tempDir = path.join(app.getPath('temp'), 'presentotter-updates')
   await fsp.mkdir(tempDir, { recursive: true })
   const filename = url.split('/').pop() ?? 'PresentOtter-Setup.exe'
@@ -83,11 +104,24 @@ export async function downloadAndLaunch(
 
   await streamToFile(url, dest, onProgress)
   // shell.openPath returns '' on success, an error string otherwise.
+  // Smart App Control / WDAC blocks land here with a non-empty string;
+  // do NOT throw — the renderer needs the path to fall back to
+  // "open the containing folder so the user can unblock manually".
   const err = await shell.openPath(dest)
   if (err.length > 0) {
-    throw new Error(`Failed to launch installer: ${err}`)
+    return { path: dest, launched: false, launchError: err }
   }
-  return dest
+  return { path: dest, launched: true }
+}
+
+/**
+ * Reveal the (already downloaded) installer in Explorer so the user
+ * can right-click → Properties → Unblock when Smart App Control kept
+ * the shell launcher from running it. Used by the renderer's "open
+ * folder" fallback button.
+ */
+export async function revealInExplorer(filePath: string): Promise<void> {
+  shell.showItemInFolder(filePath)
 }
 
 // --------- helpers ---------

@@ -166,7 +166,10 @@ declare global {
       htmlUrl: string | null
       publishedAt: string | null
     }>
-    downloadAndLaunchUpdate(url: string): Promise<string>
+    downloadAndLaunchUpdate(
+      url: string
+    ): Promise<{ path: string; launched: boolean; launchError?: string }>
+    revealInstaller(filePath: string): Promise<void>
     onUpdateProgress(
       cb: (p: { downloaded: number; total: number }) => void
     ): () => void

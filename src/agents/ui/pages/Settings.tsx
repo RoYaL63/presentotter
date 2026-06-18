@@ -5,8 +5,10 @@ import {
   Download,
   ExternalLink,
   Film,
+  FolderOpen,
   Loader2,
   RefreshCw,
+  ShieldAlert,
   Sparkles,
   Video
 } from 'lucide-react'
@@ -33,6 +35,11 @@ type DownloadState =
   | { kind: 'downloading'; downloaded: number; total: number }
   | { kind: 'launching' }
   | { kind: 'done'; path: string }
+  /** Download finished but the shell launch was rejected — typically
+   *  Smart App Control / WDAC blocking the unsigned binary. The
+   *  renderer offers a "open the folder" button so the user can
+   *  right-click → Properties → Unblock manually. */
+  | { kind: 'blocked'; path: string; reason: string }
   | { kind: 'error'; message: string }
 
 export function Settings() {
@@ -78,8 +85,19 @@ export function Settings() {
     if (url === null) return
     setDownload({ kind: 'downloading', downloaded: 0, total: 0 })
     try {
-      const path = await window.api.downloadAndLaunchUpdate(url)
-      setDownload({ kind: 'done', path })
+      const res = await window.api.downloadAndLaunchUpdate(url)
+      if (res.launched) {
+        setDownload({ kind: 'done', path: res.path })
+      } else {
+        // Smart App Control / WDAC rejected the shell launch. Surface
+        // a dedicated state so the user gets the "open the folder"
+        // escape hatch instead of a generic error.
+        setDownload({
+          kind: 'blocked',
+          path: res.path,
+          reason: res.launchError ?? 'Lancement refusé par Windows'
+        })
+      }
     } catch (err) {
       setDownload({
         kind: 'error',
@@ -87,6 +105,12 @@ export function Settings() {
       })
     }
   }, [check])
+
+  const handleRevealInstaller = useCallback(async () => {
+    if (window.api === undefined) return
+    if (download.kind !== 'blocked') return
+    await window.api.revealInstaller(download.path)
+  }, [download])
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-8 p-8 lg:p-12">
@@ -218,6 +242,33 @@ export function Settings() {
                 <div className="inline-flex items-center gap-2 text-xs font-semibold text-kelp-200">
                   <CheckCircle2 className="h-3.5 w-3.5" />
                   Installeur ouvert — suis le wizard.
+                </div>
+              )}
+              {download.kind === 'blocked' && (
+                <div className="flex w-full flex-col gap-2 rounded-xl border border-sunray-400/40 bg-sunray-500/10 p-3 text-xs text-sunray-100">
+                  <div className="flex items-start gap-2">
+                    <ShieldAlert className="mt-0.5 h-4 w-4 flex-shrink-0 text-sunray-300" />
+                    <div className="flex-1">
+                      <p className="font-semibold text-otter-50">
+                        Windows a bloqué l&apos;installeur (Smart App Control)
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-sunray-100/80 leading-relaxed">
+                        Le fichier est téléchargé mais Windows a refusé de
+                        le lancer. Ouvre le dossier ci-dessous, clic-droit
+                        sur le Setup → <strong>Propriétés</strong> → coche{' '}
+                        <strong>« Débloquer »</strong> en bas, puis double-clic
+                        pour installer.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleRevealInstaller()}
+                    className="inline-flex w-fit items-center gap-1.5 rounded-full bg-sunray-500/80 px-3 py-1.5 text-[11px] font-bold text-white ring-1 ring-sunray-300/40 transition hover:bg-sunray-400"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    Ouvrir le dossier de téléchargement
+                  </button>
                 </div>
               )}
               {download.kind === 'error' && (

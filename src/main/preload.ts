@@ -364,8 +364,13 @@ const api = {
     htmlUrl: string | null
     publishedAt: string | null
   }> => ipcRenderer.invoke('updates:check'),
-  downloadAndLaunchUpdate: (url: string): Promise<string> =>
+  downloadAndLaunchUpdate: (
+    url: string
+  ): Promise<{ path: string; launched: boolean; launchError?: string }> =>
     ipcRenderer.invoke('updates:download-and-launch', url),
+  /** Reveal the downloaded installer in Explorer (SAC fallback). */
+  revealInstaller: (filePath: string): Promise<void> =>
+    ipcRenderer.invoke('updates:reveal-installer', filePath),
   onUpdateProgress: (
     cb: (p: { downloaded: number; total: number }) => void
   ) => {

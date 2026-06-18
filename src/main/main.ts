@@ -19,7 +19,12 @@ import {
   stopTripleAltDetector,
   setEscapeHandler
 } from './triple-alt-detector'
-import { checkForUpdate, downloadAndLaunch, type UpdateCheck } from './updater'
+import {
+  checkForUpdate,
+  downloadAndLaunch,
+  revealInExplorer,
+  type UpdateCheck
+} from './updater'
 
 /**
  * PresentOtter main process.
@@ -446,6 +451,15 @@ function registerIpcHandlers(): void {
       // Progress fan-out so the renderer can drive a bar.
       event.sender.send('updates:download-progress', { downloaded, total })
     })
+  })
+  /**
+   * Renderer asks to reveal the downloaded installer in Explorer —
+   * the SAC-block escape hatch. Right-click → Properties → Unblock
+   * (or just double-click from there) lets the user past Smart App
+   * Control when the shell launcher itself got rejected.
+   */
+  ipcMain.handle('updates:reveal-installer', async (_e, filePath: string) => {
+    await revealInExplorer(filePath)
   })
 
   /** Recording — enumerate capturable sources for the source picker.
