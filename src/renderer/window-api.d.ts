@@ -9,6 +9,7 @@ declare global {
   type ToolName =
     | 'select'
     | 'pencil'
+    | 'ephemeral'
     | 'rectangle'
     | 'circle'
     | 'arrow'

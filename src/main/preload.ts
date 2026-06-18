@@ -13,6 +13,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 export type ToolName =
   | 'select'
   | 'pencil'
+  | 'ephemeral'
   | 'rectangle'
   | 'circle'
   | 'arrow'

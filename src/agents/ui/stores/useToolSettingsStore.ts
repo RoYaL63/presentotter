@@ -21,6 +21,7 @@ import { create } from 'zustand'
 
 export type ToolId =
   | 'pencil'
+  | 'ephemeral'
   | 'rectangle'
   | 'circle'
   | 'arrow'
@@ -75,6 +76,7 @@ const STORAGE_KEY = 'presentotter:tool-settings:v1'
 // sunray for spotlight focus. Users can override any of these in Outils.
 const FACTORY_DEFAULTS: Record<ToolId, ToolDefaults> = {
   pencil: { color: '#FF8B7B', strokeWidth: 4, opacity: 1 }, // coral pop
+  ephemeral: { color: '#FFC857', strokeWidth: 5, opacity: 1 }, // sunray glow
   rectangle: { color: '#1B5E7B', strokeWidth: 3, opacity: 1 }, // deep-sea
   circle: { color: '#4A7C59', strokeWidth: 3, opacity: 1 }, // kelp green
   arrow: { color: '#FF8B7B', strokeWidth: 5, opacity: 1 }, // coral pop

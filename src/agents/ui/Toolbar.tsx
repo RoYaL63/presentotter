@@ -7,6 +7,7 @@ import {
   Eraser,
   GripVertical,
   HelpCircle,
+  Highlighter,
   Layout,
   Minus,
   MousePointer2,
@@ -28,6 +29,7 @@ import { useToolSettingsStore, type ToolId as SettingsToolId } from './stores/us
 const TOOLS = [
   { id: 'select', label: 'Sélection · passe-through', shortcut: 'Alt+S', Icon: MousePointer2 },
   { id: 'pencil', label: 'Crayon', shortcut: 'Alt+P', Icon: Pencil },
+  { id: 'ephemeral', label: 'Surligneur éphémère (5 s)', shortcut: 'Alt+E', Icon: Highlighter },
   { id: 'rectangle', label: 'Rectangle', shortcut: 'Alt+R', Icon: Square },
   { id: 'circle', label: 'Cercle', shortcut: 'Alt+O', Icon: Circle },
   { id: 'arrow', label: 'Flèche', shortcut: 'Alt+A', Icon: ArrowUpRight },
@@ -234,9 +236,13 @@ export function Toolbar() {
     const api = apiRef.current
     if (!api) return
     const off = api.onToolbarToolChanged((next) => {
-      // Narrow the IPC payload to our local ToolId set
-      const known = TOOLS.find((t) => t.id === next)
-      if (known) setTool(known.id)
+      // Trust the main process — it only emits tool ids that exist
+      // in our TOOLS list. The earlier `TOOLS.find(...)` narrowing
+      // could silently swallow events if the strings ever drifted,
+      // which is exactly what made Escape feel "broken": the state
+      // stayed on the previous tool, the X icon kept showing, and
+      // the user had to click multiple times to break out.
+      setTool(next as ToolId)
     })
     return off
   }, [])

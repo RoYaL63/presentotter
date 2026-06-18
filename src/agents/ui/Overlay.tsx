@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 
-type ToolId = 'select' | 'pencil' | 'rectangle' | 'circle' | 'arrow' | 'text' | 'spotlight'
+type ToolId =
+  | 'select'
+  | 'pencil'
+  | 'ephemeral'
+  | 'rectangle'
+  | 'circle'
+  | 'arrow'
+  | 'text'
+  | 'spotlight'
 
 interface Point {
   x: number
@@ -16,11 +24,19 @@ interface BaseShape {
 
 type Shape =
   | (BaseShape & { kind: 'pencil'; points: Point[] })
+  | (BaseShape & { kind: 'ephemeral'; points: Point[]; createdAt: number })
   | (BaseShape & { kind: 'rectangle'; from: Point; to: Point })
   | (BaseShape & { kind: 'circle'; from: Point; to: Point })
   | (BaseShape & { kind: 'arrow'; from: Point; to: Point })
   | (BaseShape & { kind: 'text'; pos: Point; text: string })
   | (BaseShape & { kind: 'spotlight'; center: Point; radius: number })
+
+/** Total visible lifetime of an ephemeral stroke (full alpha → 0). */
+const EPHEMERAL_LIFE_MS = 5000
+/** Tail of the lifetime over which the stroke fades to nothing. The
+ *  first (LIFE - FADE) ms are at full alpha; the last FADE ms scale
+ *  smoothly to 0. */
+const EPHEMERAL_FADE_MS = 1500
 
 /**
  * Fullscreen transparent canvas. Every shape drawn here is part of the screen
@@ -303,7 +319,15 @@ export function Overlay() {
   const kickAnimationRef = useRef<() => void>(() => {})
   useEffect(() => {
     const loop = (): void => {
-      const active = cursorEnabledRef.current || spotlightActiveRef.current
+      // Active = cursor halo on, OR spotlight following, OR there are
+      // still ephemeral strokes that haven't fully faded out.
+      const hasEphemeral = shapesRef.current.some(
+        (s) => s.kind === 'ephemeral'
+      )
+      const active =
+        cursorEnabledRef.current ||
+        spotlightActiveRef.current ||
+        hasEphemeral
       if (!active && particlesRef.current.length === 0) {
         animationRef.current = null
         return
@@ -312,6 +336,15 @@ export function Overlay() {
       const ttl = cursorTrailMsRef.current
       cursorTrailRef.current = cursorTrailRef.current.filter((s) => now - s.t < ttl)
       particlesRef.current = particlesRef.current.filter((p) => now - p.birth < ttl)
+      // Prune ephemeral strokes whose visible life is done (LIFE_MS).
+      // Doing it here, not inside drawShape, keeps the redraw idempotent.
+      if (hasEphemeral) {
+        const perfNow = performance.now()
+        shapesRef.current = shapesRef.current.filter(
+          (s) =>
+            s.kind !== 'ephemeral' || perfNow - s.createdAt < EPHEMERAL_LIFE_MS
+        )
+      }
       redraw()
       animationRef.current = window.requestAnimationFrame(loop)
     }
@@ -427,6 +460,16 @@ export function Overlay() {
     }
     if (tool === 'pencil') {
       draftRef.current = { ...base, kind: 'pencil', points: [pt] }
+    } else if (tool === 'ephemeral') {
+      // Ephemeral stroke: timestamped at creation. The redraw loop
+      // computes alpha from age and the pruning effect drops the
+      // shape once it's fully invisible.
+      draftRef.current = {
+        ...base,
+        kind: 'ephemeral',
+        points: [pt],
+        createdAt: performance.now()
+      }
     } else if (tool === 'rectangle') {
       draftRef.current = { ...base, kind: 'rectangle', from: pt, to: pt }
     } else if (tool === 'circle') {
@@ -456,7 +499,7 @@ export function Overlay() {
     const draft = draftRef.current
     if (!draft) return
     const pt = { x: e.clientX, y: e.clientY }
-    if (draft.kind === 'pencil') {
+    if (draft.kind === 'pencil' || draft.kind === 'ephemeral') {
       draft.points.push(pt)
     } else if (draft.kind === 'rectangle' || draft.kind === 'circle' || draft.kind === 'arrow') {
       draft.to = pt
@@ -471,14 +514,19 @@ export function Overlay() {
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const draft = draftRef.current
     if (draft) {
-      // Drop pencil shapes with too few points (accidental taps)
+      // Drop pencil-family shapes with too few points (accidental taps)
       const keep =
-        draft.kind === 'pencil'
+        draft.kind === 'pencil' || draft.kind === 'ephemeral'
           ? draft.points.length > 2
           : draft.kind === 'spotlight'
             ? draft.radius > 4
             : true
-      if (keep) shapesRef.current.push(draft)
+      if (keep) {
+        shapesRef.current.push(draft)
+        // Ephemeral shapes need the rAF pump to drive their fade-out;
+        // kick it so the redraw loop starts (or stays) running.
+        if (draft.kind === 'ephemeral') kickAnimationRef.current()
+      }
       draftRef.current = null
       redraw()
     }
@@ -724,6 +772,45 @@ function drawShape(
       // Quadratic-curve smoothing: each control point is a sample, each
       // anchor sits at the midpoint of consecutive samples. Gives a much
       // smoother stroke than naive lineTo through every raw pointer event.
+      ctx.moveTo(first.x, first.y)
+      for (let i = 1; i < pts.length - 1; i++) {
+        const cur = pts[i]
+        const next = pts[i + 1]
+        if (!cur || !next) continue
+        const midX = (cur.x + next.x) / 2
+        const midY = (cur.y + next.y) / 2
+        ctx.quadraticCurveTo(cur.x, cur.y, midX, midY)
+      }
+      const last = pts[pts.length - 1]
+      if (last) ctx.lineTo(last.x, last.y)
+      ctx.stroke()
+      break
+    }
+    case 'ephemeral': {
+      const pts = shape.points
+      if (pts.length === 0) break
+      // Age-based alpha: full opacity for the first (LIFE - FADE) ms,
+      // then linear fall-off to 0 over the last FADE ms.
+      const age = performance.now() - shape.createdAt
+      if (age >= EPHEMERAL_LIFE_MS) break
+      const fadeStart = EPHEMERAL_LIFE_MS - EPHEMERAL_FADE_MS
+      const lifeFactor =
+        age < fadeStart ? 1 : Math.max(0, 1 - (age - fadeStart) / EPHEMERAL_FADE_MS)
+      ctx.globalAlpha = shape.opacity * lifeFactor
+      // Meteor-ish glow: shadow on the stroke gives a soft outer halo
+      // in the shape's color, intensifying the "neon trail" feel and
+      // making the line legible on any background.
+      ctx.shadowBlur = 14
+      ctx.shadowColor = shape.color
+      ctx.beginPath()
+      const first = pts[0]
+      if (!first) break
+      if (pts.length === 1) {
+        ctx.arc(first.x, first.y, shape.strokeWidth / 2, 0, Math.PI * 2)
+        ctx.fillStyle = shape.color
+        ctx.fill()
+        break
+      }
       ctx.moveTo(first.x, first.y)
       for (let i = 1; i < pts.length - 1; i++) {
         const cur = pts[i]

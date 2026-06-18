@@ -815,6 +815,7 @@ function registerGlobalShortcuts(): void {
   const bindings: Array<{ accel: string; fn: () => void }> = [
     { accel: 'Alt+S', fn: () => selectToolFromShortcut('select') },
     { accel: 'Alt+P', fn: () => selectToolFromShortcut('pencil') },
+    { accel: 'Alt+E', fn: () => selectToolFromShortcut('ephemeral') },
     { accel: 'Alt+R', fn: () => selectToolFromShortcut('rectangle') },
     { accel: 'Alt+O', fn: () => selectToolFromShortcut('circle') },
     { accel: 'Alt+A', fn: () => selectToolFromShortcut('arrow') },
