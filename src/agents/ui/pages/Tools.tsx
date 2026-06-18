@@ -123,11 +123,13 @@ export function Tools() {
   const defaults = useToolSettingsStore((s) => s.defaults)
   const cursor = useToolSettingsStore((s) => s.cursor)
   const sanitizer = useToolSettingsStore((s) => s.sanitizer)
+  const ephemeral = useToolSettingsStore((s) => s.ephemeral)
   const setToolColor = useToolSettingsStore((s) => s.setToolColor)
   const setToolStroke = useToolSettingsStore((s) => s.setToolStroke)
   const setToolOpacity = useToolSettingsStore((s) => s.setToolOpacity)
   const setCursor = useToolSettingsStore((s) => s.setCursor)
   const setSanitizer = useToolSettingsStore((s) => s.setSanitizer)
+  const setEphemeral = useToolSettingsStore((s) => s.setEphemeral)
   const resetAll = useToolSettingsStore((s) => s.resetAll)
 
   return (
@@ -244,6 +246,41 @@ export function Tools() {
           value={Math.round(cursor.intensity * 100)}
           onChange={(v) => setCursor({ intensity: v / 100 })}
         />
+      </div>
+
+      {/* Ephemeral highlighter — how long each stroke stays visible. */}
+      <div className="glass glass-shine flex flex-col gap-4 rounded-2xl p-6">
+        <header className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunray-500/15 border border-sunray-400/30 text-sunray-300">
+            <Crosshair className="h-5 w-5" strokeWidth={1.75} />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-otter-50">
+              Surligneur éphémère
+            </h2>
+            <p className="text-xs text-otter-200/60">
+              Le tracé s&apos;estompe progressivement, du premier coup de crayon
+              vers le dernier, puis disparaît.
+            </p>
+          </div>
+        </header>
+
+        <SliderRow
+          label="Temps avant disparition"
+          unit="s"
+          min={2}
+          max={20}
+          step={1}
+          value={Math.round(ephemeral.lifeMs / 1000)}
+          onChange={(v) => setEphemeral({ lifeMs: v * 1000 })}
+        />
+        <p className="text-xs text-otter-200/55">
+          Chaque point du tracé a son propre âge : les premiers coups de
+          crayon disparaissent avant les derniers. La phase de fondu prend
+          environ un tiers de la durée totale. Modifier la valeur n&apos;affecte
+          que les prochains tracés ; ceux déjà à l&apos;écran finissent avec
+          leur durée d&apos;origine.
+        </p>
       </div>
 
       {/* Sanitizer section — controls for the live OCR scanner that runs

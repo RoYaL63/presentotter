@@ -711,6 +711,9 @@ function registerIpcHandlers(): void {
   ipcMain.on('overlay:set-stroke', (_e, width: number) =>
     forwardToOverlays('overlay:set-stroke', width)
   )
+  ipcMain.on('overlay:set-ephemeral-life', (_e, ms: number) =>
+    forwardToOverlays('overlay:set-ephemeral-life', ms)
+  )
   ipcMain.on('overlay:clear', () => forwardToOverlays('overlay:clear'))
   ipcMain.on('overlay:undo', () => forwardToOverlays('overlay:undo'))
 

@@ -56,6 +56,8 @@ declare global {
     setColor(hex: string): void
     setOpacity(value: number): void
     setStrokeWidth(width: number): void
+    setEphemeralLifeMs(ms: number): void
+    onSetEphemeralLifeMs(cb: (ms: number) => void): () => void
     clearOverlay(): void
     undoOverlay(): void
     setOverlayInteractive(interactive: boolean): void

@@ -22,21 +22,36 @@ interface BaseShape {
   opacity: number
 }
 
+/** A point on an ephemeral stroke remembers when it was drawn so the
+ *  fade can wash over the stroke from the oldest end to the newest. */
+interface TimedPoint extends Point {
+  t: number
+}
+
 type Shape =
   | (BaseShape & { kind: 'pencil'; points: Point[] })
-  | (BaseShape & { kind: 'ephemeral'; points: Point[]; createdAt: number })
+  | (BaseShape & {
+      kind: 'ephemeral'
+      points: TimedPoint[]
+      /** Per-stroke override of the global EPHEMERAL_LIFE_MS so the
+       *  user can adjust "how long it stays" without affecting strokes
+       *  already on screen. Captured at pointer-down. */
+      lifeMs: number
+    })
   | (BaseShape & { kind: 'rectangle'; from: Point; to: Point })
   | (BaseShape & { kind: 'circle'; from: Point; to: Point })
   | (BaseShape & { kind: 'arrow'; from: Point; to: Point })
   | (BaseShape & { kind: 'text'; pos: Point; text: string })
   | (BaseShape & { kind: 'spotlight'; center: Point; radius: number })
 
-/** Total visible lifetime of an ephemeral stroke (full alpha → 0). */
-const EPHEMERAL_LIFE_MS = 5000
-/** Tail of the lifetime over which the stroke fades to nothing. The
- *  first (LIFE - FADE) ms are at full alpha; the last FADE ms scale
- *  smoothly to 0. */
-const EPHEMERAL_FADE_MS = 1500
+/** Default total visible lifetime of an ephemeral stroke (full alpha → 0).
+ *  Per-stroke value is set at pointer-down from the user setting. */
+const DEFAULT_EPHEMERAL_LIFE_MS = 5000
+/** Fraction of the per-stroke lifetime spent fading out. The first
+ *  (1 - FADE_RATIO) of the life is at full alpha; the rest scales
+ *  smoothly to 0. Same proportion regardless of total duration so a
+ *  short stroke and a long one share the same "feel". */
+const EPHEMERAL_FADE_RATIO = 0.35
 
 /**
  * Fullscreen transparent canvas. Every shape drawn here is part of the screen
@@ -88,6 +103,10 @@ export function Overlay() {
   const cursorTrailMsRef = useRef<number>(900)
   const cursorIntensityRef = useRef<number>(1)
   const cursorSizeRef = useRef<number>(1)
+  // Lifetime of the next ephemeral stroke, in ms. Driven by the user
+  // setting (Tools → Surligneur éphémère). Strokes already on screen
+  // keep the value they were created with — see `lifeMs` on the shape.
+  const ephemeralLifeMsRef = useRef<number>(DEFAULT_EPHEMERAL_LIFE_MS)
   // Spotlight tool — when active, redraw() paints a dark wash + clear
   // circle that follows the live cursor position. Independent from the
   // cursor-highlight visual (the user can have either, neither, or both).
@@ -133,6 +152,11 @@ export function Overlay() {
     const off4 = api.onSetStrokeWidth((w) => {
       setStrokeWidth(w)
       spotlightStrokeRef.current = w
+    })
+    const off4b = api.onSetEphemeralLifeMs((ms) => {
+      // Clamp at the receive boundary too — defensive against any
+      // future caller that forgets the store's own clamp.
+      ephemeralLifeMsRef.current = Math.max(2000, Math.min(20000, Math.round(ms)))
     })
     const off5 = api.onClear(() => {
       shapesRef.current = []
@@ -260,6 +284,7 @@ export function Overlay() {
       off2()
       off3()
       off4()
+      off4b()
       off5()
       off6()
       off7()
@@ -336,14 +361,19 @@ export function Overlay() {
       const ttl = cursorTrailMsRef.current
       cursorTrailRef.current = cursorTrailRef.current.filter((s) => now - s.t < ttl)
       particlesRef.current = particlesRef.current.filter((p) => now - p.birth < ttl)
-      // Prune ephemeral strokes whose visible life is done (LIFE_MS).
-      // Doing it here, not inside drawShape, keeps the redraw idempotent.
+      // Prune ephemeral strokes whose last point is now older than the
+      // shape's lifeMs. The stroke fades tail-first; we only drop the
+      // shape once even its newest point would render at alpha 0.
+      // Doing the prune here, not inside drawShape, keeps the redraw
+      // idempotent (no shape disappears mid-render).
       if (hasEphemeral) {
         const perfNow = performance.now()
-        shapesRef.current = shapesRef.current.filter(
-          (s) =>
-            s.kind !== 'ephemeral' || perfNow - s.createdAt < EPHEMERAL_LIFE_MS
-        )
+        shapesRef.current = shapesRef.current.filter((s) => {
+          if (s.kind !== 'ephemeral') return true
+          const last = s.points[s.points.length - 1]
+          if (!last) return false
+          return perfNow - last.t < s.lifeMs
+        })
       }
       redraw()
       animationRef.current = window.requestAnimationFrame(loop)
@@ -461,14 +491,17 @@ export function Overlay() {
     if (tool === 'pencil') {
       draftRef.current = { ...base, kind: 'pencil', points: [pt] }
     } else if (tool === 'ephemeral') {
-      // Ephemeral stroke: timestamped at creation. The redraw loop
-      // computes alpha from age and the pruning effect drops the
-      // shape once it's fully invisible.
+      // Ephemeral stroke: every point carries its own timestamp so the
+      // fade washes over the stroke from the oldest end to the newest
+      // (not the whole shape dropping at once). lifeMs is snapshotted
+      // here so changing the setting mid-stroke doesn't shorten the
+      // current one.
+      const now = performance.now()
       draftRef.current = {
         ...base,
         kind: 'ephemeral',
-        points: [pt],
-        createdAt: performance.now()
+        points: [{ x: pt.x, y: pt.y, t: now }],
+        lifeMs: ephemeralLifeMsRef.current
       }
     } else if (tool === 'rectangle') {
       draftRef.current = { ...base, kind: 'rectangle', from: pt, to: pt }
@@ -499,8 +532,13 @@ export function Overlay() {
     const draft = draftRef.current
     if (!draft) return
     const pt = { x: e.clientX, y: e.clientY }
-    if (draft.kind === 'pencil' || draft.kind === 'ephemeral') {
+    if (draft.kind === 'pencil') {
       draft.points.push(pt)
+    } else if (draft.kind === 'ephemeral') {
+      // Timestamped point so each segment of the stroke fades on its
+      // own schedule. performance.now() is monotonic and matches what
+      // we read in the redraw loop, so the math stays stable.
+      draft.points.push({ x: pt.x, y: pt.y, t: performance.now() })
     } else if (draft.kind === 'rectangle' || draft.kind === 'circle' || draft.kind === 'arrow') {
       draft.to = pt
     } else if (draft.kind === 'spotlight') {
@@ -789,40 +827,60 @@ function drawShape(
     case 'ephemeral': {
       const pts = shape.points
       if (pts.length === 0) break
-      // Age-based alpha: full opacity for the first (LIFE - FADE) ms,
-      // then linear fall-off to 0 over the last FADE ms.
-      const age = performance.now() - shape.createdAt
-      if (age >= EPHEMERAL_LIFE_MS) break
-      const fadeStart = EPHEMERAL_LIFE_MS - EPHEMERAL_FADE_MS
-      const lifeFactor =
-        age < fadeStart ? 1 : Math.max(0, 1 - (age - fadeStart) / EPHEMERAL_FADE_MS)
-      ctx.globalAlpha = shape.opacity * lifeFactor
+      // Per-segment alpha: each segment fades on the schedule of its
+      // OWN points, so the oldest end of the stroke goes invisible
+      // first while the newest end is still at full opacity. Hence
+      // we draw segment-by-segment (no batched single-Path stroke).
+      //
+      // life of each point:
+      //   age < holdFor          → alpha = 1
+      //   age in [holdFor, life] → alpha linear 1 → 0
+      //   age >= life            → alpha = 0  (segment skipped)
+      const now = performance.now()
+      const lifeMs = shape.lifeMs
+      const fadeMs = Math.max(200, Math.round(lifeMs * EPHEMERAL_FADE_RATIO))
+      const holdFor = lifeMs - fadeMs
       // Meteor-ish glow: shadow on the stroke gives a soft outer halo
       // in the shape's color, intensifying the "neon trail" feel and
       // making the line legible on any background.
       ctx.shadowBlur = 14
       ctx.shadowColor = shape.color
-      ctx.beginPath()
+
+      const alphaFor = (t: number): number => {
+        const age = now - t
+        if (age <= holdFor) return 1
+        if (age >= lifeMs) return 0
+        return Math.max(0, 1 - (age - holdFor) / fadeMs)
+      }
+
       const first = pts[0]
       if (!first) break
       if (pts.length === 1) {
+        const a = alphaFor(first.t)
+        if (a <= 0) break
+        ctx.globalAlpha = shape.opacity * a
+        ctx.beginPath()
         ctx.arc(first.x, first.y, shape.strokeWidth / 2, 0, Math.PI * 2)
         ctx.fillStyle = shape.color
         ctx.fill()
         break
       }
-      ctx.moveTo(first.x, first.y)
-      for (let i = 1; i < pts.length - 1; i++) {
-        const cur = pts[i]
-        const next = pts[i + 1]
-        if (!cur || !next) continue
-        const midX = (cur.x + next.x) / 2
-        const midY = (cur.y + next.y) / 2
-        ctx.quadraticCurveTo(cur.x, cur.y, midX, midY)
+      // Each segment between consecutive samples gets its own alpha,
+      // averaged from the two endpoints' ages. This gives a smooth
+      // gradient along the stroke rather than visible bands at every
+      // sample. The slight overdraw at the joins is invisible.
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1]
+        const b = pts[i]
+        if (!a || !b) continue
+        const alpha = (alphaFor(a.t) + alphaFor(b.t)) * 0.5
+        if (alpha <= 0.01) continue
+        ctx.globalAlpha = shape.opacity * alpha
+        ctx.beginPath()
+        ctx.moveTo(a.x, a.y)
+        ctx.lineTo(b.x, b.y)
+        ctx.stroke()
       }
-      const last = pts[pts.length - 1]
-      if (last) ctx.lineTo(last.x, last.y)
-      ctx.stroke()
       break
     }
     case 'rectangle': {

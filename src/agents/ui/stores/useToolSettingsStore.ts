@@ -57,15 +57,24 @@ export interface SanitizerSettings {
   contextual: boolean
 }
 
+export interface EphemeralSettings {
+  /** Visible lifetime of each ephemeral stroke point, in ms.
+   *  The user-facing "temps avant disparition" slider, clamped to
+   *  a sensible range so the rAF prune loop can't blow up. */
+  lifeMs: number
+}
+
 export interface ToolSettingsState {
   defaults: Record<ToolId, ToolDefaults>
   cursor: CursorSettings
   sanitizer: SanitizerSettings
+  ephemeral: EphemeralSettings
   setToolColor(tool: ToolId, hex: string): void
   setToolStroke(tool: ToolId, width: number): void
   setToolOpacity(tool: ToolId, opacity: number): void
   setCursor(patch: Partial<CursorSettings>): void
   setSanitizer(patch: Partial<SanitizerSettings>): void
+  setEphemeral(patch: Partial<EphemeralSettings>): void
   resetAll(): void
 }
 
@@ -100,17 +109,23 @@ const FACTORY_SANITIZER: SanitizerSettings = {
   contextual: true
 }
 
+const FACTORY_EPHEMERAL: EphemeralSettings = {
+  lifeMs: 5000
+}
+
 interface PersistedShape {
   defaults: Record<ToolId, ToolDefaults>
   cursor: CursorSettings
   sanitizer: SanitizerSettings
+  ephemeral: EphemeralSettings
 }
 
 function emptyShape(): PersistedShape {
   return {
     defaults: { ...FACTORY_DEFAULTS },
     cursor: { ...FACTORY_CURSOR },
-    sanitizer: { ...FACTORY_SANITIZER }
+    sanitizer: { ...FACTORY_SANITIZER },
+    ephemeral: { ...FACTORY_EPHEMERAL }
   }
 }
 
@@ -132,7 +147,8 @@ function parsePersisted(raw: string): PersistedShape {
   return {
     defaults: { ...FACTORY_DEFAULTS, ...(candidate.defaults ?? {}) },
     cursor: { ...FACTORY_CURSOR, ...(candidate.cursor ?? {}) },
-    sanitizer: { ...FACTORY_SANITIZER, ...(candidate.sanitizer ?? {}) }
+    sanitizer: { ...FACTORY_SANITIZER, ...(candidate.sanitizer ?? {}) },
+    ephemeral: { ...FACTORY_EPHEMERAL, ...(candidate.ephemeral ?? {}) }
   }
 }
 
@@ -147,17 +163,30 @@ function persist(state: PersistedShape): void {
 
 export const useToolSettingsStore = create<ToolSettingsState>((set) => {
   const hydrated = loadFromStorage()
+  // Local helper so each setter doesn't have to enumerate every other
+  // section when persisting. Single source of truth for the snapshot
+  // shape — adding a new section in the future means one diff here.
+  const snap = (
+    s: ToolSettingsState,
+    patch: Partial<PersistedShape>
+  ): PersistedShape => ({
+    defaults: patch.defaults ?? s.defaults,
+    cursor: patch.cursor ?? s.cursor,
+    sanitizer: patch.sanitizer ?? s.sanitizer,
+    ephemeral: patch.ephemeral ?? s.ephemeral
+  })
   return {
     defaults: hydrated.defaults,
     cursor: hydrated.cursor,
     sanitizer: hydrated.sanitizer,
+    ephemeral: hydrated.ephemeral,
     setToolColor(tool, hex) {
       set((s) => {
         const updated = {
           ...s.defaults,
           [tool]: { ...s.defaults[tool], color: hex }
         }
-        persist({ defaults: updated, cursor: s.cursor, sanitizer: s.sanitizer })
+        persist(snap(s, { defaults: updated }))
         return { defaults: updated }
       })
     },
@@ -168,7 +197,7 @@ export const useToolSettingsStore = create<ToolSettingsState>((set) => {
           ...s.defaults,
           [tool]: { ...s.defaults[tool], strokeWidth: clamped }
         }
-        persist({ defaults: updated, cursor: s.cursor, sanitizer: s.sanitizer })
+        persist(snap(s, { defaults: updated }))
         return { defaults: updated }
       })
     },
@@ -179,7 +208,7 @@ export const useToolSettingsStore = create<ToolSettingsState>((set) => {
           ...s.defaults,
           [tool]: { ...s.defaults[tool], opacity: clamped }
         }
-        persist({ defaults: updated, cursor: s.cursor, sanitizer: s.sanitizer })
+        persist(snap(s, { defaults: updated }))
         return { defaults: updated }
       })
     },
@@ -203,15 +232,32 @@ export const useToolSettingsStore = create<ToolSettingsState>((set) => {
             ? { size: Math.max(0.5, Math.min(2.5, patch.size)) }
             : {})
         }
-        persist({ defaults: s.defaults, cursor: updated, sanitizer: s.sanitizer })
+        persist(snap(s, { cursor: updated }))
         return { cursor: updated }
       })
     },
     setSanitizer(patch) {
       set((s) => {
         const updated: SanitizerSettings = { ...s.sanitizer, ...patch }
-        persist({ defaults: s.defaults, cursor: s.cursor, sanitizer: updated })
+        persist(snap(s, { sanitizer: updated }))
         return { sanitizer: updated }
+      })
+    },
+    setEphemeral(patch) {
+      set((s) => {
+        // 2 s minimum so the stroke is at least usable; 20 s ceiling so
+        // a user-typed slider value can't pin the rAF prune loop.
+        const updated: EphemeralSettings = {
+          ...s.ephemeral,
+          ...patch,
+          ...(typeof patch.lifeMs === 'number'
+            ? {
+                lifeMs: Math.max(2000, Math.min(20000, Math.round(patch.lifeMs)))
+              }
+            : {})
+        }
+        persist(snap(s, { ephemeral: updated }))
+        return { ephemeral: updated }
       })
     },
     resetAll() {

@@ -39,8 +39,11 @@ const TOOLS = [
 
 type ToolId = (typeof TOOLS)[number]['id']
 
-// Otter-morphism palette swatches — coral first because it's the signature
-// CTA color and the most common annotation choice during demos.
+// Two rows of 7 — first row is the soft otter-morphism palette (good
+// for elegant annotations during presentations), second row is the
+// punchy "demo emphasis" set (high-saturation primaries + neutrals
+// for max contrast on any background). Black and white sit at the end
+// of row 2 so they're easy to find for monochrome work.
 const COLORS: ReadonlyArray<{ hex: string; label: string }> = [
   { hex: '#FF8B7B', label: 'Coral' },
   { hex: '#FFC857', label: 'Sunray' },
@@ -48,7 +51,14 @@ const COLORS: ReadonlyArray<{ hex: string; label: string }> = [
   { hex: '#B8E0E8', label: 'Aqua' },
   { hex: '#1B5E7B', label: 'Deep Sea' },
   { hex: '#C89E76', label: 'Caramel' },
-  { hex: '#F5E6D3', label: 'Cream' }
+  { hex: '#F5E6D3', label: 'Cream' },
+  { hex: '#FF3B30', label: 'Rouge vif' },
+  { hex: '#FF9500', label: 'Orange' },
+  { hex: '#34C759', label: 'Vert vif' },
+  { hex: '#007AFF', label: 'Bleu vif' },
+  { hex: '#FF2D92', label: 'Rose fluo' },
+  { hex: '#AF52DE', label: 'Violet' },
+  { hex: '#FFFFFF', label: 'Blanc' }
 ]
 
 export function Toolbar() {
@@ -99,6 +109,7 @@ export function Toolbar() {
   const toolDefaults = useToolSettingsStore((s) => s.defaults)
   const cursorSettings = useToolSettingsStore((s) => s.cursor)
   const sanitizerSettings = useToolSettingsStore((s) => s.sanitizer)
+  const ephemeralSettings = useToolSettingsStore((s) => s.ephemeral)
   const setStoredCursor = useToolSettingsStore((s) => s.setCursor)
   // Single source of truth for the cursor color: the persisted store.
   const cursorColor = cursorSettings.color
@@ -344,6 +355,13 @@ export function Toolbar() {
   useEffect(() => {
     engineRef.current?.setContextual(sanitizerSettings.contextual)
   }, [sanitizerSettings.contextual])
+
+  // Push ephemeral lifetime to overlays whenever the user adjusts it
+  // from Tools. Strokes already in flight keep the lifeMs they were
+  // born with — only the NEXT stroke uses the new value.
+  useEffect(() => {
+    apiRef.current?.setEphemeralLifeMs(ephemeralSettings.lifeMs)
+  }, [ephemeralSettings.lifeMs])
 
   const handleToggleLive = useCallback(async () => {
     const api = apiRef.current
@@ -650,8 +668,8 @@ export function Toolbar() {
               aria-label="Palette de couleurs"
               className={
                 isVertical
-                  ? 'glass glass-shine absolute right-full top-1/2 z-50 mr-3 flex -translate-y-1/2 flex-col items-center gap-2 rounded-full px-2 py-3 shadow-glass animate-fade-in-up'
-                  : 'glass glass-shine absolute top-full left-1/2 z-50 mt-3 flex -translate-x-1/2 items-center gap-2 rounded-full px-3 py-2 shadow-glass animate-fade-in-up'
+                  ? 'glass glass-shine absolute right-full top-1/2 z-50 mr-3 grid -translate-y-1/2 grid-cols-2 gap-1.5 rounded-2xl px-2 py-2 shadow-glass animate-fade-in-up'
+                  : 'glass glass-shine absolute top-full left-1/2 z-50 mt-3 grid -translate-x-1/2 grid-cols-7 gap-1.5 rounded-2xl px-2 py-2 shadow-glass animate-fade-in-up'
               }
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             >

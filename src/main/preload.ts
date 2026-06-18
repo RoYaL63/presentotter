@@ -65,6 +65,17 @@ const api = {
   setColor: (hex: string) => ipcRenderer.send('overlay:set-color', hex),
   setOpacity: (value: number) => ipcRenderer.send('overlay:set-opacity', value),
   setStrokeWidth: (width: number) => ipcRenderer.send('overlay:set-stroke', width),
+  /** Push the user's ephemeral-stroke lifetime (ms) to every overlay
+   *  so the next stroke they draw uses the latest value. Strokes
+   *  already on screen keep their per-stroke lifeMs (captured at
+   *  pointer-down) and finish their existing fade. */
+  setEphemeralLifeMs: (ms: number) =>
+    ipcRenderer.send('overlay:set-ephemeral-life', ms),
+  onSetEphemeralLifeMs: (cb: (ms: number) => void) => {
+    const handler = (_e: unknown, ms: number) => cb(ms)
+    ipcRenderer.on('overlay:set-ephemeral-life', handler)
+    return () => ipcRenderer.off('overlay:set-ephemeral-life', handler)
+  },
   clearOverlay: () => ipcRenderer.send('overlay:clear'),
   undoOverlay: () => ipcRenderer.send('overlay:undo'),
 
