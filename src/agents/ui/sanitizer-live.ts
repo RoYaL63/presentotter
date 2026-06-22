@@ -664,6 +664,33 @@ export class SanitizerLiveEngine {
       })
     }
 
+    // Generic shape pass — mask ANY OCR word that *looks* like a secret
+    // by its shape alone (long, high-entropy, mixed character classes),
+    // regardless of a known provider prefix or a nearby label. This is
+    // what catches "a key-shaped string in a chat or on a random site"
+    // that the regex + contextual passes miss. Tuned to skip URLs,
+    // file paths, and ordinary prose so it doesn't mask the whole
+    // screen. Only runs when contextual detection is on (same "be
+    // aggressive" intent).
+    if (this.contextual) {
+      for (const w of words) {
+        if (!w || !w.bbox) continue
+        if (!looksLikeSecretToken(w.text)) continue
+        const PAD = 4
+        const cssX = toCssX(w.bbox.x0) - PAD
+        const cssY = toCssY(w.bbox.y0) - PAD
+        const cssW = (w.bbox.x1 - w.bbox.x0) * scaleX / dpi + PAD * 2
+        const cssH = (w.bbox.y1 - w.bbox.y0) * scaleY / dpi + PAD * 2
+        masks.push({
+          x: Math.floor(cssX),
+          y: Math.floor(cssY),
+          width: Math.ceil(cssW),
+          height: Math.ceil(cssH),
+          label: 'entropy'
+        })
+      }
+    }
+
     return mergeOverlappingMasks(masks)
   }
 
@@ -809,6 +836,59 @@ function rectsOverlap(a: LiveMask, b: LiveMask): boolean {
     a.y < b.y + b.height &&
     a.y + a.height > b.y
   )
+}
+
+/** Shannon entropy in bits/char of a string. Random tokens score high
+ *  (~4+), natural words and repeated chars score low. */
+function shannonEntropy(s: string): number {
+  const freq = new Map<string, number>()
+  for (const c of s) freq.set(c, (freq.get(c) ?? 0) + 1)
+  let h = 0
+  const n = s.length
+  for (const count of freq.values()) {
+    const p = count / n
+    h -= p * Math.log2(p)
+  }
+  return h
+}
+
+/**
+ * Heuristic "does this OCR word look like an API key / token / secret"
+ * by SHAPE only — no provider prefix, no nearby label needed. This is
+ * the safety net that catches credentials in formats we don't enumerate
+ * and contexts we can't label (a token pasted in a chat, shown on a
+ * random dashboard, etc.).
+ *
+ * The bar is deliberately high to avoid masking ordinary text:
+ *   - 18+ chars (real keys are long; this skips most words/IDs)
+ *   - allowed charset only (base64 / url-safe / common separators)
+ *   - at least one digit AND at least one letter (rules out words and
+ *     pure numbers / hex-looking IDs that are usually not secrets)
+ *   - Shannon entropy ≥ 3.5 bits/char (random-looking, not "aaaaaa…"
+ *     or "----------")
+ *   - not a URL / path / email (those have their own handling and are
+ *     usually fine to show)
+ */
+function looksLikeSecretToken(raw: string): boolean {
+  const s = raw.trim()
+  if (s.length < 18 || s.length > 200) return false
+  // Charset gate: only token-ish characters allowed end-to-end.
+  if (!/^[A-Za-z0-9_\-./+=:~]+$/.test(s)) return false
+  // Skip obvious non-secrets that pass the charset gate.
+  if (/^https?:\/\//i.test(s)) return false // URL
+  if (/^[\w.-]+@[\w.-]+$/.test(s)) return false // email
+  if (s.includes('/') && s.split('/').length > 3) return false // path-ish
+  if (/^[0-9.,]+$/.test(s)) return false // pure number
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(s)) {
+    // UUIDs are common, low-risk identifiers; let the regex catalog
+    // decide if a specific one matters rather than blanket-masking.
+    return false
+  }
+  const hasDigit = /\d/.test(s)
+  const hasLetter = /[A-Za-z]/.test(s)
+  if (!hasDigit || !hasLetter) return false
+  if (shannonEntropy(s) < 3.5) return false
+  return true
 }
 
 /**

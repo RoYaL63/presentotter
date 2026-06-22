@@ -19,6 +19,7 @@ export type ToolName =
   | 'arrow'
   | 'text'
   | 'spotlight'
+  | 'blur'
 
 const api = {
   /** Identify which window this renderer belongs to. */

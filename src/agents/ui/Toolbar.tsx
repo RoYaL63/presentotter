@@ -5,6 +5,7 @@ import {
   Circle,
   Crosshair,
   Eraser,
+  EyeOff,
   GripVertical,
   HelpCircle,
   Highlighter,
@@ -34,7 +35,8 @@ const TOOLS = [
   { id: 'circle', label: 'Cercle', shortcut: 'Alt+O', Icon: Circle },
   { id: 'arrow', label: 'Flèche', shortcut: 'Alt+A', Icon: ArrowUpRight },
   { id: 'text', label: 'Texte', shortcut: 'Alt+T', Icon: Type },
-  { id: 'spotlight', label: 'Spotlight', shortcut: 'Alt+L', Icon: Sun }
+  { id: 'spotlight', label: 'Spotlight', shortcut: 'Alt+L', Icon: Sun },
+  { id: 'blur', label: 'Floute une zone (manuel)', shortcut: 'Alt+F', Icon: EyeOff }
 ] as const
 
 type ToolId = (typeof TOOLS)[number]['id']

@@ -9,6 +9,7 @@ type ToolId =
   | 'arrow'
   | 'text'
   | 'spotlight'
+  | 'blur'
 
 interface Point {
   x: number
@@ -43,6 +44,12 @@ type Shape =
   | (BaseShape & { kind: 'arrow'; from: Point; to: Point })
   | (BaseShape & { kind: 'text'; pos: Point; text: string })
   | (BaseShape & { kind: 'spotlight'; center: Point; radius: number })
+  // Manual privacy box — a persistent frosted rectangle the user drags
+  // over anything they want hidden during a screen share. Drawn on the
+  // canvas (real pixels → captured by Meet/Zoom), zero CPU, 100%
+  // reliable, independent of OCR. The "présente et floute si besoin"
+  // escape hatch when the auto sanitizer misses something.
+  | (BaseShape & { kind: 'blur'; from: Point; to: Point })
 
 /** Default total visible lifetime of an ephemeral stroke (full alpha → 0).
  *  Per-stroke value is set at pointer-down from the user setting. */
@@ -505,6 +512,8 @@ export function Overlay() {
       }
     } else if (tool === 'rectangle') {
       draftRef.current = { ...base, kind: 'rectangle', from: pt, to: pt }
+    } else if (tool === 'blur') {
+      draftRef.current = { ...base, kind: 'blur', from: pt, to: pt }
     } else if (tool === 'circle') {
       draftRef.current = { ...base, kind: 'circle', from: pt, to: pt }
     } else if (tool === 'arrow') {
@@ -539,7 +548,12 @@ export function Overlay() {
       // own schedule. performance.now() is monotonic and matches what
       // we read in the redraw loop, so the math stays stable.
       draft.points.push({ x: pt.x, y: pt.y, t: performance.now() })
-    } else if (draft.kind === 'rectangle' || draft.kind === 'circle' || draft.kind === 'arrow') {
+    } else if (
+      draft.kind === 'rectangle' ||
+      draft.kind === 'circle' ||
+      draft.kind === 'arrow' ||
+      draft.kind === 'blur'
+    ) {
       draft.to = pt
     } else if (draft.kind === 'spotlight') {
       const dx = pt.x - draft.center.x
@@ -553,12 +567,16 @@ export function Overlay() {
     const draft = draftRef.current
     if (draft) {
       // Drop pencil-family shapes with too few points (accidental taps)
+      // and zero-area blur boxes (a click without a drag).
       const keep =
         draft.kind === 'pencil' || draft.kind === 'ephemeral'
           ? draft.points.length > 2
           : draft.kind === 'spotlight'
             ? draft.radius > 4
-            : true
+            : draft.kind === 'blur'
+              ? Math.abs(draft.to.x - draft.from.x) > 8 &&
+                Math.abs(draft.to.y - draft.from.y) > 8
+              : true
       if (keep) {
         shapesRef.current.push(draft)
         // Ephemeral shapes need the rAF pump to drive their fade-out;
@@ -694,8 +712,12 @@ export function Overlay() {
                 // visually reads "frosted protective shield" rather than
                 // the previous near-black bar.
                 'repeating-linear-gradient(135deg, rgba(13,53,72,0.95) 0px, rgba(13,53,72,0.95) 7px, rgba(245,230,211,0.92) 7px, rgba(245,230,211,0.92) 14px)',
-              backdropFilter: 'blur(22px) saturate(1.5)',
-              WebkitBackdropFilter: 'blur(22px) saturate(1.5)',
+              // NO backdrop-filter: on a transparent Electron overlay there
+              // are no opaque siblings beneath the DOM node, so blur() has
+              // nothing to sample and is a pure-cost no-op. Worse, applying
+              // it to several wide row-stripes forced a full compositor
+              // repaint on every scan → the freeze the user reported. The
+              // solid gradient above already hides the pixels behind.
               border: '1.5px dashed rgba(255, 139, 123, 0.95)', // coral pop
               borderRadius: 8,
               boxShadow:
@@ -889,6 +911,44 @@ function drawShape(
       const w = Math.abs(shape.to.x - shape.from.x)
       const h = Math.abs(shape.to.y - shape.from.y)
       ctx.strokeRect(x, y, w, h)
+      break
+    }
+    case 'blur': {
+      // Manual privacy box. Real canvas pixels (so screen-share tools
+      // capture it), opaque so nothing leaks through. Frosted look:
+      // deep-sea fill + diagonal cream stripes + coral dashed border,
+      // matching the auto-sanitizer masks' visual language.
+      const x = Math.min(shape.from.x, shape.to.x)
+      const y = Math.min(shape.from.y, shape.to.y)
+      const w = Math.abs(shape.to.x - shape.from.x)
+      const h = Math.abs(shape.to.y - shape.from.y)
+      ctx.save()
+      // Solid base — guarantees the pixels underneath are hidden.
+      ctx.fillStyle = 'rgba(13, 53, 72, 0.97)'
+      ctx.beginPath()
+      ctx.roundRect(x, y, w, h, 8)
+      ctx.fill()
+      // Diagonal cream hatch so it reads as a "protected zone", clipped
+      // to the rounded box.
+      ctx.clip()
+      ctx.strokeStyle = 'rgba(245, 230, 211, 0.18)'
+      ctx.lineWidth = 6
+      for (let d = -h; d < w; d += 16) {
+        ctx.beginPath()
+        ctx.moveTo(x + d, y)
+        ctx.lineTo(x + d + h, y + h)
+        ctx.stroke()
+      }
+      ctx.restore()
+      // Coral dashed border.
+      ctx.save()
+      ctx.strokeStyle = 'rgba(255, 139, 123, 0.95)'
+      ctx.lineWidth = 1.5
+      ctx.setLineDash([6, 4])
+      ctx.beginPath()
+      ctx.roundRect(x, y, w, h, 8)
+      ctx.stroke()
+      ctx.restore()
       break
     }
     case 'circle': {

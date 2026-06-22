@@ -15,6 +15,7 @@ declare global {
     | 'arrow'
     | 'text'
     | 'spotlight'
+    | 'blur'
 
   interface LiveMask {
     x: number

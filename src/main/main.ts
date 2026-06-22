@@ -838,6 +838,7 @@ function registerGlobalShortcuts(): void {
     { accel: 'Alt+A', fn: () => selectToolFromShortcut('arrow') },
     { accel: 'Alt+T', fn: () => selectToolFromShortcut('text') },
     { accel: 'Alt+L', fn: () => selectToolFromShortcut('spotlight') },
+    { accel: 'Alt+F', fn: () => selectToolFromShortcut('blur') },
     { accel: 'Alt+Z', fn: () => forwardToOverlays('overlay:undo') },
     { accel: 'Alt+Shift+C', fn: () => forwardToOverlays('overlay:clear') },
     {

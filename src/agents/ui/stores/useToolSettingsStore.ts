@@ -27,6 +27,7 @@ export type ToolId =
   | 'arrow'
   | 'text'
   | 'spotlight'
+  | 'blur'
 
 export interface ToolDefaults {
   color: string
@@ -90,7 +91,10 @@ const FACTORY_DEFAULTS: Record<ToolId, ToolDefaults> = {
   circle: { color: '#4A7C59', strokeWidth: 3, opacity: 1 }, // kelp green
   arrow: { color: '#FF8B7B', strokeWidth: 5, opacity: 1 }, // coral pop
   text: { color: '#F5E6D3', strokeWidth: 6, opacity: 1 }, // cream
-  spotlight: { color: '#FFC857', strokeWidth: 4, opacity: 0.6 } // sunray
+  spotlight: { color: '#FFC857', strokeWidth: 4, opacity: 0.6 }, // sunray
+  // The blur box ignores color/stroke (it renders a fixed frosted
+  // rectangle) but keeps an entry so the ToolId map stays exhaustive.
+  blur: { color: '#0D3548', strokeWidth: 2, opacity: 1 } // deep-sea
 }
 
 const FACTORY_CURSOR: CursorSettings = {
