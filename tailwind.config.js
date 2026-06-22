@@ -7,7 +7,7 @@ export default {
         // -----------------------------------------------------------------
         // Otterwise — palette signature (otter-morphism)
         // Liquid Glass + Clay Morphism + Aqua + Loutre.
-        // Spec : C:\Users\maill\Documents\Agents\skills\otter-morphism.skill.md
+        // Spec : design system OtterMorphisme (Otterwise Solutions)
         // -----------------------------------------------------------------
         sea: {
           50: '#E8F4F8',  // glacier
