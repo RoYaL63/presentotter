@@ -60,6 +60,23 @@ export default {
         },
 
         // -----------------------------------------------------------------
+        // OtterMorphisme — accent unique menthe (refonte v0.6, voir
+        // document.md). Remplace progressivement le corail comme couleur
+        // d'action. 60/30/10 : fond frais / encre / menthe.
+        // -----------------------------------------------------------------
+        mint: {
+          50: '#E8FBF5',
+          100: '#C9F4E8',
+          200: '#9DEEDA',
+          300: '#5FE3C0',
+          400: '#2BD9AC', // menthe vive (halos, accent lumineux)
+          500: '#19C49E', // menthe dégradé bas
+          600: '#0FA587', // menthe profonde (texte, icônes, labels)
+          700: '#0B806A',
+          900: '#06231C' // texte sur fond menthe
+        },
+
+        // -----------------------------------------------------------------
         // Aliases — gardés pour ne pas casser le code existant.
         // À terme, les composants migrent vers sea/cream/coral.
         // -----------------------------------------------------------------
@@ -128,6 +145,9 @@ export default {
         // Glows
         'glow-coral': '0 0 32px 0 rgba(255, 139, 123, 0.45)',
         'glow-coral-lg': '0 0 64px 0 rgba(255, 139, 123, 0.35)',
+        // Menthe — accent OtterMorphisme (refonte v0.6)
+        'glow-mint': '0 0 32px 0 rgba(43, 217, 172, 0.45)',
+        'glow-mint-lg': '0 0 64px 0 rgba(43, 217, 172, 0.35)',
         'glow-aqua': '0 0 32px 0 rgba(184, 224, 232, 0.55)',
         'glow-aqua-lg': '0 0 64px 0 rgba(184, 224, 232, 0.45)',
         'glow-cream': '0 0 24px 0 rgba(245, 230, 211, 0.55)',

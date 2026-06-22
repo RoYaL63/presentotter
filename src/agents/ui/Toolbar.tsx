@@ -618,7 +618,7 @@ export function Toolbar() {
                 title={buttonTitle}
                 className={`relative flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-200 otter-aqua ${
                   active
-                    ? 'bg-gradient-to-br from-coral-400 to-coral-500 text-white shadow-glow-coral ring-1 ring-coral-300/50'
+                    ? 'bg-gradient-to-br from-mint-400 to-mint-500 text-white shadow-glow-mint ring-1 ring-mint-300/50'
                     : 'text-sea-200/85 hover:bg-white/[0.06] hover:text-white'
                 }`}
               >
@@ -781,14 +781,14 @@ export function Toolbar() {
             aria-label="Sanitizer LIVE"
             className={`relative flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-200 otter-aqua ${
               liveOn
-                ? 'bg-gradient-to-br from-coral-400 to-coral-500 text-white shadow-glow-coral ring-1 ring-coral-300/50'
+                ? 'bg-gradient-to-br from-mint-400 to-mint-500 text-white shadow-glow-mint ring-1 ring-mint-300/50'
                 : 'text-sea-200 hover:bg-white/[0.06] hover:text-white'
             }`}
           >
             <Radar className={`relative h-4 w-4 ${liveOn ? 'animate-pulse' : ''}`} strokeWidth={2} />
             {liveOn && liveStatus !== null && liveStatus.count > 0 && (
               <span
-                className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-coral-500 px-1 text-[9px] font-bold text-white tabular-nums shadow-glow-coral"
+                className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-mint-500 px-1 text-[9px] font-bold text-white tabular-nums shadow-glow-mint"
                 aria-label={`${liveStatus.count} secret(s) détecté(s)`}
               >
                 {liveStatus.count}
@@ -881,7 +881,7 @@ export function Toolbar() {
                     setStoredCursor({ size: Number(e.target.value) })
                   }
                   aria-label="Taille du curseur"
-                  className="h-1 w-12 cursor-pointer accent-coral-400"
+                  className="h-1 w-12 cursor-pointer accent-mint-400"
                 />
                 <span className="w-5 text-right text-[9px] font-medium text-otter-200/70 tabular-nums">
                   {cursorSettings.size.toFixed(1)}
@@ -951,10 +951,10 @@ export function Toolbar() {
         >
           <span className="relative inline-flex h-2 w-2 flex-shrink-0">
             <span
-              className="absolute inset-0 rounded-full bg-coral-400 animate-glow-pulse"
+              className="absolute inset-0 rounded-full bg-mint-400 animate-glow-pulse"
               aria-hidden
             />
-            <span className="relative h-2 w-2 rounded-full bg-coral-500" aria-hidden />
+            <span className="relative h-2 w-2 rounded-full bg-mint-500" aria-hidden />
           </span>
           <span className="font-semibold tracking-wide whitespace-nowrap">
             {livePhase === 'acquiring' && 'Acquisition de l\'écran…'}

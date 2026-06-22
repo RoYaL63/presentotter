@@ -34,12 +34,12 @@ Le guide OtterMorphisme est pensé pour une **page web normale** : fond frais ma
 
 Le verre liquide translucide qui "montre la rivière" n'a aucun sens ici : derrière, c'est le bureau aléatoire de l'utilisateur. Un `backdrop-filter: blur` y est soit illisible, soit inutile (déjà constaté avec les masques sanitizer en v0.5.20).
 
-**Décision :** deux niveaux d'application.
+**Décision (validée par l'utilisateur) :** deux niveaux d'application.
 
-1. **Surfaces cadrées** (Home, Paramètres, Outils, Bibliothèque, Miroir, popups) → OtterMorphisme complet : pâte claire, verre liquide, jour/nuit, goutte de navigation, soulignement rivière. Fond frais maîtrisé.
-2. **Chromes flottants** (Toolbar, Overlay) → "pâte flottante opaque" : on garde le langage menthe + ombres clay + arrondis, mais la capsule est **assez opaque** pour rester lisible sur tout fond, et on n'utilise pas de verre translucide qui dépend de ce qu'il y a derrière. La toolbar suit le mode jour/nuit pour son propre fond, indépendamment du bureau.
+1. **Surfaces cadrées** (Home, Paramètres, Outils, Bibliothèque, Miroir, popups) → reprennent **intégralement le design web envoyé** : pâte claire, verre liquide, jour/nuit, goutte de navigation, soulignement rivière, polices. Fond frais maîtrisé.
+2. **Chromes flottants** (Toolbar, Overlay) → **on ne touche PAS à la structure** (elle reste lisible par-dessus n'importe quel bureau). On change **uniquement la couleur d'action** : corail → menthe. Pas de verre translucide qui dépend du fond, pas de refonte de layout.
 
-Sans cette distinction, la toolbar redeviendrait illisible. C'est le point n°1 à valider avant de coder.
+Citation utilisateur : « il faut que ça reste lisible. […] la page logicielle qui doit reprendre le design web envoyé et […] la toolbar qui flotte par-dessus le bureau, il faut que ça reste comme ça. On change juste la couleur d'action dessus. »
 
 ---
 
@@ -163,9 +163,14 @@ Le sanitizer manuel (outil Floute) est conservé. En parallèle de la refonte, c
 
 ---
 
-## 9. Ce qui est déjà fait (préalable à la refonte)
+## 9. Ce qui est déjà fait
 
-- Bug Échap corrigé : `select` ne s'affiche plus comme actif et ne montre plus l'icône X. Retour propre à l'état "rien de sélectionné" sur Échap.
+- **v0.5.21** — Bug Échap corrigé : `select` ne s'affiche plus comme actif et ne montre plus l'icône X. Retour propre à l'état "rien de sélectionné" sur Échap.
+- **v0.6.0** — Fondations menthe : palette `mint` + `glow-mint` dans Tailwind (additif, aucun token cassé). Toolbar passée en accent menthe (outils actifs, bouton LIVE, badge, slider curseur, pastille de statut) — structure inchangée, lisibilité préservée. C'est la partie "toolbar = juste la couleur d'action" du scope.
+
+## Prochaine étape
+
+Phase B : les surfaces cadrées reprennent le design web complet. Ordre proposé : Home d'abord (vitrine : navbar capsule + goutte, cartes pâte, soulignement rivière, polices, toggle jour/nuit), puis Paramètres / Outils / Bibliothèque / Miroir, puis les modales. Décisions §5 à trancher avant (surtout : sort de la mascotte, mode par défaut).
 
 ---
 
