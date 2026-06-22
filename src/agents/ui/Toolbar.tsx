@@ -593,11 +593,14 @@ export function Toolbar() {
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           {TOOLS.map(({ id, label, shortcut, Icon }) => {
-            const active = tool === id
-            // When the tool is active, the button visually becomes an
-            // "exit this tool" affordance: same coral surface, but the
-            // icon swaps to an ✕ so the user clearly sees that clicking
-            // it again will leave the mode (no need to hunt Échap).
+            // 'select' is the neutral resting state ("no tool / passe-
+            // through"), so it NEVER shows as active and never gets the
+            // X exit affordance. Pressing Escape returns to select →
+            // no button highlights → no stray cross, which is what the
+            // user expects ("plus le logo croix puisqu'il n'est plus
+            // sélectionné"). Only real drawing tools light up coral
+            // and swap their icon to ✕ to advertise "click to exit".
+            const active = tool === id && id !== 'select'
             const DisplayIcon = active ? X : Icon
             const buttonTitle = active
               ? `Quitter ${label.toLowerCase()} · ${shortcut}`
