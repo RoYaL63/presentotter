@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Keyboard, X } from 'lucide-react'
+import { RiverWave } from './components/RiverWave'
 
 /**
  * Cheat-sheet modal listing every keyboard shortcut PresentOtter
@@ -95,6 +96,7 @@ export function ShortcutsHelp({ onClose }: ShortcutsHelpProps) {
       }}
     >
       <div className="otter-glass otter-aqua w-full max-w-xl rounded-3xl p-5 animate-fade-in-up">
+        <RiverWave topClass="rounded-t-3xl" />
         <header className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div

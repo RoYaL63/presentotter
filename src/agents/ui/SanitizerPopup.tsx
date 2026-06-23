@@ -8,6 +8,7 @@ import {
   X
 } from 'lucide-react'
 import { SanitizerAnalyzer, PATTERNS } from '../sanitizer'
+import { RiverWave } from './components/RiverWave'
 import type { DetectedZone } from '@interfaces'
 
 /**
@@ -90,6 +91,7 @@ export function SanitizerPopup({ onClose }: SanitizerPopupProps) {
       }}
     >
       <div className="glass glass-shine w-full max-w-xl rounded-2xl p-5 animate-fade-in-up">
+        <RiverWave topClass="rounded-t-2xl" />
         <header className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-otter-400 to-otter-600 text-white shadow-glow-otter">
