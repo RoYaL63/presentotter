@@ -117,20 +117,21 @@ export function Toolbar() {
   const cursorColor = cursorSettings.color
 
   /** Push the current tool selection to the overlay & toggle click-through.
-   *  Also applies the per-tool defaults from the Tools page so users get
-   *  their preferred color/stroke/opacity automatically.
-   *
-   *  Clicking the icon of the already-active tool deactivates it — the
-   *  user goes back to 'select' (passe-through) without having to hunt
-   *  for the Escape key. */
+   *  Applies the per-tool defaults from the Tools page ONLY until the
+   *  user manually picks a color or stroke. After a manual choice, that
+   *  choice sticks across tool switches (the user asked to "change color
+   *  at any time" without it snapping back to the tool default). */
+  const styleTouchedRef = useRef(false)
   const sendTool = useCallback(
     (next: ToolId) => {
       const target: ToolId = next === tool && next !== 'select' ? 'select' : next
       setTool(target)
       const api = apiRef.current
       if (!api) return
-      // Apply persisted defaults if we have any for this tool
-      if (target !== 'select') {
+      // Apply persisted defaults only if the user hasn't overridden the
+      // color/stroke manually this session. Otherwise we keep whatever
+      // the user last chose, regardless of which tool they (re)select.
+      if (target !== 'select' && !styleTouchedRef.current) {
         const settingsId = target as SettingsToolId
         const def = toolDefaults[settingsId]
         if (def) {
@@ -140,6 +141,11 @@ export function Toolbar() {
           api.setStrokeWidth(def.strokeWidth)
           api.setOpacity(def.opacity)
         }
+      } else if (target !== 'select') {
+        // Re-assert the user's current color/stroke on the overlay so
+        // the new tool draws with it immediately.
+        api.setColor(color)
+        api.setStrokeWidth(strokeWidth)
       }
       api.setTool(target)
       // Spotlight is a passive viewer aid — the user should still be
@@ -154,10 +160,11 @@ export function Toolbar() {
       // they know whether to paint the dark wash + clear circle.
       api.setSpotlightActive(target === 'spotlight')
     },
-    [tool, toolDefaults]
+    [tool, toolDefaults, color, strokeWidth]
   )
 
   const sendColor = useCallback((hex: string) => {
+    styleTouchedRef.current = true
     setColor(hex)
     apiRef.current?.setColor(hex)
   }, [])
@@ -227,6 +234,7 @@ export function Toolbar() {
   }, [orientation])
 
   const sendStroke = useCallback((w: number) => {
+    styleTouchedRef.current = true
     setStrokeWidth(w)
     apiRef.current?.setStrokeWidth(w)
   }, [])

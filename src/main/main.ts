@@ -276,7 +276,13 @@ function createToolbarWindow(): BrowserWindow {
     }
   })
 
-  win.setAlwaysOnTop(true, 'screen-saver')
+  // relativeLevel 1 puts the toolbar ONE layer above the overlay (which
+  // also sits at 'screen-saver'). On Windows two windows at the same
+  // always-on-top level get reordered by activity, so the interactive
+  // overlay could climb over the toolbar and steal clicks (the user
+  // would draw instead of clicking an icon). The higher relative level
+  // keeps the toolbar reliably clickable on top of the draw surface.
+  win.setAlwaysOnTop(true, 'screen-saver', 1)
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 
   void win.loadURL(rendererUrl('toolbar'))
