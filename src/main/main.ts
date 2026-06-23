@@ -306,6 +306,8 @@ function createToolbarWindow(): BrowserWindow {
     }
     overlayWindows.clear()
     stopCursorTracking()
+    stopToolbarHolePoll()
+    overlaysInteractive = false
     notifyHomeStatus()
   })
 
@@ -338,6 +340,8 @@ function closeToolbarAndOverlays(): void {
   }
   overlayWindows.clear()
   stopCursorTracking()
+  stopToolbarHolePoll()
+  overlaysInteractive = false
 }
 
 /**
@@ -372,23 +376,79 @@ function forwardToOverlays<T>(channel: string, payload?: T): void {
   }
 }
 
-function setOverlaysInteractive(interactive: boolean): void {
+/**
+ * Apply a single click-through state to every overlay.
+ *   interactive=true  → overlay captures the pointer (drawing)
+ *   interactive=false → overlay is click-through (events pass beneath)
+ */
+function applyOverlayClickThrough(interactive: boolean): void {
   for (const w of overlayWindows.values()) {
     if (w.isDestroyed()) continue
-    if (interactive) {
-      w.setIgnoreMouseEvents(false)
-      // Focusable stays TRUE (set at creation) so the text input
-      // accepts keystrokes when an overlay receives a focus request.
-    } else {
-      w.setIgnoreMouseEvents(true, { forward: true })
-    }
+    if (interactive) w.setIgnoreMouseEvents(false)
+    else w.setIgnoreMouseEvents(true, { forward: true })
   }
-  // On Windows, `alwaysOnTop: 'screen-saver'` on both the toolbar AND
-  // the overlay puts them in the same z-tier; the OS then orders them
-  // by last activity. An overlay that just received `setFocusable(true)`
-  // can briefly climb above the toolbar, hiding its buttons under the
-  // draw surface. Pushing the toolbar back to the top after every
-  // interactivity flip keeps its clicks reachable.
+}
+
+/**
+ * "Toolbar hole" poll. On Windows the `relativeLevel` argument of
+ * setAlwaysOnTop is a no-op, so an interactive (mouse-capturing) overlay
+ * at the same 'screen-saver' tier can sit ABOVE the toolbar and steal
+ * its clicks — the user draws instead of clicking an icon. Fighting the
+ * z-order via moveTop() proved unreliable, and it breaks on multi-monitor
+ * setups.
+ *
+ * Deterministic fix: while a drawing tool is active, poll the global
+ * cursor position. When it enters the toolbar window's rectangle, make
+ * the overlays click-through so the click falls through to the toolbar;
+ * when it leaves, make them interactive again so drawing resumes. All
+ * coordinates are global DIP screen coords (getCursorScreenPoint +
+ * getBounds), so this works identically on every display.
+ */
+let overlaysInteractive = false
+let toolbarHoleInterval: ReturnType<typeof setInterval> | null = null
+let holeOpen = false
+
+function pointInToolbar(x: number, y: number): boolean {
+  if (toolbarWindow === null || toolbarWindow.isDestroyed()) return false
+  if (!toolbarWindow.isVisible()) return false
+  const b = toolbarWindow.getBounds()
+  return x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height
+}
+
+function startToolbarHolePoll(): void {
+  if (toolbarHoleInterval !== null) return
+  holeOpen = false
+  toolbarHoleInterval = setInterval(() => {
+    if (!overlaysInteractive) return
+    const pt = screen.getCursorScreenPoint()
+    const over = pointInToolbar(pt.x, pt.y)
+    if (over === holeOpen) return // no state change, skip the IPC churn
+    holeOpen = over
+    // over toolbar → overlays click-through (toolbar gets the click)
+    // elsewhere     → overlays interactive (drawing works)
+    applyOverlayClickThrough(!over)
+  }, 40)
+}
+
+function stopToolbarHolePoll(): void {
+  if (toolbarHoleInterval !== null) {
+    clearInterval(toolbarHoleInterval)
+    toolbarHoleInterval = null
+  }
+  holeOpen = false
+}
+
+function setOverlaysInteractive(interactive: boolean): void {
+  overlaysInteractive = interactive
+  if (interactive) {
+    // Start in the interactive state, then let the hole poll punch a
+    // click-through hole whenever the cursor is over the toolbar.
+    applyOverlayClickThrough(true)
+    startToolbarHolePoll()
+  } else {
+    stopToolbarHolePoll()
+    applyOverlayClickThrough(false)
+  }
   if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
     toolbarWindow.moveTop()
   }
@@ -572,6 +632,14 @@ function registerIpcHandlers(): void {
    *  virtual-screen CSS coordinates the overlays use? We pick the display
    *  the cursor is currently on so the user can choose by simply moving
    *  the mouse to the screen they want scanned. */
+  /** Cheap: which display is the cursor on right now? The live engine
+   *  polls this every scan and re-acquires its capture when the value
+   *  changes, so the sanitizer follows the user across monitors instead
+   *  of being stuck on whichever screen it started on. */
+  ipcMain.handle('live:cursor-display-id', () => {
+    return screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id
+  })
+
   ipcMain.handle('live:acquire-target', async () => {
     const cursor = screen.getCursorScreenPoint()
     const display = screen.getDisplayNearestPoint(cursor)

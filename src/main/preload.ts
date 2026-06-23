@@ -99,6 +99,10 @@ const api = {
     }>
   > => ipcRenderer.invoke('mirror:list-displays'),
 
+  /** Which display the cursor is on right now (cheap, no getSources). */
+  liveCursorDisplayId: (): Promise<number> =>
+    ipcRenderer.invoke('live:cursor-display-id'),
+
   liveAcquireTarget: (): Promise<{
     sourceId: string
     displayId: number

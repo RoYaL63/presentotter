@@ -82,6 +82,7 @@ declare global {
     onSetToolbarRect(
       cb: (rect: { x: number; y: number; width: number; height: number } | null) => void
     ): () => void
+    liveCursorDisplayId(): Promise<number>
     liveAcquireTarget(): Promise<{
       sourceId: string
       displayId: number

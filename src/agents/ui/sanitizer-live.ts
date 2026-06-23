@@ -273,6 +273,36 @@ export class SanitizerLiveEngine {
     debug(`video acquired: ${video.videoWidth}x${video.videoHeight}`)
   }
 
+  /**
+   * If the cursor has moved to a different display since we acquired the
+   * capture, tear the stream down and re-acquire for the new display.
+   * Cheap check (one IPC returning a display id) every scan; the
+   * expensive getUserMedia only runs on an actual screen change. This
+   * is what makes the sanitizer follow the user across monitors.
+   */
+  private async switchDisplayIfNeeded(): Promise<void> {
+    if (this.target === null) return
+    let cur: number | undefined
+    try {
+      cur = await window.api?.liveCursorDisplayId()
+    } catch {
+      return // IPC unavailable — keep current capture
+    }
+    if (cur === undefined || cur === this.target.displayId) return
+    debug(`cursor moved to display ${cur} (was ${this.target.displayId}) — re-acquiring`)
+    if (this.stream !== null) {
+      for (const track of this.stream.getTracks()) track.stop()
+      this.stream = null
+    }
+    if (this.video !== null) {
+      this.video.srcObject = null
+      this.video = null
+    }
+    this.lastSignature = null
+    this.lastOcrAt = 0
+    await this.acquireStream()
+  }
+
   private async ensureWorker(): Promise<void> {
     if (this.worker !== null) return
     // Default to English; users can add 'fra' later via settings. Tesseract
@@ -337,45 +367,47 @@ export class SanitizerLiveEngine {
     onScan?: (r: ScanResult) => void,
     onStatus?: (s: 'acquiring' | 'loading-ocr' | 'scanning' | 'idle') => void
   ): Promise<ScanResult | null> {
-    if (this.video === null || this.worker === null) {
-      debug('scanOnce skipped: no video/worker')
+    if (this.worker === null) {
+      debug('scanOnce skipped: no worker')
       return null
     }
     if (this.scanInFlight) return null
-
-    // ---- Frame-stable shortcut --------------------------------------
-    // If the screen looks identical to the last scan, skip the OCR
-    // entirely. The Toolbar's sticky pool (15 s TTL) keeps any masks
-    // from the last real scan visible, so the user sees zero change
-    // and we save 500-1500 ms of CPU + worker memory churn.
-    //
-    // Safety net: time-based forced OCR. Even when the signature says
-    // "stable", we re-OCR after FORCE_OCR_AFTER_MS to catch a tiny
-    // change the 16x9 thumbnail averaged out (e.g., one cell of text
-    // updated with a secret).
-    const now = performance.now()
-    const sig = this.computeFrameSignature(this.video)
-    const sigStable =
-      sig !== null &&
-      this.lastSignature !== null &&
-      this.signaturesMatch(sig, this.lastSignature)
-    const sinceLastOcr = now - this.lastOcrAt
-    if (sigStable && sinceLastOcr < FORCE_OCR_AFTER_MS) {
-      debug(`frame stable (${sinceLastOcr.toFixed(0)} ms since last OCR) — skipping`)
-      onStatus?.('idle')
-      return null
-    }
-    if (sig !== null) this.lastSignature = sig
-    if (sigStable) {
-      debug(`anti-drift forced OCR after ${sinceLastOcr.toFixed(0)} ms`)
-    }
-    this.lastOcrAt = now
-    // ----------------------------------------------------------------
-
     this.scanInFlight = true
-    onStatus?.('scanning')
-    const startedAt = performance.now()
     try {
+      // ---- Multi-monitor: follow the cursor's display ---------------
+      // The capture is pinned to one display. If the user moved to a
+      // different screen, re-acquire so we scan the screen they're
+      // actually looking at (otherwise the sanitizer silently watches
+      // the wrong monitor — the #1 "it doesn't work" cause on multi-
+      // screen setups).
+      await this.switchDisplayIfNeeded()
+      if (this.video === null || this.worker === null) {
+        return null
+      }
+
+      // ---- Frame-stable shortcut -----------------------------------
+      // If the screen looks identical to the last scan, skip the OCR
+      // entirely. The Toolbar's sticky pool (15 s TTL) keeps any masks
+      // from the last real scan visible. Safety net: re-OCR after
+      // FORCE_OCR_AFTER_MS even when stable.
+      const now = performance.now()
+      const sig = this.computeFrameSignature(this.video)
+      const sigStable =
+        sig !== null &&
+        this.lastSignature !== null &&
+        this.signaturesMatch(sig, this.lastSignature)
+      const sinceLastOcr = now - this.lastOcrAt
+      if (sigStable && sinceLastOcr < FORCE_OCR_AFTER_MS) {
+        debug(`frame stable (${sinceLastOcr.toFixed(0)} ms since last OCR) — skipping`)
+        onStatus?.('idle')
+        return null
+      }
+      if (sig !== null) this.lastSignature = sig
+      this.lastOcrAt = now
+      // --------------------------------------------------------------
+
+      onStatus?.('scanning')
+      const startedAt = performance.now()
       const { dataUrl, scaleX, scaleY } = this.captureFrameToDataUrl(this.video)
       if (dataUrl.length === 0) {
         debug('empty frame capture')
