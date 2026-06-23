@@ -3,8 +3,10 @@ import {
   Home as HomeIcon,
   Keyboard,
   Library as LibraryIcon,
+  Moon,
   MonitorPlay,
   Power,
+  Sun,
   Settings as SettingsIcon,
   ShieldCheck,
   Sparkles,
@@ -50,6 +52,25 @@ export function Home() {
   const currentPage = useNavStore((s) => s.currentPage)
   const navigate = useNavStore((s) => s.navigate)
 
+  // Day/night theme — opt-in, defaults to day so nothing changes for
+  // users who don't toggle. Persisted in localStorage; the night CSS is
+  // scoped under html[data-mode='home'][data-theme='night'].
+  const [theme, setTheme] = useState<'day' | 'night'>(() => {
+    try {
+      return localStorage.getItem('po-theme') === 'night' ? 'night' : 'day'
+    } catch {
+      return 'day'
+    }
+  })
+  useEffect(() => {
+    document.documentElement.dataset['theme'] = theme
+    try {
+      localStorage.setItem('po-theme', theme)
+    } catch {
+      // localStorage blocked — theme just won't persist
+    }
+  }, [theme])
+
   const section: SectionId = (
     ['home', 'tools', 'library', 'mirror', 'settings'] as SectionId[]
   ).includes(currentPage as SectionId)
@@ -89,7 +110,12 @@ export function Home() {
       </div>
 
       <div className="relative z-10 flex h-full flex-col">
-        <TopNav current={section} onSelect={navigate} />
+        <TopNav
+          current={section}
+          onSelect={navigate}
+          theme={theme}
+          onToggleTheme={() => setTheme((t) => (t === 'day' ? 'night' : 'day'))}
+        />
         <main className="flex-1 overflow-y-auto">
           <div key={section} className="animate-fade-in-up">
             {renderSection(section)}
@@ -119,9 +145,11 @@ function renderSection(section: SectionId): ReactElement {
 interface TopNavProps {
   current: SectionId
   onSelect(section: PageName): void
+  theme: 'day' | 'night'
+  onToggleTheme(): void
 }
 
-function TopNav({ current, onSelect }: TopNavProps) {
+function TopNav({ current, onSelect, theme, onToggleTheme }: TopNavProps) {
   // Goutte de navigation — the signature OtterMorphisme indicator. An
   // absolutely-positioned "drop" slides (and briefly stretches) behind
   // the active tab. We measure the active button's geometry on every
@@ -168,6 +196,7 @@ function TopNav({ current, onSelect }: TopNavProps) {
         </span>
       </button>
 
+      <div className="flex items-center gap-2">
       <nav
         ref={navRef}
         className="relative flex items-center gap-1"
@@ -205,6 +234,22 @@ function TopNav({ current, onSelect }: TopNavProps) {
           )
         })}
       </nav>
+
+        {/* Day / night toggle — pill in the navbar, sun ↔ moon. */}
+        <button
+          type="button"
+          onClick={onToggleTheme}
+          aria-label={theme === 'day' ? 'Passer en mode nuit' : 'Passer en mode jour'}
+          title={theme === 'day' ? 'Mode nuit' : 'Mode jour'}
+          className="otter-clay relative flex h-9 w-9 items-center justify-center rounded-full text-sea-700 transition-transform duration-200 hover:scale-105 active:scale-95"
+        >
+          {theme === 'day' ? (
+            <Moon className="h-4 w-4" strokeWidth={2} />
+          ) : (
+            <Sun className="h-4 w-4" strokeWidth={2} />
+          )}
+        </button>
+      </div>
     </header>
   )
 }

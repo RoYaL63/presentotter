@@ -596,4 +596,91 @@
       no-repeat bottom / 200% 3.5px;
     animation: riv-flow 3.2s ease-in-out infinite alternate;
   }
+
+  /* ============================================================
+     OTTERMORPHISME — MODE NUIT (opt-in)
+     ----------------------------------------------------------------
+     Scopé html[data-mode='home'][data-theme='night']. Spécificité plus
+     forte que les règles jour (attribut supplémentaire) → l'emporte.
+     Le défaut reste le jour : sans data-theme='night', rien de ceci ne
+     s'applique. Toolbar/overlay (autre data-mode) jamais touchés.
+     ============================================================ */
+  html[data-mode='home'][data-theme='night'] body {
+    background-color: #0A1F1B;
+    color: #E7F3ED;
+  }
+  html[data-mode='home'][data-theme='night'] .otter-mesh {
+    background:
+      radial-gradient(at 18% 28%, #14342B 0%, transparent 52%),
+      radial-gradient(at 82% 72%, #102A24 0%, transparent 50%),
+      radial-gradient(at 50% 100%, rgba(59, 230, 192, 0.10) 0%, transparent 60%),
+      linear-gradient(135deg, #0A1F1B 0%, #143029 100%);
+  }
+  html[data-mode='home'][data-theme='night'] .liquid-orb.bg-sea-200 { background-color: #14342B; }
+  html[data-mode='home'][data-theme='night'] .liquid-orb.bg-cream-100 { background-color: #102A24; }
+  html[data-mode='home'][data-theme='night'] .liquid-orb.bg-coral-200 { background-color: #0F7A66; }
+
+  /* Verre liquide sombre (comme un panneau translucide sur l'eau nuit) */
+  html[data-mode='home'][data-theme='night'] .otter-glass {
+    background: rgba(24, 60, 50, 0.55);
+    border: 1px solid rgba(157, 238, 218, 0.14);
+    box-shadow:
+      0 20px 48px rgba(0, 0, 0, 0.45),
+      inset 0 1px 0 rgba(157, 238, 218, 0.12),
+      inset 0 0 0 1px rgba(157, 238, 218, 0.06);
+  }
+  /* Pâte sombre */
+  html[data-mode='home'][data-theme='night'] .otter-clay {
+    background: linear-gradient(145deg, #183C32, #0F2922);
+    box-shadow:
+      10px 12px 28px rgba(0, 0, 0, 0.4),
+      -8px -8px 22px rgba(157, 238, 218, 0.05),
+      inset 1.5px 1.5px 4px rgba(157, 238, 218, 0.1),
+      inset -2px -2px 6px rgba(0, 0, 0, 0.3);
+    color: #E7F3ED;
+  }
+  /* Badge + goutte de nav en menthe sombre */
+  html[data-mode='home'][data-theme='night'] .otter-badge,
+  html[data-mode='home'][data-theme='night'] .nav-drop {
+    background: linear-gradient(145deg, #1C3A33, #16302A);
+    color: #3BE6C0;
+    box-shadow:
+      0 4px 14px rgba(0, 0, 0, 0.4),
+      inset 0 0 0 1px rgba(59, 230, 192, 0.35);
+  }
+
+  /* Texte : tout ce qui était sombre-sur-clair passe clair-sur-sombre.
+     Les variantes d'opacité (/70 etc.) sont couvertes par le match de
+     sous-chaîne ; on perd la nuance d'alpha mais le texte reste lisible. */
+  html[data-mode='home'][data-theme='night'] [class*='text-sea-700'],
+  html[data-mode='home'][data-theme='night'] [class*='text-otter-50'],
+  html[data-mode='home'][data-theme='night'] [class*='text-otter-100'] {
+    color: #E7F3ED;
+  }
+  html[data-mode='home'][data-theme='night'] [class*='text-otter-200'],
+  html[data-mode='home'][data-theme='night'] [class*='text-cream-800'] {
+    color: rgba(231, 243, 237, 0.7);
+  }
+  html[data-mode='home'][data-theme='night'] [class*='text-otter-300'],
+  html[data-mode='home'][data-theme='night'] [class*='text-fur-300'] {
+    color: #3BE6C0;
+  }
+  html[data-mode='home'][data-theme='night'] [class*='text-coral-400'],
+  html[data-mode='home'][data-theme='night'] [class*='text-coral-500'] {
+    color: #3BE6C0;
+  }
+
+  /* Surfaces blanches translucides → menthe translucide sur sombre */
+  html[data-mode='home'][data-theme='night'] [class*='bg-white\\/'] {
+    background-color: rgba(157, 238, 218, 0.06);
+  }
+  html[data-mode='home'][data-theme='night'] [class*='border-white\\/'] {
+    border-color: rgba(157, 238, 218, 0.12);
+  }
+  html[data-mode='home'][data-theme='night'] [class*='bg-deep-950'] {
+    background-color: rgba(24, 60, 50, 0.6);
+  }
+  html[data-mode='home'][data-theme='night'] :focus-visible {
+    outline-color: #3BE6C0;
+  }
 }

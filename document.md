@@ -173,12 +173,17 @@ Le sanitizer manuel (outil Floute) est conservé. En parallèle de la refonte, c
   - Accent unique menthe : CTA, dégradés, anneaux, focus, remaps corail→menthe sur toutes les pages cadrées (Accueil, Outils, Bibliothèque, Paramètres, Miroir).
   - Soulignement rivière sur le mot "Otter" du wordmark (plus de couleur de texte).
 
-## Reste à faire (Phase B+ / C / D / E)
+## Fait depuis (v0.6.6 → v0.6.8)
 
-- **Goutte de navigation** animée (glisse entre onglets) — pour l'instant l'onglet actif = anneau menthe simple.
-- **Mode jour/nuit** complet + toggle dans la navbar (les tokens nuit sont définis dans ce doc, pas encore câblés ; pour l'instant jour uniquement).
-- **Modales** (SanitizerPopup, RecordingPanel, ShortcutsHelp) : en-tête vague rivière, surfaces pâte dédiées.
-- **Finitions** : bulles/caustiques discrètes sur les fonds cadrés, passe d'accessibilité.
+- **v0.6.6** — Goutte de navigation animée (glisse + s'étire entre onglets) ; survol des cartes -4px + halo menthe.
+- **v0.6.7** — En-têtes de modales à vague rivière (composant `RiverWave`, Sanitizer + Aide raccourcis).
+- **v0.6.8** — Mode jour/nuit. Toggle soleil/lune dans la navbar, persistant. **Opt-in, défaut jour** (sans `data-theme='night'` rien ne change). Bloc CSS nuit scopé `html[data-mode='home'][data-theme='night']`.
+
+## Reste à faire
+
+- **Modale RecordingPanel** : appliquer aussi la vague rivière (grosse surface, pas encore faite).
+- **Finitions** : bulles/caustiques discrètes sur les fonds cadrés.
+- **Passe d'accessibilité** nuit : vérifier tous les contrastes, affiner les variantes d'opacité de texte (le mode nuit met les `/70` etc. en couleur pleine, légère perte de hiérarchie).
 
 Décisions §5 encore ouvertes : sort exact de la mascotte (gardée pour l'instant comme logo), activation du mode nuit.
 
