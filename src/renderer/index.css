@@ -544,6 +544,28 @@
   /* Anneau de focus → menthe */
   html[data-mode='home'] :focus-visible { outline-color: #19C49E; }
 
+  /* Goutte de navigation — indicateur d'onglet actif qui glisse d'un
+     onglet à l'autre avec un léger dépassement élastique, et s'étire
+     pendant le trajet comme une goutte d'eau qui se reforme. */
+  .nav-drop {
+    background: linear-gradient(145deg, #E8FBF5, #C9F4E8);
+    box-shadow:
+      0 4px 14px rgba(15, 165, 135, 0.22),
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      inset 0 0 0 1px rgba(43, 217, 172, 0.35);
+    transition:
+      left 0.55s cubic-bezier(0.5, 1.5, 0.42, 1),
+      width 0.55s cubic-bezier(0.5, 1.5, 0.42, 1);
+  }
+  @keyframes nav-drop-stretch {
+    0% { transform: translateY(-50%) scaleX(1); }
+    45% { transform: translateY(-50%) scaleX(1.18); }
+    100% { transform: translateY(-50%) scaleX(1); }
+  }
+  .nav-drop-move {
+    animation: nav-drop-stretch 0.55s ease;
+  }
+
   /* Soulignement rivière — mot-clé d'un titre. Jamais de couleur de
      texte, un trait menthe qui coule sous le mot. */
   @keyframes riv-flow {

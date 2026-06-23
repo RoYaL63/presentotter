@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import {
   Home as HomeIcon,
   Keyboard,
@@ -122,6 +122,32 @@ interface TopNavProps {
 }
 
 function TopNav({ current, onSelect }: TopNavProps) {
+  // Goutte de navigation — the signature OtterMorphisme indicator. An
+  // absolutely-positioned "drop" slides (and briefly stretches) behind
+  // the active tab. We measure the active button's geometry on every
+  // change and animate left/width via CSS. Pure layout measurement, no
+  // extra state churn beyond the drop rect.
+  const navRef = useRef<HTMLElement | null>(null)
+  const btnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const dropRef = useRef<HTMLSpanElement | null>(null)
+  const [drop, setDrop] = useState<{ left: number; width: number } | null>(null)
+
+  useLayoutEffect(() => {
+    const nav = navRef.current
+    const btn = btnRefs.current[current]
+    if (nav === null || btn === null || btn === undefined) return
+    const navBox = nav.getBoundingClientRect()
+    const btnBox = btn.getBoundingClientRect()
+    setDrop({ left: btnBox.left - navBox.left, width: btnBox.width })
+    // Replay the stretch keyframe each move so the drop "reforms".
+    const d = dropRef.current
+    if (d !== null) {
+      d.classList.remove('nav-drop-move')
+      void d.offsetWidth // force reflow
+      d.classList.add('nav-drop-move')
+    }
+  }, [current])
+
   return (
     <header className="otter-glass sticky top-0 z-30 mx-4 mt-4 flex items-center justify-between px-5 py-3">
       <button
@@ -142,19 +168,35 @@ function TopNav({ current, onSelect }: TopNavProps) {
         </span>
       </button>
 
-      <nav className="flex items-center gap-1" aria-label="Navigation principale">
+      <nav
+        ref={navRef}
+        className="relative flex items-center gap-1"
+        aria-label="Navigation principale"
+      >
+        {/* The sliding drop sits behind the buttons. */}
+        {drop !== null && (
+          <span
+            ref={dropRef}
+            className="nav-drop pointer-events-none absolute top-1/2 -translate-y-1/2 rounded-full"
+            style={{ left: drop.left, width: drop.width, height: 36 }}
+            aria-hidden
+          />
+        )}
         {SECTIONS.map(({ id, label, Icon }) => {
           const active = current === id
           return (
             <button
               key={id}
+              ref={(el) => {
+                btnRefs.current[id] = el
+              }}
               type="button"
               onClick={() => onSelect(id)}
               aria-current={active ? 'page' : undefined}
-              className={`relative flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
+              className={`relative z-10 flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors duration-200 ${
                 active
-                  ? 'bg-white/70 text-sea-700 shadow-glass-sm ring-1 ring-mint-400/50'
-                  : 'text-sea-700/70 hover:bg-white/40 hover:text-sea-700'
+                  ? 'text-sea-700'
+                  : 'text-sea-700/70 hover:text-sea-700'
               }`}
             >
               <Icon className="h-4 w-4" strokeWidth={2} />
@@ -402,10 +444,10 @@ function ActionCard({ icon: Icon, title, description, onClick, highlight = false
     <button
       type="button"
       onClick={onClick}
-      className={`group flex items-center gap-2.5 p-2.5 text-left transition-all duration-300 hover:-translate-y-0.5 ${
+      className={`group flex items-center gap-2.5 p-2.5 text-left transition-all duration-300 hover:-translate-y-1 ${
         highlight
-          ? 'otter-clay-coral otter-aqua text-white shadow-glow-coral'
-          : 'otter-glass otter-aqua hover:shadow-glow-aqua'
+          ? 'otter-clay-coral otter-aqua text-white shadow-glow-mint'
+          : 'otter-glass otter-aqua hover:shadow-glow-mint'
       }`}
       style={highlight ? { borderRadius: 18 } : undefined}
     >
