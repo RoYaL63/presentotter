@@ -84,10 +84,16 @@ interface CaptureTarget {
   scaleFactor: number
 }
 
-// 960 px (was 1280) shaves ~30% off every Tesseract pass while keeping
-// 1080p text at ~8-10 px high — still well within Tesseract's reliable
-// zone with PSM 11 (sparse text).
-const MAX_SCAN_WIDTH = 960
+// Scan at (near) native resolution. Downscaling to 960 px (the old
+// "fast" value) shrank small text — API-key fields use a compact
+// monospace font that, after a 2-4x downscale on a hi-res screen,
+// dropped below Tesseract's readable threshold and was silently NOT
+// read (confirmed via the OCR debug overlay: every label was boxed,
+// the sk-proj- token was not). 2200 keeps 1080p/1440p screens at native
+// and only mildly downscales 4K, so small credential text stays
+// legible. OCR is in a worker + gated by the frame-hash skip, so the
+// extra cost only hits on actual screen changes.
+const MAX_SCAN_WIDTH = 2200
 // 250 ms cadence (was 1 s) means the engine notices a frame change in
 // at most a quarter second. Hash check is ~3 ms so the extra ticks
 // cost almost nothing — the heavy OCR only runs when something
@@ -108,10 +114,11 @@ const SIGNATURE_TOLERANCE = 10
 // At 250 ms cadence + 5 s anti-drift, idle CPU stays low while
 // no secret can hide longer than ~5 s.
 const FORCE_OCR_AFTER_MS = 5000
-// JPEG quality used for the OCR input. PNG was paying ~50 ms per
-// frame for lossless encoding we don't need; JPEG at 0.6 is plenty
-// for Tesseract and shaves 30-50 ms per scan.
-const OCR_JPEG_QUALITY = 0.6
+// JPEG quality used for the OCR input. 0.6 was too aggressive: it
+// blurred small monospace token text into unreadable mush. 0.9 keeps
+// the glyph edges crisp for Tesseract while still being far cheaper
+// than lossless PNG.
+const OCR_JPEG_QUALITY = 0.9
 
 /**
  * getUserMedia constraints for Electron's desktop-capture pipeline.
