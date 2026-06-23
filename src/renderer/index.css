@@ -2,6 +2,63 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ------------------------------------------------------------------
+   OtterMorphisme — polices bundlées en local (offline-first).
+   Subsets latin uniquement, hébergés dans src/renderer/fonts/ pour que
+   Vite les fingerprinte et corrige l'URL en dev (/fonts) comme en
+   prod (file://). Special Elite = display, Syne = corps/titres,
+   JetBrains Mono = méta.
+   ------------------------------------------------------------------ */
+@font-face {
+  font-family: 'Special Elite';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/specialelite-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Syne';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/syne-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Syne';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/syne-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Syne';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('./fonts/syne-800.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/jetbrainsmono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/jetbrainsmono-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/jetbrainsmono-700.woff2') format('woff2');
+}
+
 @layer base {
   * {
     margin: 0;
@@ -356,5 +413,156 @@
       4px 4px 12px rgba(61, 40, 23, 0.14),
       -3px -3px 8px rgba(255, 255, 255, 0.80),
       inset 0 1px 2px rgba(255, 255, 255, 0.55);
+  }
+
+  /* ============================================================
+     OTTERMORPHISME — thème menthe pour la PAGE LOGICIELLE
+     ----------------------------------------------------------------
+     Tout est scopé sous html[data-mode='home'] : la toolbar et
+     l'overlay (data-mode toolbar/overlay) ne sont JAMAIS touchés et
+     gardent leur verre sombre flottant. Ici on remplace l'ancien
+     univers crème/corail par : fond frais menthe, surfaces pâte
+     claires, accent menthe unique, polices Syne / Special Elite.
+     Réf : design system OtterMorphisme.
+     ============================================================ */
+
+  /* Fond + typo de la page */
+  html[data-mode='home'] body {
+    font-family: 'Syne', 'Inter', system-ui, sans-serif;
+    color: #15201C; /* encre */
+  }
+  /* Titres display → machine à écrire (gros titres uniquement) */
+  html[data-mode='home'] .font-display {
+    font-family: 'Special Elite', 'Syne', system-ui, serif;
+    letter-spacing: -0.01em;
+  }
+
+  /* Mesh aquatique → frais menthe */
+  html[data-mode='home'] .otter-mesh {
+    background:
+      radial-gradient(at 18% 28%, #C9F4E8 0%, transparent 52%),
+      radial-gradient(at 82% 72%, #E7F0EC 0%, transparent 50%),
+      radial-gradient(at 50% 100%, rgba(15, 165, 135, 0.14) 0%, transparent 60%),
+      linear-gradient(135deg, #E7F0EC 0%, #EFF6F2 100%);
+  }
+
+  /* Orbes décoratives → teintes menthe */
+  html[data-mode='home'] .liquid-orb.bg-sea-200 { background-color: #9DEEDA; }
+  html[data-mode='home'] .liquid-orb.bg-cream-100 { background-color: #E8FBF5; }
+  html[data-mode='home'] .liquid-orb.bg-coral-200 { background-color: #5FE3C0; }
+
+  /* Verre liquide clair → liseré + ombre menthe */
+  html[data-mode='home'] .otter-glass {
+    background: rgba(255, 255, 255, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    box-shadow:
+      0 20px 48px rgba(15, 165, 135, 0.14),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.32);
+  }
+
+  /* Pâte neutre → dégradé OtterMorphisme clair */
+  html[data-mode='home'] .otter-clay {
+    background: linear-gradient(145deg, #FCFEFD, #E6EFEB);
+    box-shadow:
+      10px 12px 28px rgba(40, 96, 82, 0.13),
+      -8px -8px 22px rgba(255, 255, 255, 0.9),
+      inset 1.5px 1.5px 4px rgba(255, 255, 255, 0.8),
+      inset -2px -2px 6px rgba(40, 96, 82, 0.07);
+    color: #15201C;
+  }
+
+  /* CTA principal : la pâte "corail" du code devient pâte MENTHE.
+     C'est l'accent d'action unique du système. */
+  html[data-mode='home'] .otter-clay-coral,
+  html[data-mode='home'] .btn-otter {
+    background: linear-gradient(145deg, #3BE6C0, #19C49E);
+    color: #06231C;
+    box-shadow:
+      8px 8px 20px rgba(15, 165, 135, 0.30),
+      -6px -6px 16px rgba(255, 255, 255, 0.55),
+      inset 0 2px 4px rgba(255, 255, 255, 0.45);
+  }
+
+  /* État "actif/pressé" du CTA (anciennement clay-sea) → encre profonde
+     pour contraster avec la menthe d'appel. */
+  html[data-mode='home'] .otter-clay-sea {
+    background: linear-gradient(145deg, #1C3A33, #122A24);
+    color: #E7F3ED;
+    box-shadow:
+      8px 8px 20px rgba(10, 31, 27, 0.30),
+      -6px -6px 16px rgba(157, 238, 218, 0.18),
+      inset 0 2px 4px rgba(157, 238, 218, 0.15);
+  }
+
+  /* Badge loutre → pâte menthe pâle */
+  html[data-mode='home'] .otter-badge {
+    background: linear-gradient(145deg, #E8FBF5, #C9F4E8);
+    color: #0B806A;
+    box-shadow:
+      4px 4px 12px rgba(40, 96, 82, 0.14),
+      -3px -3px 8px rgba(255, 255, 255, 0.85),
+      inset 0 1px 2px rgba(255, 255, 255, 0.6);
+  }
+
+  /* Survol des surfaces interactives → halo menthe (au lieu de corail) */
+  html[data-mode='home'] .glass-interactive:hover {
+    box-shadow: 0 0 32px 0 rgba(43, 217, 172, 0.40);
+  }
+
+  /* Remap couleurs en mode home : l'accent passe corail → menthe.
+     (surcharge les règles génériques plus haut, même spécificité,
+     déclarées après donc prioritaires) */
+  html[data-mode='home'] [class*='text-otter-300'] { color: #0FA587; }
+  html[data-mode='home'] [class*='bg-otter-500/15'] {
+    background-color: rgba(15, 165, 135, 0.14);
+  }
+  html[data-mode='home'] [class*='border-otter-400/30'] {
+    border-color: rgba(15, 165, 135, 0.38);
+  }
+  /* Le corail explicite des composants (texte, bg, ring, from/to) vire
+     menthe sur la page logicielle. Liste ciblée pour ne pas toucher la
+     palette de dessin de l'overlay (autre data-mode). */
+  html[data-mode='home'] [class*='text-coral-400'],
+  html[data-mode='home'] [class*='text-coral-500'] { color: #0FA587; }
+  html[data-mode='home'] [class*='bg-coral-500'] { background-color: #19C49E; }
+  /* Dégradés corail des boutons (Paramètres/Outils) → menthe */
+  html[data-mode='home'] [class*='from-coral-400'] {
+    --tw-gradient-from: #3BE6C0 var(--tw-gradient-from-position);
+    --tw-gradient-to: rgb(59 230 192 / 0) var(--tw-gradient-to-position);
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
+  }
+  html[data-mode='home'] [class*='to-coral-500'] {
+    --tw-gradient-to: #19C49E var(--tw-gradient-to-position);
+  }
+  /* Anneaux corail → menthe */
+  html[data-mode='home'] [class*='ring-coral-300'],
+  html[data-mode='home'] [class*='ring-coral-400'] {
+    --tw-ring-color: rgba(43, 217, 172, 0.5);
+  }
+
+  /* Anneau de focus → menthe */
+  html[data-mode='home'] :focus-visible { outline-color: #19C49E; }
+
+  /* Soulignement rivière — mot-clé d'un titre. Jamais de couleur de
+     texte, un trait menthe qui coule sous le mot. */
+  @keyframes riv-flow {
+    0% { background-position: -60% bottom; }
+    100% { background-position: 160% bottom; }
+  }
+  .riv-underline {
+    display: inline-block;
+    color: inherit;
+    padding: 0 2px 6px;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(43, 217, 172, 0.46) 10%,
+        rgba(59, 230, 192, 0.7) 50%,
+        rgba(43, 217, 172, 0.46) 90%,
+        transparent 100%
+      )
+      no-repeat bottom / 200% 3.5px;
+    animation: riv-flow 3.2s ease-in-out infinite alternate;
   }
 }

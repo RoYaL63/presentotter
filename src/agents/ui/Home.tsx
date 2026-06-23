@@ -138,7 +138,7 @@ function TopNav({ current, onSelect }: TopNavProps) {
           <Mascot size={42} />
         </span>
         <span className="font-display tracking-tight text-lg">
-          Present<span className="text-coral-400">Otter</span>
+          Present<span className="riv-underline">Otter</span>
         </span>
       </button>
 
@@ -153,7 +153,7 @@ function TopNav({ current, onSelect }: TopNavProps) {
               aria-current={active ? 'page' : undefined}
               className={`relative flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-all duration-200 ${
                 active
-                  ? 'bg-white/70 text-sea-700 shadow-glass-sm ring-1 ring-coral-400/40'
+                  ? 'bg-white/70 text-sea-700 shadow-glass-sm ring-1 ring-mint-400/50'
                   : 'text-sea-700/70 hover:bg-white/40 hover:text-sea-700'
               }`}
             >
@@ -223,7 +223,7 @@ function AccueilSection() {
         </div>
         <div className="text-left">
           <h1 className="font-display text-3xl font-black leading-none tracking-tight text-sea-700">
-            Present<span className="text-coral-400">Otter</span>
+            Present<span className="riv-underline">Otter</span>
           </h1>
           <p className="mt-1 max-w-md text-xs leading-snug text-cream-800/75">
             Annote, surligne et masque les secrets en direct par-dessus

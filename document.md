@@ -167,10 +167,20 @@ Le sanitizer manuel (outil Floute) est conservé. En parallèle de la refonte, c
 
 - **v0.5.21** — Bug Échap corrigé : `select` ne s'affiche plus comme actif et ne montre plus l'icône X. Retour propre à l'état "rien de sélectionné" sur Échap.
 - **v0.6.0** — Fondations menthe : palette `mint` + `glow-mint` dans Tailwind (additif, aucun token cassé). Toolbar passée en accent menthe (outils actifs, bouton LIVE, badge, slider curseur, pastille de statut) — structure inchangée, lisibilité préservée. C'est la partie "toolbar = juste la couleur d'action" du scope.
+- **v0.6.1** — Phase B (surfaces cadrées). Tout est scopé `html[data-mode='home']`, toolbar/overlay zéro changement :
+  - Polices OtterMorphisme bundlées en local (offline) : Special Elite (titres display), Syne (corps), JetBrains Mono (méta). Fichiers dans `src/renderer/fonts/`, fingerprintés par Vite.
+  - Fond frais menthe (mesh reteinté), surfaces pâte claires (`#FCFEFD→#E6EFEB`), verre liquide à liseré menthe.
+  - Accent unique menthe : CTA, dégradés, anneaux, focus, remaps corail→menthe sur toutes les pages cadrées (Accueil, Outils, Bibliothèque, Paramètres, Miroir).
+  - Soulignement rivière sur le mot "Otter" du wordmark (plus de couleur de texte).
 
-## Prochaine étape
+## Reste à faire (Phase B+ / C / D / E)
 
-Phase B : les surfaces cadrées reprennent le design web complet. Ordre proposé : Home d'abord (vitrine : navbar capsule + goutte, cartes pâte, soulignement rivière, polices, toggle jour/nuit), puis Paramètres / Outils / Bibliothèque / Miroir, puis les modales. Décisions §5 à trancher avant (surtout : sort de la mascotte, mode par défaut).
+- **Goutte de navigation** animée (glisse entre onglets) — pour l'instant l'onglet actif = anneau menthe simple.
+- **Mode jour/nuit** complet + toggle dans la navbar (les tokens nuit sont définis dans ce doc, pas encore câblés ; pour l'instant jour uniquement).
+- **Modales** (SanitizerPopup, RecordingPanel, ShortcutsHelp) : en-tête vague rivière, surfaces pâte dédiées.
+- **Finitions** : bulles/caustiques discrètes sur les fonds cadrés, passe d'accessibilité.
+
+Décisions §5 encore ouvertes : sort exact de la mascotte (gardée pour l'instant comme logo), activation du mode nuit.
 
 ---
 
