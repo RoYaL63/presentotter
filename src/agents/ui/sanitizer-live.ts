@@ -381,9 +381,31 @@ export class SanitizerLiveEngine {
         debug('empty frame capture')
         return null
       }
-      const result = await this.worker.recognize(dataUrl)
-      const data = result.data as unknown as { text?: string; words?: TesseractWord[] }
-      const words = Array.isArray(data.words) ? data.words : []
+      // tesseract.js v5.1+ STOPPED returning the word hierarchy by
+      // default — `data.words` is undefined unless we explicitly ask for
+      // `blocks: true` in the output options. Without this the words
+      // array was always empty and the sanitizer produced ZERO masks
+      // ("rien ne fonctionne"). We request blocks and, as a belt-and-
+      // suspenders, flatten the block→paragraph→line→word tree if the
+      // flat `data.words` accessor is missing.
+      const result = await this.worker.recognize(
+        dataUrl,
+        {},
+        { blocks: true } as unknown as undefined
+      )
+      const data = result.data as unknown as {
+        text?: string
+        words?: TesseractWord[]
+        blocks?: Array<{
+          paragraphs?: Array<{
+            lines?: Array<{ words?: TesseractWord[] }>
+          }>
+        }>
+      }
+      let words = Array.isArray(data.words) ? data.words : []
+      if (words.length === 0 && Array.isArray(data.blocks)) {
+        words = flattenBlocksToWords(data.blocks)
+      }
       const textPreview = (data.text ?? '').slice(0, 120).replace(/\s+/g, ' ').trim()
       // scaleX / scaleY here recover physical source pixels from the
       // downscaled OCR canvas. We then divide by the display's DPI scale
@@ -836,6 +858,29 @@ function rectsOverlap(a: LiveMask, b: LiveMask): boolean {
     a.y < b.y + b.height &&
     a.y + a.height > b.y
   )
+}
+
+/**
+ * Flatten Tesseract's block → paragraph → line → word tree into a flat
+ * word array. Needed because tesseract.js v5.1+ only returns the
+ * hierarchy (via `blocks: true`), not the convenient flat `data.words`.
+ */
+function flattenBlocksToWords(
+  blocks: Array<{
+    paragraphs?: Array<{ lines?: Array<{ words?: TesseractWord[] }> }>
+  }>
+): TesseractWord[] {
+  const out: TesseractWord[] = []
+  for (const block of blocks) {
+    for (const para of block.paragraphs ?? []) {
+      for (const line of para.lines ?? []) {
+        for (const w of line.words ?? []) {
+          if (w && w.bbox) out.push(w)
+        }
+      }
+    }
+  }
+  return out
 }
 
 /** Shannon entropy in bits/char of a string. Random tokens score high
