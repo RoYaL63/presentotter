@@ -670,12 +670,58 @@
     color: #3BE6C0;
   }
 
-  /* Surfaces blanches translucides → menthe translucide sur sombre */
-  html[data-mode='home'][data-theme='night'] [class*='bg-white\\/'] {
-    background-color: rgba(157, 238, 218, 0.06);
+  /* Surfaces verre des pages Tools / Library / Settings.
+     .glass et .glass-strong sont remplies via `@apply otter-glass`, donc
+     les valeurs JOUR (verre blanc) sont figées dans la règle .glass à la
+     compilation. L'override nuit de .otter-glass ne les atteint jamais
+     (ces éléments portent la classe .glass, pas .otter-glass). On doit
+     donc cibler .glass directement ici, sinon : cartes blanches + texte
+     clair = illisible. */
+  html[data-mode='home'][data-theme='night'] .glass,
+  html[data-mode='home'][data-theme='night'] .glass-strong {
+    background: rgba(22, 56, 47, 0.66);
+    border-color: rgba(157, 238, 218, 0.14);
+    box-shadow:
+      0 20px 48px rgba(0, 0, 0, 0.45),
+      inset 0 1px 0 rgba(157, 238, 218, 0.12),
+      inset 0 0 0 1px rgba(157, 238, 218, 0.05);
   }
-  html[data-mode='home'][data-theme='night'] [class*='border-white\\/'] {
+  html[data-mode='home'][data-theme='night'] .glass-subtle {
+    background: rgba(18, 48, 40, 0.62);
     border-color: rgba(157, 238, 218, 0.12);
+  }
+  /* La barre de brillance du haut était claire (eau de jour) → menthe */
+  html[data-mode='home'][data-theme='night'] .glass-shine::before {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(59, 230, 192, 0.22) 50%,
+      transparent 100%
+    );
+  }
+
+  /* Bouton verre (ex. « Réinitialiser ») — blanc en dur côté jour, donc
+     gris clair illisible en nuit. Surface sombre + encre claire. */
+  html[data-mode='home'][data-theme='night'] .btn-glass {
+    background: rgba(28, 66, 56, 0.72);
+    border-color: rgba(157, 238, 218, 0.18);
+    color: #E7F3ED;
+    box-shadow:
+      0 4px 16px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(157, 238, 218, 0.1);
+  }
+  html[data-mode='home'][data-theme='night'] .btn-glass:hover {
+    background: rgba(38, 84, 71, 0.85);
+  }
+
+  /* Surfaces blanches translucides → menthe translucide sur sombre.
+     Tailwind écrit bg-white/NN sans backslash dans l'attribut class, donc
+     le sélecteur correct est [class*='bg-white/'] (pas de \\/). */
+  html[data-mode='home'][data-theme='night'] [class*='bg-white/'] {
+    background-color: rgba(157, 238, 218, 0.08);
+  }
+  html[data-mode='home'][data-theme='night'] [class*='border-white/'] {
+    border-color: rgba(157, 238, 218, 0.16);
   }
   html[data-mode='home'][data-theme='night'] [class*='bg-deep-950'] {
     background-color: rgba(24, 60, 50, 0.6);
