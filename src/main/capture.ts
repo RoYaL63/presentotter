@@ -167,6 +167,12 @@ function createCaptureWindow(display: Display, mode: CaptureMode): void {
 
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  // Force the bounds in screen coordinates. The BrowserWindow constructor
+  // interprets width/height with the PRIMARY display's DPI, so on a
+  // secondary monitor with a different scale the window comes out the wrong
+  // size (the "micro window in the corner"). setBounds re-applies them in
+  // the target screen's own DPI so it truly covers that display.
+  win.setBounds({ x, y, width, height })
 
   // Capture the id up-front: by the time 'closed' fires the webContents is
   // already destroyed, and reading win.webContents.id then throws
@@ -189,6 +195,9 @@ function createCaptureWindow(display: Display, mode: CaptureMode): void {
     win.show()
     win.focus()
     win.setAlwaysOnTop(true, 'screen-saver')
+    // Re-assert the bounds after show — Windows can resize a frameless
+    // window on first paint, which is what produced the tiny window.
+    win.setBounds({ x, y, width, height })
   })
   win.on('closed', () => {
     frameByWebContents.delete(wcId)
