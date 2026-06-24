@@ -5,6 +5,7 @@ import { Toolbar } from '../agents/ui/Toolbar'
 import { Overlay } from '../agents/ui/Overlay'
 import { CaptureOverlay } from '../agents/ui/CaptureOverlay'
 import { CaptureEditor } from '../agents/ui/CaptureEditor'
+import { RegionRecorder } from '../agents/ui/RegionRecorder'
 import './index.css'
 
 /**
@@ -22,7 +23,7 @@ import './index.css'
  * shares the Home window in Meet (mode "Une fenêtre") with the Mirror
  * section displayed.
  */
-type Mode = 'home' | 'toolbar' | 'overlay' | 'capture' | 'editor'
+type Mode = 'home' | 'toolbar' | 'overlay' | 'capture' | 'editor' | 'recorder'
 
 function detectMode(): Mode {
   const hash = window.location.hash.replace('#', '').trim()
@@ -30,6 +31,7 @@ function detectMode(): Mode {
   if (hash === 'overlay') return 'overlay'
   if (hash === 'capture') return 'capture'
   if (hash === 'editor') return 'editor'
+  if (hash === 'recorder') return 'recorder'
   return 'home'
 }
 
@@ -41,6 +43,7 @@ const Root: () => React.ReactElement = () => {
   if (mode === 'overlay') return <Overlay />
   if (mode === 'capture') return <CaptureOverlay />
   if (mode === 'editor') return <CaptureEditor />
+  if (mode === 'recorder') return <RegionRecorder />
   return <Home />
 }
 

@@ -193,8 +193,18 @@ declare global {
       deviceRect?: { x: number; y: number; width: number; height: number }
       bounds?: { x: number; y: number; width: number; height: number }
       scaleFactor?: number
+      sourceId?: string
     }): void
     captureCancel(): void
+
+    // ---------- Region recorder (ShareX-style video) ----------
+    recorderGetConfig(): Promise<{
+      sourceId: string
+      rect: { x: number; y: number; width: number; height: number }
+      fps: number
+    } | null>
+    recorderDone(savePath: string | null): void
+    onRecorderStop(cb: () => void): () => void
 
     // ---------- Capture editor ----------
     editorGetImage(): Promise<{

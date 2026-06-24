@@ -38,7 +38,7 @@ import path from 'node:path'
 
 export interface CaptureDeps {
   /** Build a renderer URL for a given window hash (dev server or file://). */
-  rendererUrl: (hash: 'capture' | 'editor') => string
+  rendererUrl: (hash: 'capture' | 'editor' | 'recorder') => string
   /** Absolute path to the compiled preload script. */
   preloadPath: string
   /** Hide every PresentOtter-owned window that would otherwise appear in
@@ -51,8 +51,17 @@ export interface CaptureDeps {
   isDev: boolean
 }
 
-/** Opaque restore token — list of windows we hid and should re-show. */
-export type OwnUiState = { restore: () => void }
+/**
+ * Restore token for the windows we hid before a capture. Split so video
+ * recording can bring back the small UI (toolbar/overlays) immediately but
+ * keep the big Home window hidden until the recording stops — otherwise it
+ * would pop into the live region being filmed.
+ */
+export type OwnUiState = {
+  restore: () => void
+  restoreNonHome: () => void
+  restoreHome: () => void
+}
 
 export type CaptureMode = 'photo' | 'video'
 
@@ -64,6 +73,15 @@ interface FramePayload {
   mode: CaptureMode
   /** True when more than one display is being captured (UI hint). */
   multiDisplay: boolean
+  /** desktopCapturer source id of this display (for video getUserMedia). */
+  sourceId: string
+}
+
+interface RecorderConfig {
+  sourceId: string
+  /** Crop rectangle in DEVICE pixels on the source display. */
+  rect: { x: number; y: number; width: number; height: number }
+  fps: number
 }
 
 interface LastCapture {
@@ -80,6 +98,8 @@ const frameByWebContents = new Map<number, FramePayload>()
 let pendingRestore: OwnUiState | null = null
 let lastCapture: LastCapture | null = null
 let editorWindow: BrowserWindow | null = null
+let recorderWindow: BrowserWindow | null = null
+const recorderConfigByWebContents = new Map<number, RecorderConfig>()
 
 const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms))
@@ -93,7 +113,7 @@ const delay = (ms: number): Promise<void> =>
 async function grabDisplay(
   display: Display,
   index: number
-): Promise<string | null> {
+): Promise<{ dataUrl: string; sourceId: string } | null> {
   const devW = Math.round(display.size.width * display.scaleFactor)
   const devH = Math.round(display.size.height * display.scaleFactor)
   const sources = await desktopCapturer.getSources({
@@ -108,12 +128,13 @@ async function grabDisplay(
   )
   if (match === undefined) match = sources[index] ?? sources[0]
   if (match === undefined || match.thumbnail.isEmpty()) return null
-  return match.thumbnail.toDataURL()
+  return { dataUrl: match.thumbnail.toDataURL(), sourceId: match.id }
 }
 
 function createCaptureWindow(
   display: Display,
   dataUrl: string,
+  sourceId: string,
   mode: CaptureMode,
   multiDisplay: boolean
 ): void {
@@ -156,7 +177,8 @@ function createCaptureWindow(
     bounds: { x, y, width, height },
     scaleFactor: display.scaleFactor,
     mode,
-    multiDisplay
+    multiDisplay,
+    sourceId
   })
   captureWindows.add(win)
 
@@ -173,13 +195,18 @@ function createCaptureWindow(
   })
 }
 
-/** Tear down every capture window and restore the UI we hid. */
-function finishCapture(): void {
+/** Close every capture (selection) window. Does NOT touch the restore. */
+function closeCaptureWindows(): void {
   for (const w of captureWindows) {
     if (!w.isDestroyed()) w.close()
   }
   captureWindows.clear()
   frameByWebContents.clear()
+}
+
+/** Tear down the selection windows and restore ALL the UI we hid. */
+function finishCapture(): void {
+  closeCaptureWindows()
   if (pendingRestore !== null) {
     pendingRestore.restore()
     pendingRestore = null
@@ -202,13 +229,19 @@ export async function startCapture(mode: CaptureMode): Promise<void> {
   await delay(180)
 
   const displays = screen.getAllDisplays()
-  const grabbed: Array<{ display: Display; dataUrl: string }> = []
+  const grabbed: Array<{
+    display: Display
+    dataUrl: string
+    sourceId: string
+  }> = []
   for (let i = 0; i < displays.length; i++) {
     const d = displays[i]
     if (d === undefined) continue
     try {
-      const dataUrl = await grabDisplay(d, i)
-      if (dataUrl !== null) grabbed.push({ display: d, dataUrl })
+      const got = await grabDisplay(d, i)
+      if (got !== null) {
+        grabbed.push({ display: d, dataUrl: got.dataUrl, sourceId: got.sourceId })
+      }
     } catch (err) {
       console.error('[capture] grabDisplay failed:', err)
     }
@@ -222,7 +255,7 @@ export async function startCapture(mode: CaptureMode): Promise<void> {
 
   const multi = grabbed.length > 1
   for (const g of grabbed) {
-    createCaptureWindow(g.display, g.dataUrl, mode, multi)
+    createCaptureWindow(g.display, g.dataUrl, g.sourceId, mode, multi)
   }
 }
 
@@ -344,6 +377,130 @@ function editorImagePayload(): {
 }
 
 // ============================================================================
+// Region video recording (ShareX-style)
+// ============================================================================
+
+const REGION_FPS = 30
+
+/**
+ * Pick a spot for the little recorder control bar that is OUTSIDE the
+ * recorded region (so it gets cropped away), preferring just above the
+ * region, else just below, clamped to the display work area.
+ */
+function controlPosition(
+  rect: { x: number; y: number; width: number; height: number },
+  bounds: { x: number; y: number; width: number; height: number },
+  scaleFactor: number
+): { x: number; y: number; width: number; height: number } {
+  const W = 280
+  const H = 52
+  const regX = bounds.x + rect.x / scaleFactor
+  const regY = bounds.y + rect.y / scaleFactor
+  const regW = rect.width / scaleFactor
+  const regH = rect.height / scaleFactor
+  let x = Math.round(regX + regW / 2 - W / 2)
+  x = Math.max(bounds.x + 8, Math.min(bounds.x + bounds.width - W - 8, x))
+  let y = Math.round(regY - H - 12)
+  if (y < bounds.y + 8) {
+    y = Math.round(regY + regH + 12)
+    // If still off the bottom (region fills the screen), tuck it inside the
+    // bottom edge — rare, and better than an off-screen control.
+    y = Math.min(y, bounds.y + bounds.height - H - 8)
+  }
+  return { x, y, width: W, height: H }
+}
+
+function startRegionRecording(
+  sourceId: string,
+  rect: { x: number; y: number; width: number; height: number },
+  bounds: { x: number; y: number; width: number; height: number },
+  scaleFactor: number
+): void {
+  if (deps === null) return
+  // Bring back the small floating UI now; keep Home hidden until the
+  // recording ends so it never pops into the filmed region.
+  closeCaptureWindows()
+  if (pendingRestore !== null) pendingRestore.restoreNonHome()
+  capturing = false
+
+  const pos = controlPosition(rect, bounds, scaleFactor)
+  const win = new BrowserWindow({
+    x: pos.x,
+    y: pos.y,
+    width: pos.width,
+    height: pos.height,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    show: false,
+    focusable: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: deps.preloadPath,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      backgroundThrottling: false
+    }
+  })
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  recorderWindow = win
+  recorderConfigByWebContents.set(win.webContents.id, {
+    sourceId,
+    rect,
+    fps: REGION_FPS
+  })
+  void win.loadURL(deps.rendererUrl('recorder'))
+  win.once('ready-to-show', () => win.showInactive())
+  win.on('closed', () => {
+    recorderConfigByWebContents.delete(win.webContents.id)
+    if (recorderWindow === win) recorderWindow = null
+    // Safety net: if the recorder died without reporting done (crash, kill),
+    // bring Home back so it isn't stranded hidden. The normal recorder:done
+    // path nulls pendingRestore before this fires, so it won't double-run.
+    if (pendingRestore !== null) {
+      pendingRestore.restoreHome()
+      pendingRestore = null
+    }
+  })
+}
+
+export function isRegionRecording(): boolean {
+  return recorderWindow !== null && !recorderWindow.isDestroyed()
+}
+
+/** Ask the recorder renderer to stop (it then saves + reports done). */
+export function stopRegionRecording(): void {
+  if (recorderWindow !== null && !recorderWindow.isDestroyed()) {
+    recorderWindow.webContents.send('recorder:stop')
+  }
+}
+
+function notifyRecorded(savePath: string | null): void {
+  if (!Notification.isSupported()) return
+  const notif = new Notification({
+    title: 'Zone enregistrée 🦦',
+    body:
+      savePath !== null
+        ? 'Vidéo sauvegardée. Cliquez pour ouvrir le dossier.'
+        : 'Enregistrement terminé.',
+    silent: false
+  })
+  if (savePath !== null) {
+    notif.on('click', () => shell.showItemInFolder(savePath))
+  }
+  notif.show()
+}
+
+// ============================================================================
 // IPC
 // ============================================================================
 
@@ -374,16 +531,48 @@ export function registerCaptureIpc(d: CaptureDeps): void {
         deviceRect?: { x: number; y: number; width: number; height: number }
         bounds?: { x: number; y: number; width: number; height: number }
         scaleFactor?: number
+        sourceId?: string
       }
     ) => {
       if (payload.mode === 'video') {
-        // Phase 3 — region recording. For now, just tear down cleanly.
-        finishCapture()
+        if (
+          payload.deviceRect !== undefined &&
+          payload.bounds !== undefined &&
+          payload.scaleFactor !== undefined &&
+          payload.sourceId !== undefined
+        ) {
+          startRegionRecording(
+            payload.sourceId,
+            payload.deviceRect,
+            payload.bounds,
+            payload.scaleFactor
+          )
+        } else {
+          finishCapture()
+        }
         return
       }
       void handlePhotoSelected(payload.pngBase64, payload.width, payload.height)
     }
   )
+
+  /** Recorder window asks for its capture config (source + crop rect). */
+  ipcMain.handle('recorder:get-config', (e: IpcMainInvokeEvent) => {
+    return recorderConfigByWebContents.get(e.sender.id) ?? null
+  })
+
+  /** Recorder finished + saved: close the control, restore Home, notify. */
+  ipcMain.on('recorder:done', (_e, savePath: string | null) => {
+    if (recorderWindow !== null && !recorderWindow.isDestroyed()) {
+      recorderWindow.close()
+    }
+    recorderWindow = null
+    if (pendingRestore !== null) {
+      pendingRestore.restoreHome()
+      pendingRestore = null
+    }
+    notifyRecorded(savePath)
+  })
 
   /** Esc / cancel from any capture window cancels the whole session. */
   ipcMain.on('capture:cancel', () => {

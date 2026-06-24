@@ -28,6 +28,8 @@ import {
 import {
   registerCaptureIpc,
   startCapture,
+  isRegionRecording,
+  stopRegionRecording,
   type OwnUiState
 } from './capture'
 
@@ -70,7 +72,7 @@ const DEV_URL = 'http://localhost:5173'
 const CURSOR_POLL_MS = 16
 
 function rendererUrl(
-  hash: 'home' | 'toolbar' | 'overlay' | 'capture' | 'editor'
+  hash: 'home' | 'toolbar' | 'overlay' | 'capture' | 'editor' | 'recorder'
 ): string {
   if (isDev) {
     return `${DEV_URL}/#${hash}`
@@ -382,6 +384,7 @@ function notifyHomeStatus(): void {
 function hideOwnUiForCapture(): OwnUiState {
   const overlays: BrowserWindow[] = []
   const others: BrowserWindow[] = []
+  let home: BrowserWindow | null = null
   if (
     toolbarWindow !== null &&
     !toolbarWindow.isDestroyed() &&
@@ -398,14 +401,24 @@ function hideOwnUiForCapture(): OwnUiState {
     homeWindow.isVisible() &&
     !homeWindow.isMinimized()
   ) {
-    others.push(homeWindow)
+    home = homeWindow
   }
   for (const w of overlays) w.hide()
   for (const w of others) w.hide()
+  if (home !== null) home.hide()
+  const restoreNonHome = (): void => {
+    for (const w of overlays) if (!w.isDestroyed()) w.showInactive()
+    for (const w of others) if (!w.isDestroyed()) w.show()
+  }
+  const restoreHome = (): void => {
+    if (home !== null && !home.isDestroyed()) home.show()
+  }
   return {
+    restoreNonHome,
+    restoreHome,
     restore: () => {
-      for (const w of overlays) if (!w.isDestroyed()) w.showInactive()
-      for (const w of others) if (!w.isDestroyed()) w.show()
+      restoreNonHome()
+      restoreHome()
     }
   }
 }
@@ -962,6 +975,15 @@ function registerGlobalShortcuts(): void {
     // Screen capture — Snipping-Tool replacement. Default trigger; the
     // Settings page will let the user rebind it (phase 4).
     { accel: 'Alt+Shift+S', fn: () => void startCapture('photo') },
+    // Region video — toggles: start the region picker, or stop an active
+    // recording. ShareX-style.
+    {
+      accel: 'Alt+Shift+R',
+      fn: () => {
+        if (isRegionRecording()) stopRegionRecording()
+        else void startCapture('video')
+      }
+    },
     {
       accel: 'Alt+H',
       fn: () => {

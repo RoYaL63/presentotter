@@ -368,7 +368,7 @@ function AccueilSection() {
         <ActionCard
           icon={Camera}
           title="Capture d'écran"
-          description="Zone, copie auto, Alt+Maj+S"
+          description="Photo ou vidéo de zone · Alt+Maj+S"
           onClick={() => window.api?.captureStart('photo')}
           highlight
         />
@@ -425,6 +425,7 @@ function AccueilSection() {
           <span className="text-[11px] font-bold">Quitter l&apos;outil</span>
         </span>
         <ShortcutChip combo={['Alt', 'Maj', 'S']} label="Capture" />
+        <ShortcutChip combo={['Alt', 'Maj', 'R']} label="Vidéo zone" />
         <ShortcutChip combo={['Alt', 'P']} label="Crayon" />
         <ShortcutChip combo={['Alt', 'R']} label="Rectangle" />
         <ShortcutChip combo={['Alt', 'T']} label="Texte" />

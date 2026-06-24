@@ -379,10 +379,31 @@ const api = {
     deviceRect?: { x: number; y: number; width: number; height: number }
     bounds?: { x: number; y: number; width: number; height: number }
     scaleFactor?: number
+    sourceId?: string
   }) => ipcRenderer.send('capture:region-selected', payload),
 
   /** Capture window: cancel the whole session (Esc). */
   captureCancel: () => ipcRenderer.send('capture:cancel'),
+
+  // ---------- Region recorder (ShareX-style video) ----------
+
+  /** Recorder window: fetch its capture config (source id + crop rect). */
+  recorderGetConfig: (): Promise<{
+    sourceId: string
+    rect: { x: number; y: number; width: number; height: number }
+    fps: number
+  } | null> => ipcRenderer.invoke('recorder:get-config'),
+
+  /** Recorder window: report it finished + saved (path or null). */
+  recorderDone: (savePath: string | null) =>
+    ipcRenderer.send('recorder:done', savePath),
+
+  /** Recorder window: main asks it to stop (hotkey toggle). */
+  onRecorderStop: (cb: () => void) => {
+    const handler = (): void => cb()
+    ipcRenderer.on('recorder:stop', handler)
+    return () => ipcRenderer.off('recorder:stop', handler)
+  },
 
   // ---------- Capture editor ----------
 

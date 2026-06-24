@@ -21,6 +21,7 @@ interface Frame {
   scaleFactor: number
   mode: 'photo' | 'video'
   multiDisplay: boolean
+  sourceId: string
 }
 
 interface Rect {
@@ -38,6 +39,7 @@ function normalize(ax: number, ay: number, bx: number, by: number): Rect {
 
 export function CaptureOverlay(): React.ReactElement {
   const [frame, setFrame] = useState<Frame | null>(null)
+  const [mode, setMode] = useState<'photo' | 'video'>('photo')
   const [sel, setSel] = useState<Rect | null>(null)
   const [drawing, setDrawing] = useState(false)
 
@@ -49,7 +51,10 @@ export function CaptureOverlay(): React.ReactElement {
   useEffect(() => {
     let alive = true
     void window.api?.captureGetFrame().then((f) => {
-      if (alive && f !== null) setFrame(f as Frame)
+      if (alive && f !== null) {
+        setFrame(f as Frame)
+        setMode((f as Frame).mode)
+      }
     })
     return () => {
       alive = false
@@ -90,16 +95,17 @@ export function CaptureOverlay(): React.ReactElement {
       const b64 = dataUrl.split(',')[1] ?? ''
       sentRef.current = true
       window.api?.captureRegionSelected({
-        mode: frame.mode,
+        mode,
         pngBase64: b64,
         width: sw,
         height: sh,
         deviceRect: { x: sx, y: sy, width: sw, height: sh },
         bounds: frame.bounds,
-        scaleFactor: frame.scaleFactor
+        scaleFactor: frame.scaleFactor,
+        sourceId: frame.sourceId
       })
     },
-    [frame]
+    [frame, mode]
   )
 
   // Global keys: Esc cancels, Enter captures the full display.
@@ -147,7 +153,7 @@ export function CaptureOverlay(): React.ReactElement {
     return <div style={{ width: '100%', height: '100%', background: '#000' }} />
   }
 
-  const isVideo = frame.mode === 'video'
+  const isVideo = mode === 'video'
   const accent = isVideo ? '#ff8b7b' : '#2BD9AC'
 
   return (
@@ -241,6 +247,7 @@ export function CaptureOverlay(): React.ReactElement {
       {/* Hint bar — only on the primary interaction, centered top */}
       {sel === null && (
         <div
+          onPointerDown={(e) => e.stopPropagation()}
           style={{
             position: 'absolute',
             top: 28,
@@ -257,17 +264,52 @@ export function CaptureOverlay(): React.ReactElement {
             fontFamily: 'Syne, system-ui, sans-serif',
             border: `1px solid ${accent}55`,
             boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
-            pointerEvents: 'none'
+            pointerEvents: 'auto'
           }}
         >
-          <span style={{ fontWeight: 700, color: accent }}>
-            {isVideo ? '🎥 Enregistrer une zone' : '📸 Capturer une zone'}
+          {/* Photo / vidéo toggle */}
+          <span
+            style={{
+              display: 'inline-flex',
+              gap: 2,
+              padding: 2,
+              borderRadius: 999,
+              background: 'rgba(231,243,237,0.1)'
+            }}
+          >
+            {(['photo', 'video'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                style={{
+                  cursor: 'pointer',
+                  border: 'none',
+                  borderRadius: 999,
+                  padding: '4px 12px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  fontFamily: 'Syne, system-ui, sans-serif',
+                  color: mode === m ? '#06231D' : '#E7F3ED',
+                  background:
+                    mode === m
+                      ? m === 'video'
+                        ? '#ff8b7b'
+                        : '#2BD9AC'
+                      : 'transparent'
+                }}
+              >
+                {m === 'video' ? '🎥 Vidéo' : '📸 Photo'}
+              </button>
+            ))}
           </span>
-          <span style={{ opacity: 0.85 }}>Glisse pour sélectionner</span>
+          <span style={{ opacity: 0.85, pointerEvents: 'none' }}>
+            Glisse pour sélectionner
+          </span>
           <Kbd>Entrée</Kbd>
-          <span style={{ opacity: 0.7 }}>plein écran</span>
+          <span style={{ opacity: 0.7, pointerEvents: 'none' }}>plein écran</span>
           <Kbd>Échap</Kbd>
-          <span style={{ opacity: 0.7 }}>annuler</span>
+          <span style={{ opacity: 0.7, pointerEvents: 'none' }}>annuler</span>
         </div>
       )}
     </div>

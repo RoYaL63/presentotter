@@ -125,6 +125,16 @@
     background: #0a1f1b !important;
   }
 
+  /* Recorder mode — tiny transparent always-on-top control bar. Must be
+     fully transparent like the toolbar/overlay so only the pill shows. */
+  html[data-mode='recorder'],
+  html[data-mode='recorder'] body,
+  html[data-mode='recorder'] #root {
+    background: transparent !important;
+    background-color: transparent !important;
+    overflow: hidden;
+  }
+
   /* Scrollbar — aqua-mist, discrete */
   ::-webkit-scrollbar {
     width: 10px;
