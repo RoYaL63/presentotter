@@ -172,7 +172,11 @@ function createCaptureWindow(
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 
-  frameByWebContents.set(win.webContents.id, {
+  // Capture the id up-front: by the time 'closed' fires the webContents is
+  // already destroyed, and reading win.webContents.id then throws
+  // "Object has been destroyed".
+  const wcId = win.webContents.id
+  frameByWebContents.set(wcId, {
     dataUrl,
     bounds: { x, y, width, height },
     scaleFactor: display.scaleFactor,
@@ -185,12 +189,16 @@ function createCaptureWindow(
   void win.loadURL(deps.rendererUrl('capture'))
 
   win.once('ready-to-show', () => {
+    // Another display's window may have already confirmed/cancelled and
+    // torn everything down before this fires — guard against the
+    // destroyed window.
+    if (win.isDestroyed()) return
     win.show()
     win.focus()
     win.setAlwaysOnTop(true, 'screen-saver')
   })
   win.on('closed', () => {
-    frameByWebContents.delete(win.webContents.id)
+    frameByWebContents.delete(wcId)
     captureWindows.delete(win)
   })
 }
@@ -383,31 +391,54 @@ function editorImagePayload(): {
 const REGION_FPS = 30
 
 /**
- * Pick a spot for the little recorder control bar that is OUTSIDE the
- * recorded region (so it gets cropped away), preferring just above the
- * region, else just below, clamped to the display work area.
+ * Place the recorder PANEL (setup + controls + preview) OUTSIDE the recorded
+ * region so it gets cropped away, preferring the right of the region, then
+ * left, then below, then above, then a display corner as a last resort.
  */
 function controlPosition(
   rect: { x: number; y: number; width: number; height: number },
   bounds: { x: number; y: number; width: number; height: number },
   scaleFactor: number
 ): { x: number; y: number; width: number; height: number } {
-  const W = 280
-  const H = 52
+  const W = 360
+  const H = 440
+  const gap = 12
   const regX = bounds.x + rect.x / scaleFactor
   const regY = bounds.y + rect.y / scaleFactor
   const regW = rect.width / scaleFactor
   const regH = rect.height / scaleFactor
-  let x = Math.round(regX + regW / 2 - W / 2)
-  x = Math.max(bounds.x + 8, Math.min(bounds.x + bounds.width - W - 8, x))
-  let y = Math.round(regY - H - 12)
-  if (y < bounds.y + 8) {
-    y = Math.round(regY + regH + 12)
-    // If still off the bottom (region fills the screen), tuck it inside the
-    // bottom edge — rare, and better than an off-screen control.
-    y = Math.min(y, bounds.y + bounds.height - H - 8)
+  const dispR = bounds.x + bounds.width
+  const dispB = bounds.y + bounds.height
+  const clamp = (v: number, lo: number, hi: number): number =>
+    Math.max(lo, Math.min(hi, v))
+
+  // Right, then left (vertically aligned near the region top).
+  if (regX + regW + gap + W <= dispR) {
+    return {
+      x: Math.round(regX + regW + gap),
+      y: Math.round(clamp(regY, bounds.y + 8, dispB - H - 8)),
+      width: W,
+      height: H
+    }
   }
-  return { x, y, width: W, height: H }
+  if (regX - gap - W >= bounds.x) {
+    return {
+      x: Math.round(regX - gap - W),
+      y: Math.round(clamp(regY, bounds.y + 8, dispB - H - 8)),
+      width: W,
+      height: H
+    }
+  }
+  // Below, then above (horizontally centered on the region).
+  const cx = Math.round(clamp(regX + regW / 2 - W / 2, bounds.x + 8, dispR - W - 8))
+  if (regY + regH + gap + H <= dispB) {
+    return { x: cx, y: Math.round(regY + regH + gap), width: W, height: H }
+  }
+  if (regY - gap - H >= bounds.y) {
+    return { x: cx, y: Math.round(regY - gap - H), width: W, height: H }
+  }
+  // Last resort: top-right corner of the display (may overlap the region).
+  return { x: Math.round(dispR - W - 8), y: Math.round(bounds.y + 8), width: W, height: H }
 }
 
 function startRegionRecording(
@@ -453,15 +484,18 @@ function startRegionRecording(
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   recorderWindow = win
-  recorderConfigByWebContents.set(win.webContents.id, {
+  const wcId = win.webContents.id
+  recorderConfigByWebContents.set(wcId, {
     sourceId,
     rect,
     fps: REGION_FPS
   })
   void win.loadURL(deps.rendererUrl('recorder'))
-  win.once('ready-to-show', () => win.showInactive())
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed()) win.show()
+  })
   win.on('closed', () => {
-    recorderConfigByWebContents.delete(win.webContents.id)
+    recorderConfigByWebContents.delete(wcId)
     if (recorderWindow === win) recorderWindow = null
     // Safety net: if the recorder died without reporting done (crash, kill),
     // bring Home back so it isn't stranded hidden. The normal recorder:done
