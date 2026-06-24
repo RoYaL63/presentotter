@@ -3,25 +3,20 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 /**
  * CaptureOverlay — the region-selection surface (one per display).
  *
- * The main process freezes the screen, spawns an opaque window per display
- * showing that display's still, and this component lets the user drag a
- * rectangle over it. On confirm we crop the selection out of the frozen
- * frame at DEVICE resolution and hand the PNG back to main, which copies it
- * to the clipboard + saves it + notifies.
- *
- * Coordinate model: the window is exactly the display's DIP size; the
- * frozen <img> is the display's DEVICE-pixel still. The CSS→device scale is
- * derived from naturalWidth/clientWidth so it stays exact regardless of DPI
- * rounding.
+ * It is a TRANSPARENT always-on-top window: the user keeps seeing their
+ * LIVE screen through a light wash, with just the selection toolbar + the
+ * drag rectangle on top (no opaque "window over my content"). On confirm we
+ * only send the chosen rectangle (device pixels) + the display id; the main
+ * process hides this overlay and grabs the real screen, so the selection UI
+ * is never in the shot.
  */
 
 interface Frame {
-  dataUrl: string
   bounds: { x: number; y: number; width: number; height: number }
   scaleFactor: number
   mode: 'photo' | 'video'
   multiDisplay: boolean
-  sourceId: string
+  displayId: number
 }
 
 interface Rect {
@@ -44,7 +39,6 @@ export function CaptureOverlay(): React.ReactElement {
   const [drawing, setDrawing] = useState(false)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
-  const imgRef = useRef<HTMLImageElement | null>(null)
   const startRef = useRef<{ x: number; y: number } | null>(null)
   const sentRef = useRef(false)
 
@@ -67,42 +61,27 @@ export function CaptureOverlay(): React.ReactElement {
     window.api?.captureCancel()
   }, [])
 
-  /** Crop `r` (CSS coords) out of the frozen frame at device resolution
-   *  and send it to main. `r === null` means the whole display. */
+  /** Send the chosen rect (device px) + display id. `r === null` = full. */
   const confirm = useCallback(
     (r: Rect | null) => {
       if (sentRef.current) return
-      const img = imgRef.current
       const cont = containerRef.current
-      if (img === null || cont === null || frame === null) return
-      if (img.naturalWidth === 0 || cont.clientWidth === 0) return
-      const scaleX = img.naturalWidth / cont.clientWidth
-      const scaleY = img.naturalHeight / cont.clientHeight
+      if (cont === null || frame === null) return
+      const sf = frame.scaleFactor
       const rect: Rect =
         r ?? { x: 0, y: 0, w: cont.clientWidth, h: cont.clientHeight }
-      const sx = Math.max(0, Math.round(rect.x * scaleX))
-      const sy = Math.max(0, Math.round(rect.y * scaleY))
-      const sw = Math.min(img.naturalWidth - sx, Math.round(rect.w * scaleX))
-      const sh = Math.min(img.naturalHeight - sy, Math.round(rect.h * scaleY))
-      if (sw < 1 || sh < 1) return
-      const canvas = document.createElement('canvas')
-      canvas.width = sw
-      canvas.height = sh
-      const ctx = canvas.getContext('2d')
-      if (ctx === null) return
-      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
-      const dataUrl = canvas.toDataURL('image/png')
-      const b64 = dataUrl.split(',')[1] ?? ''
+      const deviceRect = {
+        x: Math.round(rect.x * sf),
+        y: Math.round(rect.y * sf),
+        width: Math.round(rect.w * sf),
+        height: Math.round(rect.h * sf)
+      }
+      if (deviceRect.width < 1 || deviceRect.height < 1) return
       sentRef.current = true
       window.api?.captureRegionSelected({
         mode,
-        pngBase64: b64,
-        width: sw,
-        height: sh,
-        deviceRect: { x: sx, y: sy, width: sw, height: sh },
-        bounds: frame.bounds,
-        scaleFactor: frame.scaleFactor,
-        sourceId: frame.sourceId
+        displayId: frame.displayId,
+        deviceRect
       })
     },
     [frame, mode]
@@ -143,18 +122,19 @@ export function CaptureOverlay(): React.ReactElement {
     if (r !== null && r.w >= 4 && r.h >= 4) {
       confirm(r)
     } else {
-      // A click (no real drag) clears the selection rather than capturing
-      // a 1px sliver. The user can drag again or press Enter for full.
       setSel(null)
     }
   }
 
   if (frame === null) {
-    return <div style={{ width: '100%', height: '100%', background: '#000' }} />
+    // Transparent placeholder while we fetch geometry — never opaque, so
+    // the live screen is visible from the first frame.
+    return <div style={{ width: '100%', height: '100%' }} />
   }
 
   const isVideo = mode === 'video'
   const accent = isVideo ? '#ff8b7b' : '#2BD9AC'
+  const sf = frame.scaleFactor
 
   return (
     <div
@@ -170,29 +150,14 @@ export function CaptureOverlay(): React.ReactElement {
         overflow: 'hidden'
       }}
     >
-      <img
-        ref={imgRef}
-        src={frame.dataUrl}
-        alt=""
-        draggable={false}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          display: 'block',
-          pointerEvents: 'none'
-        }}
-      />
-
-      {/* Dim wash. When a selection exists we punch a clear hole with 4
-          rectangles so the selected region shows the bright still. */}
+      {/* Light wash over the LIVE screen. The selection punches a clear
+          hole so the chosen region shows at full brightness. */}
       {sel === null ? (
         <div
           style={{
             position: 'absolute',
             inset: 0,
-            background: 'rgba(6, 20, 17, 0.45)',
+            background: 'rgba(6, 20, 17, 0.32)',
             pointerEvents: 'none'
           }}
         />
@@ -232,19 +197,13 @@ export function CaptureOverlay(): React.ReactElement {
                 whiteSpace: 'nowrap'
               }}
             >
-              {Math.round(sel.w * (imgRef.current
-                ? imgRef.current.naturalWidth / (containerRef.current?.clientWidth ?? 1)
-                : 1))}{' '}
-              ×{' '}
-              {Math.round(sel.h * (imgRef.current
-                ? imgRef.current.naturalHeight / (containerRef.current?.clientHeight ?? 1)
-                : 1))}
+              {Math.round(sel.w * sf)} × {Math.round(sel.h * sf)}
             </div>
           )}
         </>
       )}
 
-      {/* Hint bar — only on the primary interaction, centered top */}
+      {/* Toolbar — only before the drag starts, centered top */}
       {sel === null && (
         <div
           onPointerDown={(e) => e.stopPropagation()}
@@ -258,7 +217,7 @@ export function CaptureOverlay(): React.ReactElement {
             alignItems: 'center',
             padding: '10px 18px',
             borderRadius: 999,
-            background: 'rgba(10, 31, 27, 0.82)',
+            background: 'rgba(10, 31, 27, 0.92)',
             color: '#E7F3ED',
             fontSize: 13,
             fontFamily: 'Syne, system-ui, sans-serif',
@@ -267,7 +226,6 @@ export function CaptureOverlay(): React.ReactElement {
             pointerEvents: 'auto'
           }}
         >
-          {/* Photo / vidéo toggle */}
           <span
             style={{
               display: 'inline-flex',
@@ -316,9 +274,9 @@ export function CaptureOverlay(): React.ReactElement {
   )
 }
 
-/** Four dim rectangles around the selection (the bright "hole"). */
+/** Four wash rectangles around the selection (the bright "hole"). */
 function Dimmer({ rect }: { rect: Rect }): React.ReactElement {
-  const dim = 'rgba(6, 20, 17, 0.45)'
+  const dim = 'rgba(6, 20, 17, 0.32)'
   const base: React.CSSProperties = {
     position: 'absolute',
     background: dim,

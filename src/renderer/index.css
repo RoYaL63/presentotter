@@ -107,13 +107,14 @@
     pointer-events: auto;
   }
 
-  /* Capture mode — opaque window showing a frozen screen still. NOT
-     transparent (that would defeat the freeze); black base avoids the
-     glacier flash before the still paints. */
+  /* Capture mode — TRANSPARENT selector over the live screen (just a wash
+     + toolbar). Must not paint an opaque base or it would hide the very
+     content the user is trying to capture. */
   html[data-mode='capture'],
   html[data-mode='capture'] body,
   html[data-mode='capture'] #root {
-    background: #000 !important;
+    background: transparent !important;
+    background-color: transparent !important;
     overflow: hidden;
   }
 

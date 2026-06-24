@@ -179,21 +179,16 @@ declare global {
     // ---------- Capture (Snipping-Tool replacement) ----------
     captureStart(mode: 'photo' | 'video'): void
     captureGetFrame(): Promise<{
-      dataUrl: string
       bounds: { x: number; y: number; width: number; height: number }
       scaleFactor: number
       mode: 'photo' | 'video'
       multiDisplay: boolean
+      displayId: number
     } | null>
     captureRegionSelected(payload: {
       mode: 'photo' | 'video'
-      pngBase64: string
-      width: number
-      height: number
-      deviceRect?: { x: number; y: number; width: number; height: number }
-      bounds?: { x: number; y: number; width: number; height: number }
-      scaleFactor?: number
-      sourceId?: string
+      displayId: number
+      deviceRect: { x: number; y: number; width: number; height: number }
     }): void
     captureCancel(): void
 

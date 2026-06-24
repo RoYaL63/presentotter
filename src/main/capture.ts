@@ -66,15 +66,15 @@ export type OwnUiState = {
 export type CaptureMode = 'photo' | 'video'
 
 interface FramePayload {
-  dataUrl: string
   /** Display bounds in DIP (CSS) coordinates. */
   bounds: { x: number; y: number; width: number; height: number }
   scaleFactor: number
   mode: CaptureMode
   /** True when more than one display is being captured (UI hint). */
   multiDisplay: boolean
-  /** desktopCapturer source id of this display (for video getUserMedia). */
-  sourceId: string
+  /** Electron Display.id this selection window covers — echoed back so
+   *  main grabs the right screen at confirm time. */
+  displayId: number
 }
 
 interface RecorderConfig {
@@ -105,20 +105,20 @@ const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
- * Grab a full-resolution still of one display. We issue a getSources call
- * sized to that display's exact device pixels so the returned thumbnail is
- * native resolution (no up/down-scaling). display_id matching is unreliable
- * on Windows, so we fall back to index alignment with getAllDisplays order.
+ * Find the desktopCapturer screen source for a display. display_id matching
+ * is unreliable on Windows, so we fall back to index alignment with the
+ * getAllDisplays order. thumbW/H controls the thumbnail resolution (full
+ * device pixels for a photo crop, tiny when we only need the source id).
  */
-async function grabDisplay(
+async function getDisplaySource(
   display: Display,
-  index: number
-): Promise<{ dataUrl: string; sourceId: string } | null> {
-  const devW = Math.round(display.size.width * display.scaleFactor)
-  const devH = Math.round(display.size.height * display.scaleFactor)
+  index: number,
+  thumbW: number,
+  thumbH: number
+): Promise<Electron.DesktopCapturerSource | null> {
   const sources = await desktopCapturer.getSources({
     types: ['screen'],
-    thumbnailSize: { width: devW, height: devH }
+    thumbnailSize: { width: thumbW, height: thumbH }
   })
   if (sources.length === 0) return null
   const wanted = String(display.id)
@@ -127,14 +127,11 @@ async function grabDisplay(
       s.display_id === wanted
   )
   if (match === undefined) match = sources[index] ?? sources[0]
-  if (match === undefined || match.thumbnail.isEmpty()) return null
-  return { dataUrl: match.thumbnail.toDataURL(), sourceId: match.id }
+  return match ?? null
 }
 
 function createCaptureWindow(
   display: Display,
-  dataUrl: string,
-  sourceId: string,
   mode: CaptureMode,
   multiDisplay: boolean
 ): void {
@@ -146,10 +143,11 @@ function createCaptureWindow(
     width,
     height,
     frame: false,
-    // Opaque: the window shows the FROZEN frame, so it must not let the
-    // live desktop bleed through (which would defeat the freeze).
-    transparent: false,
-    backgroundColor: '#000000',
+    // Transparent: the user sees their LIVE screen through a light wash +
+    // the selection toolbar — no opaque "window over my content". The
+    // actual still is grabbed by main AFTER this overlay is hidden.
+    transparent: true,
+    backgroundColor: '#00000000',
     resizable: false,
     movable: false,
     minimizable: false,
@@ -177,12 +175,11 @@ function createCaptureWindow(
   // "Object has been destroyed".
   const wcId = win.webContents.id
   frameByWebContents.set(wcId, {
-    dataUrl,
     bounds: { x, y, width, height },
     scaleFactor: display.scaleFactor,
     mode,
     multiDisplay,
-    sourceId
+    displayId: display.id
   })
   captureWindows.add(win)
 
@@ -229,42 +226,20 @@ export async function startCapture(mode: CaptureMode): Promise<void> {
   if (deps === null || capturing) return
   capturing = true
 
-  // Hide our own floating UI so it is not baked into the screenshot.
+  // Hide our own floating UI so the user doesn't see (or select) it, and so
+  // it won't be in the grab taken at confirm time.
   pendingRestore = deps.hideOwnUi()
-  // Give the compositor a couple of frames to actually remove the windows
-  // before we grab the screen. Without this the toolbar/overlay can still
-  // appear in the still.
-  await delay(180)
+  // Let the compositor actually remove our windows before the transparent
+  // selector appears over the live screen.
+  await delay(120)
 
   const displays = screen.getAllDisplays()
-  const grabbed: Array<{
-    display: Display
-    dataUrl: string
-    sourceId: string
-  }> = []
-  for (let i = 0; i < displays.length; i++) {
-    const d = displays[i]
-    if (d === undefined) continue
-    try {
-      const got = await grabDisplay(d, i)
-      if (got !== null) {
-        grabbed.push({ display: d, dataUrl: got.dataUrl, sourceId: got.sourceId })
-      }
-    } catch (err) {
-      console.error('[capture] grabDisplay failed:', err)
-    }
-  }
-
-  if (grabbed.length === 0) {
-    // Nothing captured — bail cleanly and restore UI.
+  if (displays.length === 0) {
     finishCapture()
     return
   }
-
-  const multi = grabbed.length > 1
-  for (const g of grabbed) {
-    createCaptureWindow(g.display, g.dataUrl, g.sourceId, mode, multi)
-  }
+  const multi = displays.length > 1
+  for (const d of displays) createCaptureWindow(d, mode, multi)
 }
 
 /** Build the screenshots directory and return its absolute path. */
@@ -312,26 +287,82 @@ function notifyCaptured(savePath: string | null): void {
 }
 
 /**
- * Handle a finished photo selection: copy to clipboard, save to disk,
- * remember it for the editor, restore UI, and notify.
+ * Handle a finished photo selection. The selector is transparent (no frozen
+ * frame), so main does the actual grab HERE: close the overlay, let it
+ * vanish, capture the chosen display at full resolution, crop to the device
+ * rectangle, then copy to clipboard + save + notify.
  */
 async function handlePhotoSelected(
-  pngBase64: string,
-  width: number,
-  height: number
+  displayId: number,
+  deviceRect: { x: number; y: number; width: number; height: number }
 ): Promise<void> {
-  const buf = Buffer.from(pngBase64, 'base64')
-  finishCapture()
+  closeCaptureWindows()
+  // The transparent selector (with its wash) must be gone before the grab.
+  await delay(150)
 
-  const img = nativeImage.createFromBuffer(buf)
-  if (!img.isEmpty()) clipboard.writeImage(img)
+  const displays = screen.getAllDisplays()
+  const idx = displays.findIndex((d) => d.id === displayId)
+  const display = displays[idx] ?? screen.getPrimaryDisplay()
+  const devW = Math.round(display.size.width * display.scaleFactor)
+  const devH = Math.round(display.size.height * display.scaleFactor)
+
+  let src: Electron.DesktopCapturerSource | null = null
+  try {
+    src = await getDisplaySource(display, idx < 0 ? 0 : idx, devW, devH)
+  } catch (err) {
+    console.error('[capture] grab failed:', err)
+  }
+
+  // Grab done — bring our UI back.
+  if (pendingRestore !== null) {
+    pendingRestore.restore()
+    pendingRestore = null
+  }
+  capturing = false
+
+  if (src === null || src.thumbnail.isEmpty()) return
+  const full = src.thumbnail
+  const size = full.getSize()
+  const cx = Math.max(0, Math.min(size.width - 1, Math.round(deviceRect.x)))
+  const cy = Math.max(0, Math.min(size.height - 1, Math.round(deviceRect.y)))
+  const cw = Math.max(1, Math.min(size.width - cx, Math.round(deviceRect.width)))
+  const ch = Math.max(1, Math.min(size.height - cy, Math.round(deviceRect.height)))
+  const cropped = full.crop({ x: cx, y: cy, width: cw, height: ch })
+  const buf = cropped.toPNG()
+  if (!cropped.isEmpty()) clipboard.writeImage(cropped)
 
   const savePath = await saveScreenshot(buf)
-  lastCapture = { path: savePath, bytes: buf, width, height }
+  const cs = cropped.getSize()
+  lastCapture = { path: savePath, bytes: buf, width: cs.width, height: cs.height }
   notifyCaptured(savePath)
   // Dev convenience: open the editor straight away so the full loop is
   // testable without a working OS toast (see CaptureDeps.isDev).
   if (deps?.isDev === true) openEditor()
+}
+
+/**
+ * Handle a finished video selection: resolve the display's capturer source
+ * and hand the rectangle to the region recorder.
+ */
+async function handleVideoSelected(
+  displayId: number,
+  deviceRect: { x: number; y: number; width: number; height: number }
+): Promise<void> {
+  closeCaptureWindows()
+  const displays = screen.getAllDisplays()
+  const idx = displays.findIndex((d) => d.id === displayId)
+  const display = displays[idx] ?? screen.getPrimaryDisplay()
+  let src: Electron.DesktopCapturerSource | null = null
+  try {
+    src = await getDisplaySource(display, idx < 0 ? 0 : idx, 150, 100)
+  } catch (err) {
+    console.error('[capture] video source grab failed:', err)
+  }
+  if (src === null) {
+    finishCapture()
+    return
+  }
+  startRegionRecording(src.id, deviceRect, display.bounds, display.scaleFactor)
 }
 
 // ============================================================================
@@ -558,35 +589,16 @@ export function registerCaptureIpc(d: CaptureDeps): void {
       _e,
       payload: {
         mode: CaptureMode
-        pngBase64: string
-        width: number
-        height: number
-        /** Device-pixel rect on the source display (for video crop). */
-        deviceRect?: { x: number; y: number; width: number; height: number }
-        bounds?: { x: number; y: number; width: number; height: number }
-        scaleFactor?: number
-        sourceId?: string
+        displayId: number
+        /** Device-pixel rect on the chosen display. */
+        deviceRect: { x: number; y: number; width: number; height: number }
       }
     ) => {
       if (payload.mode === 'video') {
-        if (
-          payload.deviceRect !== undefined &&
-          payload.bounds !== undefined &&
-          payload.scaleFactor !== undefined &&
-          payload.sourceId !== undefined
-        ) {
-          startRegionRecording(
-            payload.sourceId,
-            payload.deviceRect,
-            payload.bounds,
-            payload.scaleFactor
-          )
-        } else {
-          finishCapture()
-        }
-        return
+        void handleVideoSelected(payload.displayId, payload.deviceRect)
+      } else {
+        void handlePhotoSelected(payload.displayId, payload.deviceRect)
       }
-      void handlePhotoSelected(payload.pngBase64, payload.width, payload.height)
     }
   )
 

@@ -361,25 +361,22 @@ const api = {
   captureStart: (mode: 'photo' | 'video') =>
     ipcRenderer.send('capture:start', mode),
 
-  /** Capture window asks main for its frozen frame + display geometry. */
+  /** Capture window asks main for its display geometry (transparent
+   *  selector — no frozen frame; main grabs at confirm time). */
   captureGetFrame: (): Promise<{
-    dataUrl: string
     bounds: { x: number; y: number; width: number; height: number }
     scaleFactor: number
     mode: 'photo' | 'video'
     multiDisplay: boolean
+    displayId: number
   } | null> => ipcRenderer.invoke('capture:get-frame'),
 
-  /** Capture window: report the confirmed selection (cropped PNG base64). */
+  /** Capture window: report the confirmed selection (device-px rect +
+   *  display id). Main grabs + crops the real screen from these. */
   captureRegionSelected: (payload: {
     mode: 'photo' | 'video'
-    pngBase64: string
-    width: number
-    height: number
-    deviceRect?: { x: number; y: number; width: number; height: number }
-    bounds?: { x: number; y: number; width: number; height: number }
-    scaleFactor?: number
-    sourceId?: string
+    displayId: number
+    deviceRect: { x: number; y: number; width: number; height: number }
   }) => ipcRenderer.send('capture:region-selected', payload),
 
   /** Capture window: cancel the whole session (Esc). */
