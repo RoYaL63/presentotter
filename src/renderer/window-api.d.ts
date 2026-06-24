@@ -188,6 +188,14 @@ declare global {
       screenRect: { x: number; y: number; width: number; height: number } | null
     }): void
     captureCancel(): void
+    captureSelectionPreview(
+      screenRect: { x: number; y: number; width: number; height: number } | null
+    ): void
+    onCaptureSelectionPreview(
+      cb: (
+        screenRect: { x: number; y: number; width: number; height: number } | null
+      ) => void
+    ): () => void
 
     // ---------- Region recorder (ShareX-style video) ----------
     recorderGetConfig(): Promise<{

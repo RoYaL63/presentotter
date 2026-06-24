@@ -36,6 +36,14 @@ export function CaptureOverlay(): React.ReactElement {
   const [mode, setMode] = useState<'photo' | 'video'>('photo')
   const [sel, setSel] = useState<Rect | null>(null)
   const [drawing, setDrawing] = useState(false)
+  /** Selection in progress on ANOTHER screen (screen-DIP), mirrored here so
+   *  the border stays visible across the monitor boundary. */
+  const [remoteSel, setRemoteSel] = useState<{
+    x: number
+    y: number
+    width: number
+    height: number
+  } | null>(null)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const startRef = useRef<{ x: number; y: number } | null>(null)
@@ -52,6 +60,12 @@ export function CaptureOverlay(): React.ReactElement {
     return () => {
       alive = false
     }
+  }, [])
+
+  // Mirror the in-progress selection coming from another screen.
+  useEffect(() => {
+    const off = window.api?.onCaptureSelectionPreview((r) => setRemoteSel(r))
+    return off
   }, [])
 
   const cancel = useCallback(() => {
@@ -108,13 +122,23 @@ export function CaptureOverlay(): React.ReactElement {
   const onPointerMove = (e: React.PointerEvent) => {
     const s = startRef.current
     if (!drawing || s === null) return
-    setSel(normalize(s.x, s.y, e.clientX, e.clientY))
+    const r = normalize(s.x, s.y, e.clientX, e.clientY)
+    setSel(r)
+    if (frame !== null) {
+      window.api?.captureSelectionPreview({
+        x: frame.originX + r.x,
+        y: frame.originY + r.y,
+        width: r.w,
+        height: r.h
+      })
+    }
   }
   const onPointerUp = () => {
     if (!drawing) return
     setDrawing(false)
     const r = sel
     startRef.current = null
+    window.api?.captureSelectionPreview(null)
     if (r !== null && r.w >= 4 && r.h >= 4) {
       confirm(r)
     } else {
@@ -126,6 +150,19 @@ export function CaptureOverlay(): React.ReactElement {
   const accent = isVideo ? '#ff8b7b' : '#2BD9AC'
   const dpr = window.devicePixelRatio || 1
   const ready = frame !== null
+
+  // The rectangle to draw on THIS screen: the local drag if any, otherwise
+  // the part of a drag happening on another screen (mirrored).
+  const remoteLocal =
+    remoteSel !== null && frame !== null
+      ? {
+          x: remoteSel.x - frame.originX,
+          y: remoteSel.y - frame.originY,
+          w: remoteSel.width,
+          h: remoteSel.height
+        }
+      : null
+  const effectiveSel = sel ?? remoteLocal
 
   return (
     <div
@@ -143,7 +180,7 @@ export function CaptureOverlay(): React.ReactElement {
     >
       {/* Light wash over the LIVE screen. The selection punches a clear
           hole so the chosen region shows at full brightness. */}
-      {sel === null ? (
+      {effectiveSel === null ? (
         <div
           style={{
             position: 'absolute',
@@ -153,49 +190,49 @@ export function CaptureOverlay(): React.ReactElement {
           }}
         />
       ) : (
-        <Dimmer rect={sel} />
+        <Dimmer rect={effectiveSel} />
       )}
 
-      {/* Selection border + size badge */}
-      {sel !== null && (
-        <>
-          <div
-            style={{
-              position: 'absolute',
-              left: sel.x,
-              top: sel.y,
-              width: sel.w,
-              height: sel.h,
-              border: `2px solid ${accent}`,
-              boxShadow: `0 0 0 1px rgba(0,0,0,0.4), 0 0 18px ${accent}66`,
-              pointerEvents: 'none'
-            }}
-          />
-          {sel.w > 0 && sel.h > 0 && (
-            <div
-              style={{
-                position: 'absolute',
-                left: sel.x,
-                top: Math.max(0, sel.y - 26),
-                padding: '2px 8px',
-                fontSize: 12,
-                fontFamily: 'JetBrains Mono, monospace',
-                fontWeight: 600,
-                color: '#06231D',
-                background: accent,
-                borderRadius: 6,
-                pointerEvents: 'none',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              {Math.round(sel.w * dpr)} × {Math.round(sel.h * dpr)}
-            </div>
-          )}
-        </>
+      {/* Selection border (local or mirrored) */}
+      {effectiveSel !== null && (
+        <div
+          style={{
+            position: 'absolute',
+            left: effectiveSel.x,
+            top: effectiveSel.y,
+            width: effectiveSel.w,
+            height: effectiveSel.h,
+            border: `2px solid ${accent}`,
+            boxShadow: `0 0 0 1px rgba(0,0,0,0.4), 0 0 18px ${accent}66`,
+            pointerEvents: 'none'
+          }}
+        />
+      )}
+
+      {/* Size badge — only on the screen where the drag is happening */}
+      {sel !== null && sel.w > 0 && sel.h > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            left: sel.x,
+            top: Math.max(0, sel.y - 26),
+            padding: '2px 8px',
+            fontSize: 12,
+            fontFamily: 'JetBrains Mono, monospace',
+            fontWeight: 600,
+            color: '#06231D',
+            background: accent,
+            borderRadius: 6,
+            pointerEvents: 'none',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          {Math.round(sel.w * dpr)} × {Math.round(sel.h * dpr)}
+        </div>
       )}
 
       {/* Toolbar — only before the drag starts, centered top */}
-      {sel === null && ready && (
+      {effectiveSel === null && ready && (
         <div
           onPointerDown={(e) => e.stopPropagation()}
           style={{

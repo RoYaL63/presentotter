@@ -379,6 +379,25 @@ const api = {
   /** Capture window: cancel the whole session (Esc). */
   captureCancel: () => ipcRenderer.send('capture:cancel'),
 
+  /** Capture window: broadcast the in-progress selection (screen-DIP) so
+   *  the OTHER screens' overlays can draw the same rectangle — keeps the
+   *  border visible when a drag crosses monitors. null clears it. */
+  captureSelectionPreview: (
+    screenRect: { x: number; y: number; width: number; height: number } | null
+  ) => ipcRenderer.send('capture:selection-preview', screenRect),
+  onCaptureSelectionPreview: (
+    cb: (
+      screenRect: { x: number; y: number; width: number; height: number } | null
+    ) => void
+  ) => {
+    const handler = (
+      _e: unknown,
+      r: { x: number; y: number; width: number; height: number } | null
+    ): void => cb(r)
+    ipcRenderer.on('capture:selection-preview-fwd', handler)
+    return () => ipcRenderer.off('capture:selection-preview-fwd', handler)
+  },
+
   // ---------- Region recorder (ShareX-style video) ----------
 
   /** Recorder window: fetch its capture config (source id + crop rect). */

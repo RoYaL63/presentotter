@@ -666,6 +666,21 @@ export function registerCaptureIpc(d: CaptureDeps): void {
     finishCapture()
   })
 
+  /** Relay the in-progress selection to the OTHER capture windows so the
+   *  rectangle stays visible when a drag crosses monitors. */
+  ipcMain.on(
+    'capture:selection-preview',
+    (
+      e,
+      screenRect: { x: number; y: number; width: number; height: number } | null
+    ) => {
+      for (const w of captureWindows) {
+        if (w.isDestroyed() || w.webContents.id === e.sender.id) continue
+        w.webContents.send('capture:selection-preview-fwd', screenRect)
+      }
+    }
+  )
+
   /** Editor asks for the image to edit. */
   ipcMain.handle('editor:get-image', () => editorImagePayload())
 
