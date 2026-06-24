@@ -85,6 +85,7 @@ export function RegionRecorder(): React.ReactElement {
   const sysAudioStreamRef = useRef<MediaStream | null>(null)
   const micStreamRef = useRef<MediaStream | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
+  const audioCtxRef = useRef<AudioContext | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const rafRef = useRef<number | null>(null)
   const timerRef = useRef<number | null>(null)
@@ -111,6 +112,10 @@ export function RegionRecorder(): React.ReactElement {
     rafRef.current = null
     timerRef.current = null
     stopStreams()
+    if (audioCtxRef.current !== null) {
+      void audioCtxRef.current.close().catch(() => {})
+      audioCtxRef.current = null
+    }
   }
 
   const finish = (path: string | null): void => {
@@ -286,7 +291,18 @@ export function RegionRecorder(): React.ReactElement {
       }
     }
     const out = canvas.captureStream(cfg.fps)
-    for (const t of audioTracks) out.addTrack(t)
+    // Merge every audio source into ONE track via WebAudio — MediaRecorder
+    // only reliably records a single audio track, so simply addTrack-ing
+    // both system + mic would drop one of them.
+    if (audioTracks.length > 0) {
+      const audioCtx = new AudioContext()
+      const dest = audioCtx.createMediaStreamDestination()
+      for (const t of audioTracks) {
+        audioCtx.createMediaStreamSource(new MediaStream([t])).connect(dest)
+      }
+      for (const t of dest.stream.getAudioTracks()) out.addTrack(t)
+      audioCtxRef.current = audioCtx
+    }
 
     const candidates = [
       'video/webm; codecs="vp9,opus"',
