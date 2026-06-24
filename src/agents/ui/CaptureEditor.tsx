@@ -7,6 +7,7 @@ import {
   Crop,
   FolderOpen,
   Highlighter,
+  ListOrdered,
   Minus,
   Pencil,
   Redo2,
@@ -39,6 +40,7 @@ type ToolId =
   | 'ellipse'
   | 'highlight'
   | 'text'
+  | 'step'
   | 'crop'
 
 interface Pt {
@@ -51,6 +53,7 @@ type Shape =
   | { t: 'line' | 'arrow'; color: string; width: number; a: Pt; b: Pt }
   | { t: 'rect' | 'ellipse'; color: string; width: number; a: Pt; b: Pt }
   | { t: 'text'; color: string; size: number; pos: Pt; text: string }
+  | { t: 'step'; color: string; size: number; num: number; pos: Pt; label: string }
 
 interface EditorImage {
   dataUrl: string
@@ -78,6 +81,7 @@ const TOOLS: Array<{ id: ToolId; Icon: typeof Pencil; label: string }> = [
   { id: 'ellipse', Icon: Circle, label: 'Ellipse' },
   { id: 'highlight', Icon: Highlighter, label: 'Surligneur' },
   { id: 'text', Icon: Type, label: 'Texte' },
+  { id: 'step', Icon: ListOrdered, label: 'Étapes numérotées' },
   { id: 'crop', Icon: Crop, label: 'Recadrer' }
 ]
 
@@ -161,6 +165,38 @@ function drawShape(ctx: CanvasRenderingContext2D, s: Shape): void {
     ctx.font = `600 ${s.size}px Syne, system-ui, sans-serif`
     ctx.textBaseline = 'top'
     ctx.fillText(s.text, s.pos.x, s.pos.y)
+  } else if (s.t === 'step') {
+    const r = s.size
+    // Numbered disc
+    ctx.fillStyle = s.color
+    ctx.beginPath()
+    ctx.arc(s.pos.x, s.pos.y, r, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#ffffff'
+    ctx.font = `800 ${Math.round(r * 1.15)}px Syne, system-ui, sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(String(s.num), s.pos.x, s.pos.y + r * 0.04)
+    // Caption pill to the right (matches the disc colour, white text)
+    if (s.label.trim().length > 0) {
+      const fs = Math.round(r * 0.95)
+      ctx.font = `600 ${fs}px Syne, system-ui, sans-serif`
+      ctx.textAlign = 'left'
+      const padX = fs * 0.55
+      const padY = fs * 0.34
+      const tw = ctx.measureText(s.label).width
+      const bx = s.pos.x + r + fs * 0.5
+      const bh = fs + padY * 2
+      const by = s.pos.y - bh / 2
+      const bw = tw + padX * 2
+      ctx.fillStyle = s.color
+      ctx.beginPath()
+      ctx.roundRect(bx, by, bw, bh, bh * 0.32)
+      ctx.fill()
+      ctx.fillStyle = '#ffffff'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(s.label, bx + padX, by + bh / 2)
+    }
   }
   ctx.restore()
 }
@@ -175,6 +211,12 @@ export function CaptureEditor(): React.ReactElement {
   const [savedPath, setSavedPath] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [textDraft, setTextDraft] = useState<{ pos: Pt; cssX: number; cssY: number } | null>(null)
+  const [captionDraft, setCaptionDraft] = useState<{
+    shapeIndex: number
+    cssX: number
+    cssY: number
+    value: string
+  } | null>(null)
 
   const baseImgRef = useRef<HTMLImageElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -265,6 +307,21 @@ export function CaptureEditor(): React.ReactElement {
         pos: p,
         cssX: e.clientX - (r?.left ?? 0),
         cssY: e.clientY - (r?.top ?? 0)
+      })
+      return
+    }
+    if (tool === 'step') {
+      // Click drops the next numbered disc; a caption field opens next to it.
+      const num = shapes.filter((s) => s.t === 'step').length + 1
+      const r = Math.max(20, width * 3)
+      const index = shapes.length
+      pushShape({ t: 'step', color, size: r, num, pos: p, label: '' })
+      const box = canvasRef.current?.getBoundingClientRect()
+      setCaptionDraft({
+        shapeIndex: index,
+        cssX: e.clientX - (box?.left ?? 0) + 18,
+        cssY: e.clientY - (box?.top ?? 0) - 10,
+        value: ''
       })
       return
     }
@@ -413,7 +470,7 @@ export function CaptureEditor(): React.ReactElement {
   // Keyboard: Ctrl+Z / Ctrl+Y / Ctrl+C / Ctrl+S.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (textDraft !== null) return
+      if (textDraft !== null || captionDraft !== null) return
       if (e.ctrlKey && e.key.toLowerCase() === 'z') {
         e.preventDefault()
         undo()
@@ -431,7 +488,19 @@ export function CaptureEditor(): React.ReactElement {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [textDraft, shapes, redoStack])
+  }, [textDraft, captionDraft, shapes, redoStack])
+
+  /** Live-update the step caption being typed. */
+  const updateCaption = (v: string): void => {
+    setCaptionDraft((d) => (d !== null ? { ...d, value: v } : d))
+    setShapes((prev) =>
+      prev.map((s, i) =>
+        captionDraft !== null && i === captionDraft.shapeIndex && s.t === 'step'
+          ? { ...s, label: v }
+          : s
+      )
+    )
+  }
 
   const reveal = () => {
     if (savedPath !== null) void window.api?.editorReveal(savedPath)
@@ -572,6 +641,23 @@ export function CaptureEditor(): React.ReactElement {
                 className="absolute z-10 rounded border border-[#2BD9AC] bg-black/70 px-1 py-0.5 text-sm outline-none"
                 style={{ left: textDraft.cssX, top: textDraft.cssY, color }}
                 placeholder="Texte…"
+              />
+            )}
+            {captionDraft !== null && (
+              <input
+                autoFocus
+                type="text"
+                value={captionDraft.value}
+                onChange={(e) => updateCaption(e.target.value)}
+                onBlur={() => setCaptionDraft(null)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'Escape') {
+                    setCaptionDraft(null)
+                  }
+                }}
+                className="absolute z-10 rounded border border-[#2BD9AC] bg-black/70 px-1.5 py-0.5 text-sm text-white outline-none"
+                style={{ left: captionDraft.cssX, top: captionDraft.cssY }}
+                placeholder="Légende (optionnel)…"
               />
             )}
           </div>
