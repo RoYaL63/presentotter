@@ -12,11 +12,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  */
 
 interface Frame {
-  bounds: { x: number; y: number; width: number; height: number }
-  scaleFactor: number
+  /** Virtual-desktop origin (DIP). Added to local coords → screen coords. */
+  originX: number
+  originY: number
   mode: 'photo' | 'video'
-  multiDisplay: boolean
-  displayId: number
 }
 
 interface Rect {
@@ -61,28 +60,25 @@ export function CaptureOverlay(): React.ReactElement {
     window.api?.captureCancel()
   }, [])
 
-  /** Send the chosen rect (device px) + display id. `r === null` = full. */
+  /** Send the chosen rect in screen-DIP coords. `r === null` = full screen
+   *  (main captures the display under the cursor). */
   const confirm = useCallback(
     (r: Rect | null) => {
-      if (sentRef.current) return
-      const cont = containerRef.current
-      if (cont === null || frame === null) return
-      const sf = frame.scaleFactor
-      const rect: Rect =
-        r ?? { x: 0, y: 0, w: cont.clientWidth, h: cont.clientHeight }
-      const deviceRect = {
-        x: Math.round(rect.x * sf),
-        y: Math.round(rect.y * sf),
-        width: Math.round(rect.w * sf),
-        height: Math.round(rect.h * sf)
+      if (sentRef.current || frame === null) return
+      const screenRect =
+        r === null
+          ? null
+          : {
+              x: frame.originX + r.x,
+              y: frame.originY + r.y,
+              width: r.w,
+              height: r.h
+            }
+      if (screenRect !== null && (screenRect.width < 2 || screenRect.height < 2)) {
+        return
       }
-      if (deviceRect.width < 1 || deviceRect.height < 1) return
       sentRef.current = true
-      window.api?.captureRegionSelected({
-        mode,
-        displayId: frame.displayId,
-        deviceRect
-      })
+      window.api?.captureRegionSelected({ mode, screenRect })
     },
     [frame, mode]
   )
@@ -103,7 +99,7 @@ export function CaptureOverlay(): React.ReactElement {
   }, [cancel, confirm])
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return
+    if (e.button !== 0 || frame === null) return
     ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
     startRef.current = { x: e.clientX, y: e.clientY }
     setSel({ x: e.clientX, y: e.clientY, w: 0, h: 0 })
@@ -126,15 +122,10 @@ export function CaptureOverlay(): React.ReactElement {
     }
   }
 
-  if (frame === null) {
-    // Transparent placeholder while we fetch geometry — never opaque, so
-    // the live screen is visible from the first frame.
-    return <div style={{ width: '100%', height: '100%' }} />
-  }
-
   const isVideo = mode === 'video'
   const accent = isVideo ? '#ff8b7b' : '#2BD9AC'
-  const sf = frame.scaleFactor
+  const dpr = window.devicePixelRatio || 1
+  const ready = frame !== null
 
   return (
     <div
@@ -197,14 +188,14 @@ export function CaptureOverlay(): React.ReactElement {
                 whiteSpace: 'nowrap'
               }}
             >
-              {Math.round(sel.w * sf)} × {Math.round(sel.h * sf)}
+              {Math.round(sel.w * dpr)} × {Math.round(sel.h * dpr)}
             </div>
           )}
         </>
       )}
 
       {/* Toolbar — only before the drag starts, centered top */}
-      {sel === null && (
+      {sel === null && ready && (
         <div
           onPointerDown={(e) => e.stopPropagation()}
           style={{

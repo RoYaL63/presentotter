@@ -361,22 +361,19 @@ const api = {
   captureStart: (mode: 'photo' | 'video') =>
     ipcRenderer.send('capture:start', mode),
 
-  /** Capture window asks main for its display geometry (transparent
-   *  selector — no frozen frame; main grabs at confirm time). */
+  /** Capture window asks main for the virtual-desktop origin (the overlay
+   *  spans all screens) + the requested mode. */
   captureGetFrame: (): Promise<{
-    bounds: { x: number; y: number; width: number; height: number }
-    scaleFactor: number
+    originX: number
+    originY: number
     mode: 'photo' | 'video'
-    multiDisplay: boolean
-    displayId: number
   } | null> => ipcRenderer.invoke('capture:get-frame'),
 
-  /** Capture window: report the confirmed selection (device-px rect +
-   *  display id). Main grabs + crops the real screen from these. */
+  /** Capture window: report the confirmed selection in screen-DIP coords
+   *  (null = full screen). Main resolves the display + grabs/crops. */
   captureRegionSelected: (payload: {
     mode: 'photo' | 'video'
-    displayId: number
-    deviceRect: { x: number; y: number; width: number; height: number }
+    screenRect: { x: number; y: number; width: number; height: number } | null
   }) => ipcRenderer.send('capture:region-selected', payload),
 
   /** Capture window: cancel the whole session (Esc). */

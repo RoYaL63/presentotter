@@ -66,15 +66,12 @@ export type OwnUiState = {
 export type CaptureMode = 'photo' | 'video'
 
 interface FramePayload {
-  /** Display bounds in DIP (CSS) coordinates. */
-  bounds: { x: number; y: number; width: number; height: number }
-  scaleFactor: number
+  /** Top-left of the virtual desktop (DIP). The overlay spans ALL screens
+   *  as one window, so the renderer adds this origin to its local cursor
+   *  coords to produce screen-DIP coordinates main can resolve. */
+  originX: number
+  originY: number
   mode: CaptureMode
-  /** True when more than one display is being captured (UI hint). */
-  multiDisplay: boolean
-  /** Electron Display.id this selection window covers — echoed back so
-   *  main grabs the right screen at confirm time. */
-  displayId: number
 }
 
 interface RecorderConfig {
@@ -130,13 +127,33 @@ async function getDisplaySource(
   return match ?? null
 }
 
+/** Bounding rectangle (DIP) of the whole virtual desktop — the union of
+ *  every display, so one window can cover them all. */
+function virtualBounds(): { x: number; y: number; width: number; height: number } {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const d of screen.getAllDisplays()) {
+    const b = d.bounds
+    minX = Math.min(minX, b.x)
+    minY = Math.min(minY, b.y)
+    maxX = Math.max(maxX, b.x + b.width)
+    maxY = Math.max(maxY, b.y + b.height)
+  }
+  if (!Number.isFinite(minX)) {
+    const p = screen.getPrimaryDisplay().bounds
+    return { x: p.x, y: p.y, width: p.width, height: p.height }
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
+}
+
 function createCaptureWindow(
-  display: Display,
-  mode: CaptureMode,
-  multiDisplay: boolean
+  vb: { x: number; y: number; width: number; height: number },
+  mode: CaptureMode
 ): void {
   if (deps === null) return
-  const { x, y, width, height } = display.bounds
+  const { x, y, width, height } = vb
   const win = new BrowserWindow({
     x,
     y,
@@ -175,11 +192,9 @@ function createCaptureWindow(
   // "Object has been destroyed".
   const wcId = win.webContents.id
   frameByWebContents.set(wcId, {
-    bounds: { x, y, width, height },
-    scaleFactor: display.scaleFactor,
-    mode,
-    multiDisplay,
-    displayId: display.id
+    originX: x,
+    originY: y,
+    mode
   })
   captureWindows.add(win)
 
@@ -233,13 +248,51 @@ export async function startCapture(mode: CaptureMode): Promise<void> {
   // selector appears over the live screen.
   await delay(120)
 
+  // ONE overlay spanning every screen, so the wash covers all displays.
+  createCaptureWindow(virtualBounds(), mode)
+}
+
+/**
+ * Map a screen-DIP selection rectangle to the display it belongs to (by its
+ * centre) and the device-pixel crop rect on that display. A null rect means
+ * "full screen of the display under the cursor".
+ */
+function resolveSelection(
+  screenRect: { x: number; y: number; width: number; height: number } | null
+): {
+  display: Display
+  index: number
+  deviceRect: { x: number; y: number; width: number; height: number }
+} {
   const displays = screen.getAllDisplays()
-  if (displays.length === 0) {
-    finishCapture()
-    return
+  if (screenRect === null) {
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+    const sf = display.scaleFactor
+    return {
+      display,
+      index: displays.findIndex((d) => d.id === display.id),
+      deviceRect: {
+        x: 0,
+        y: 0,
+        width: Math.round(display.size.width * sf),
+        height: Math.round(display.size.height * sf)
+      }
+    }
   }
-  const multi = displays.length > 1
-  for (const d of displays) createCaptureWindow(d, mode, multi)
+  const cx = Math.round(screenRect.x + screenRect.width / 2)
+  const cy = Math.round(screenRect.y + screenRect.height / 2)
+  const display = screen.getDisplayNearestPoint({ x: cx, y: cy })
+  const sf = display.scaleFactor
+  return {
+    display,
+    index: displays.findIndex((d) => d.id === display.id),
+    deviceRect: {
+      x: Math.round((screenRect.x - display.bounds.x) * sf),
+      y: Math.round((screenRect.y - display.bounds.y) * sf),
+      width: Math.round(screenRect.width * sf),
+      height: Math.round(screenRect.height * sf)
+    }
+  }
 }
 
 /** Build the screenshots directory and return its absolute path. */
@@ -293,22 +346,19 @@ function notifyCaptured(savePath: string | null): void {
  * rectangle, then copy to clipboard + save + notify.
  */
 async function handlePhotoSelected(
-  displayId: number,
-  deviceRect: { x: number; y: number; width: number; height: number }
+  screenRect: { x: number; y: number; width: number; height: number } | null
 ): Promise<void> {
   closeCaptureWindows()
   // The transparent selector (with its wash) must be gone before the grab.
   await delay(150)
 
-  const displays = screen.getAllDisplays()
-  const idx = displays.findIndex((d) => d.id === displayId)
-  const display = displays[idx] ?? screen.getPrimaryDisplay()
+  const { display, index, deviceRect } = resolveSelection(screenRect)
   const devW = Math.round(display.size.width * display.scaleFactor)
   const devH = Math.round(display.size.height * display.scaleFactor)
 
   let src: Electron.DesktopCapturerSource | null = null
   try {
-    src = await getDisplaySource(display, idx < 0 ? 0 : idx, devW, devH)
+    src = await getDisplaySource(display, index < 0 ? 0 : index, devW, devH)
   } catch (err) {
     console.error('[capture] grab failed:', err)
   }
@@ -345,16 +395,13 @@ async function handlePhotoSelected(
  * and hand the rectangle to the region recorder.
  */
 async function handleVideoSelected(
-  displayId: number,
-  deviceRect: { x: number; y: number; width: number; height: number }
+  screenRect: { x: number; y: number; width: number; height: number } | null
 ): Promise<void> {
   closeCaptureWindows()
-  const displays = screen.getAllDisplays()
-  const idx = displays.findIndex((d) => d.id === displayId)
-  const display = displays[idx] ?? screen.getPrimaryDisplay()
+  const { display, index, deviceRect } = resolveSelection(screenRect)
   let src: Electron.DesktopCapturerSource | null = null
   try {
-    src = await getDisplaySource(display, idx < 0 ? 0 : idx, 150, 100)
+    src = await getDisplaySource(display, index < 0 ? 0 : index, 150, 100)
   } catch (err) {
     console.error('[capture] video source grab failed:', err)
   }
@@ -589,15 +636,14 @@ export function registerCaptureIpc(d: CaptureDeps): void {
       _e,
       payload: {
         mode: CaptureMode
-        displayId: number
-        /** Device-pixel rect on the chosen display. */
-        deviceRect: { x: number; y: number; width: number; height: number }
+        /** Selection in screen-DIP coords, or null for full screen. */
+        screenRect: { x: number; y: number; width: number; height: number } | null
       }
     ) => {
       if (payload.mode === 'video') {
-        void handleVideoSelected(payload.displayId, payload.deviceRect)
+        void handleVideoSelected(payload.screenRect)
       } else {
-        void handlePhotoSelected(payload.displayId, payload.deviceRect)
+        void handlePhotoSelected(payload.screenRect)
       }
     }
   )
