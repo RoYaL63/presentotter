@@ -127,33 +127,14 @@ async function getDisplaySource(
   return match ?? null
 }
 
-/** Bounding rectangle (DIP) of the whole virtual desktop — the union of
- *  every display, so one window can cover them all. */
-function virtualBounds(): { x: number; y: number; width: number; height: number } {
-  let minX = Infinity
-  let minY = Infinity
-  let maxX = -Infinity
-  let maxY = -Infinity
-  for (const d of screen.getAllDisplays()) {
-    const b = d.bounds
-    minX = Math.min(minX, b.x)
-    minY = Math.min(minY, b.y)
-    maxX = Math.max(maxX, b.x + b.width)
-    maxY = Math.max(maxY, b.y + b.height)
-  }
-  if (!Number.isFinite(minX)) {
-    const p = screen.getPrimaryDisplay().bounds
-    return { x: p.x, y: p.y, width: p.width, height: p.height }
-  }
-  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
-}
-
-function createCaptureWindow(
-  vb: { x: number; y: number; width: number; height: number },
-  mode: CaptureMode
-): void {
+function createCaptureWindow(display: Display, mode: CaptureMode): void {
   if (deps === null) return
-  const { x, y, width, height } = vb
+  // One window PER display, exactly at its bounds. A single window spanning
+  // multiple monitors does not paint reliably across the whole span on
+  // Windows (mixed-DPI / large transparent layered window), which left a
+  // screen un-dimmed and clipped the selection border. Per-display windows
+  // are DPI-correct and always cover their whole screen.
+  const { x, y, width, height } = display.bounds
   const win = new BrowserWindow({
     x,
     y,
@@ -248,8 +229,13 @@ export async function startCapture(mode: CaptureMode): Promise<void> {
   // selector appears over the live screen.
   await delay(120)
 
-  // ONE overlay spanning every screen, so the wash covers all displays.
-  createCaptureWindow(virtualBounds(), mode)
+  const displays = screen.getAllDisplays()
+  if (displays.length === 0) {
+    finishCapture()
+    return
+  }
+  // One transparent selector per screen so every display is fully dimmed.
+  for (const d of displays) createCaptureWindow(d, mode)
 }
 
 /**
