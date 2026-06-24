@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import {
+  Camera,
   Home as HomeIcon,
   Keyboard,
   Library as LibraryIcon,
@@ -361,15 +362,21 @@ function AccueilSection() {
         </span>
       </button>
 
-      {/* QUICK ACTIONS — 5 cards on one row. Mirror sits next to Enregistrer
-          because both are about sharing/capturing the screen. */}
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
+      {/* QUICK ACTIONS — 6 cards, two rows of three. Capture leads because
+          it's the new headline action (Snipping-Tool replacement). */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+        <ActionCard
+          icon={Camera}
+          title="Capture d'écran"
+          description="Zone, copie auto, Alt+Maj+S"
+          onClick={() => window.api?.captureStart('photo')}
+          highlight
+        />
         <ActionCard
           icon={Video}
           title="Enregistrer"
           description="Écran, audio, webcam, fond"
           onClick={() => setRecordingOpen(true)}
-          highlight
         />
         <ActionCard
           icon={MonitorPlay}
@@ -417,6 +424,7 @@ function AccueilSection() {
           </kbd>
           <span className="text-[11px] font-bold">Quitter l&apos;outil</span>
         </span>
+        <ShortcutChip combo={['Alt', 'Maj', 'S']} label="Capture" />
         <ShortcutChip combo={['Alt', 'P']} label="Crayon" />
         <ShortcutChip combo={['Alt', 'R']} label="Rectangle" />
         <ShortcutChip combo={['Alt', 'T']} label="Texte" />

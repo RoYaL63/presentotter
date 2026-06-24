@@ -107,6 +107,24 @@
     pointer-events: auto;
   }
 
+  /* Capture mode — opaque window showing a frozen screen still. NOT
+     transparent (that would defeat the freeze); black base avoids the
+     glacier flash before the still paints. */
+  html[data-mode='capture'],
+  html[data-mode='capture'] body,
+  html[data-mode='capture'] #root {
+    background: #000 !important;
+    overflow: hidden;
+  }
+
+  /* Editor mode — framed pop-up. Dark base so there's no light flash
+     before React paints its own dark chrome. */
+  html[data-mode='editor'],
+  html[data-mode='editor'] body,
+  html[data-mode='editor'] #root {
+    background: #0a1f1b !important;
+  }
+
   /* Scrollbar — aqua-mist, discrete */
   ::-webkit-scrollbar {
     width: 10px;

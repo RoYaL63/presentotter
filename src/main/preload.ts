@@ -355,6 +355,72 @@ const api = {
     return () => ipcRenderer.off('home:open-shortcuts', handler)
   },
 
+  // ---------- Capture (Snipping-Tool replacement) ----------
+
+  /** Home/toolbar trigger: start a capture session (photo or video). */
+  captureStart: (mode: 'photo' | 'video') =>
+    ipcRenderer.send('capture:start', mode),
+
+  /** Capture window asks main for its frozen frame + display geometry. */
+  captureGetFrame: (): Promise<{
+    dataUrl: string
+    bounds: { x: number; y: number; width: number; height: number }
+    scaleFactor: number
+    mode: 'photo' | 'video'
+    multiDisplay: boolean
+  } | null> => ipcRenderer.invoke('capture:get-frame'),
+
+  /** Capture window: report the confirmed selection (cropped PNG base64). */
+  captureRegionSelected: (payload: {
+    mode: 'photo' | 'video'
+    pngBase64: string
+    width: number
+    height: number
+    deviceRect?: { x: number; y: number; width: number; height: number }
+    bounds?: { x: number; y: number; width: number; height: number }
+    scaleFactor?: number
+  }) => ipcRenderer.send('capture:region-selected', payload),
+
+  /** Capture window: cancel the whole session (Esc). */
+  captureCancel: () => ipcRenderer.send('capture:cancel'),
+
+  // ---------- Capture editor ----------
+
+  /** Editor: fetch the image to edit (base64 data URL + pixel size). */
+  editorGetImage: (): Promise<{
+    dataUrl: string
+    width: number
+    height: number
+  } | null> => ipcRenderer.invoke('editor:get-image'),
+
+  /** Editor: copy a (flattened) PNG to the clipboard. */
+  editorCopyImage: (pngBase64: string): Promise<boolean> =>
+    ipcRenderer.invoke('editor:copy-image', pngBase64),
+
+  /** Editor: save a (flattened) PNG to the Captures folder. */
+  editorSaveImage: (pngBase64: string): Promise<string | null> =>
+    ipcRenderer.invoke('editor:save-image', pngBase64),
+
+  /** Editor: save-as via a file dialog. */
+  editorSaveImageAs: (pngBase64: string): Promise<string | null> =>
+    ipcRenderer.invoke('editor:save-image-as', pngBase64),
+
+  /** Editor: reveal a saved file in Explorer. */
+  editorReveal: (filePath: string): Promise<void> =>
+    ipcRenderer.invoke('editor:reveal', filePath),
+
+  /** Editor: main pushes a fresh image when the window is reused. */
+  onEditorLoadImage: (
+    cb: (img: { dataUrl: string; width: number; height: number } | null) => void
+  ) => {
+    const handler = (
+      _e: unknown,
+      img: { dataUrl: string; width: number; height: number } | null
+    ) => cb(img)
+    ipcRenderer.on('editor:load-image', handler)
+    return () => ipcRenderer.off('editor:load-image', handler)
+  },
+
   // ---------- Misc ----------
 
   appVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),

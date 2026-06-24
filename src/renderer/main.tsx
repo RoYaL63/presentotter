@@ -3,6 +3,8 @@ import ReactDOM from 'react-dom/client'
 import { Home } from '../agents/ui/Home'
 import { Toolbar } from '../agents/ui/Toolbar'
 import { Overlay } from '../agents/ui/Overlay'
+import { CaptureOverlay } from '../agents/ui/CaptureOverlay'
+import { CaptureEditor } from '../agents/ui/CaptureEditor'
 import './index.css'
 
 /**
@@ -20,12 +22,14 @@ import './index.css'
  * shares the Home window in Meet (mode "Une fenêtre") with the Mirror
  * section displayed.
  */
-type Mode = 'home' | 'toolbar' | 'overlay'
+type Mode = 'home' | 'toolbar' | 'overlay' | 'capture' | 'editor'
 
 function detectMode(): Mode {
   const hash = window.location.hash.replace('#', '').trim()
   if (hash === 'toolbar') return 'toolbar'
   if (hash === 'overlay') return 'overlay'
+  if (hash === 'capture') return 'capture'
+  if (hash === 'editor') return 'editor'
   return 'home'
 }
 
@@ -35,6 +39,8 @@ document.documentElement.dataset['mode'] = mode
 const Root: () => React.ReactElement = () => {
   if (mode === 'toolbar') return <Toolbar />
   if (mode === 'overlay') return <Overlay />
+  if (mode === 'capture') return <CaptureOverlay />
+  if (mode === 'editor') return <CaptureEditor />
   return <Home />
 }
 

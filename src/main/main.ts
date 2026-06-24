@@ -25,6 +25,11 @@ import {
   revealInExplorer,
   type UpdateCheck
 } from './updater'
+import {
+  registerCaptureIpc,
+  startCapture,
+  type OwnUiState
+} from './capture'
 
 /**
  * PresentOtter main process.
@@ -64,7 +69,9 @@ const isDev = !app.isPackaged
 const DEV_URL = 'http://localhost:5173'
 const CURSOR_POLL_MS = 16
 
-function rendererUrl(hash: 'home' | 'toolbar' | 'overlay'): string {
+function rendererUrl(
+  hash: 'home' | 'toolbar' | 'overlay' | 'capture' | 'editor'
+): string {
   if (isDev) {
     return `${DEV_URL}/#${hash}`
   }
@@ -364,6 +371,43 @@ function notifyHomeStatus(): void {
   homeWindow.webContents.send('home:toolbar-status', {
     enabled: toolbarWindow !== null && !toolbarWindow.isDestroyed()
   })
+}
+
+/**
+ * Hide every PresentOtter-owned window so it does NOT end up baked into a
+ * screenshot, then hand back a restore() that re-shows exactly what was
+ * hidden (overlays come back inactive, toolbar/home come back focusable).
+ * Passed to the capture module as its hideOwnUi dependency.
+ */
+function hideOwnUiForCapture(): OwnUiState {
+  const overlays: BrowserWindow[] = []
+  const others: BrowserWindow[] = []
+  if (
+    toolbarWindow !== null &&
+    !toolbarWindow.isDestroyed() &&
+    toolbarWindow.isVisible()
+  ) {
+    others.push(toolbarWindow)
+  }
+  for (const w of overlayWindows.values()) {
+    if (!w.isDestroyed() && w.isVisible()) overlays.push(w)
+  }
+  if (
+    homeWindow !== null &&
+    !homeWindow.isDestroyed() &&
+    homeWindow.isVisible() &&
+    !homeWindow.isMinimized()
+  ) {
+    others.push(homeWindow)
+  }
+  for (const w of overlays) w.hide()
+  for (const w of others) w.hide()
+  return {
+    restore: () => {
+      for (const w of overlays) if (!w.isDestroyed()) w.showInactive()
+      for (const w of others) if (!w.isDestroyed()) w.show()
+    }
+  }
 }
 
 // ============================================================================
@@ -915,6 +959,9 @@ function registerGlobalShortcuts(): void {
     { accel: 'Alt+F', fn: () => selectToolFromShortcut('blur') },
     { accel: 'Alt+Z', fn: () => forwardToOverlays('overlay:undo') },
     { accel: 'Alt+Shift+C', fn: () => forwardToOverlays('overlay:clear') },
+    // Screen capture — Snipping-Tool replacement. Default trigger; the
+    // Settings page will let the user rebind it (phase 4).
+    { accel: 'Alt+Shift+S', fn: () => void startCapture('photo') },
     {
       accel: 'Alt+H',
       fn: () => {
@@ -1048,8 +1095,18 @@ app
     // global Alt+P / Alt+R shortcuts trigger that path. Nuking the
     // menu entirely also speeds up Alt-shortcuts a hair.
     Menu.setApplicationMenu(null)
+    // Stable AppUserModelID — required on Windows for native notifications
+    // (toast) to render with our identity and for their click events to
+    // fire. The capture flow relies on the "click to edit" notification.
+    app.setAppUserModelId('com.otterwise.presentotter')
     configureDisplayMedia()
     registerIpcHandlers()
+    registerCaptureIpc({
+      rendererUrl,
+      preloadPath: path.join(__dirname, 'preload.js'),
+      hideOwnUi: hideOwnUiForCapture,
+      isDev
+    })
     homeWindow = createHomeWindow()
     registerGlobalShortcuts()
     setupDisplayHotPlug()

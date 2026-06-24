@@ -175,6 +175,42 @@ declare global {
     onUpdateProgress(
       cb: (p: { downloaded: number; total: number }) => void
     ): () => void
+
+    // ---------- Capture (Snipping-Tool replacement) ----------
+    captureStart(mode: 'photo' | 'video'): void
+    captureGetFrame(): Promise<{
+      dataUrl: string
+      bounds: { x: number; y: number; width: number; height: number }
+      scaleFactor: number
+      mode: 'photo' | 'video'
+      multiDisplay: boolean
+    } | null>
+    captureRegionSelected(payload: {
+      mode: 'photo' | 'video'
+      pngBase64: string
+      width: number
+      height: number
+      deviceRect?: { x: number; y: number; width: number; height: number }
+      bounds?: { x: number; y: number; width: number; height: number }
+      scaleFactor?: number
+    }): void
+    captureCancel(): void
+
+    // ---------- Capture editor ----------
+    editorGetImage(): Promise<{
+      dataUrl: string
+      width: number
+      height: number
+    } | null>
+    editorCopyImage(pngBase64: string): Promise<boolean>
+    editorSaveImage(pngBase64: string): Promise<string | null>
+    editorSaveImageAs(pngBase64: string): Promise<string | null>
+    editorReveal(filePath: string): Promise<void>
+    onEditorLoadImage(
+      cb: (
+        img: { dataUrl: string; width: number; height: number } | null
+      ) => void
+    ): () => void
   }
 
   interface Window {
