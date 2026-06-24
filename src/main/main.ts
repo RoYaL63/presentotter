@@ -32,6 +32,12 @@ import {
   stopRegionRecording,
   type OwnUiState
 } from './capture'
+import {
+  getCaptureHotkeys,
+  setCaptureHotkeys,
+  getDefaultCaptureHotkeys,
+  type CaptureHotkeys
+} from './app-settings'
 
 /**
  * PresentOtter main process.
@@ -558,10 +564,37 @@ function syncCursorTracking(): void {
 // IPC
 // ============================================================================
 
+/** Re-apply all global shortcuts after a hotkey rebind. unregisterAll only
+ *  touches Electron globalShortcut entries (Escape stays on uiohook). */
+function reRegisterShortcuts(): void {
+  globalShortcut.unregisterAll()
+  registerGlobalShortcuts()
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle('window:get-role', (event) => getWindowRole(event.sender))
   ipcMain.handle('app:version', () => app.getVersion())
   ipcMain.handle('toolbar:is-enabled', () => toolbarWindow !== null && !toolbarWindow.isDestroyed())
+
+  // Capture hotkeys — read/rebind. Persisted in app-settings (userData).
+  ipcMain.handle('settings:get-capture-hotkeys', () => getCaptureHotkeys())
+  ipcMain.handle('settings:default-capture-hotkeys', () =>
+    getDefaultCaptureHotkeys()
+  )
+  ipcMain.handle(
+    'settings:set-capture-hotkeys',
+    (_e, next: Partial<CaptureHotkeys>) => {
+      const saved = setCaptureHotkeys(next)
+      reRegisterShortcuts()
+      // Report whether each capture accel actually grabbed (another app
+      // owning it makes register() fail → isRegistered false).
+      return {
+        hotkeys: saved,
+        capturePhotoOk: globalShortcut.isRegistered(saved.capturePhoto),
+        captureVideoOk: globalShortcut.isRegistered(saved.captureVideo)
+      }
+    }
+  )
 
   // Updates — see src/main/updater.ts. The renderer triggers a check,
   // we hit the GitHub Releases API. If the user opts in, we download
@@ -960,6 +993,7 @@ function selectToolFromShortcut(tool: string): void {
 }
 
 function registerGlobalShortcuts(): void {
+  const hotkeys = getCaptureHotkeys()
   const bindings: Array<{ accel: string; fn: () => void }> = [
     { accel: 'Alt+S', fn: () => selectToolFromShortcut('select') },
     { accel: 'Alt+P', fn: () => selectToolFromShortcut('pencil') },
@@ -972,13 +1006,14 @@ function registerGlobalShortcuts(): void {
     { accel: 'Alt+F', fn: () => selectToolFromShortcut('blur') },
     { accel: 'Alt+Z', fn: () => forwardToOverlays('overlay:undo') },
     { accel: 'Alt+Shift+C', fn: () => forwardToOverlays('overlay:clear') },
-    // Screen capture — Snipping-Tool replacement. Default trigger; the
-    // Settings page will let the user rebind it (phase 4).
-    { accel: 'Alt+Shift+S', fn: () => void startCapture('photo') },
+    // Screen capture — Snipping-Tool replacement. Accelerators come from
+    // persisted settings (rebind in Paramètres), defaulting to Alt+Shift+S
+    // / Alt+Shift+R.
+    { accel: hotkeys.capturePhoto, fn: () => void startCapture('photo') },
     // Region video — toggles: start the region picker, or stop an active
     // recording. ShareX-style.
     {
-      accel: 'Alt+Shift+R',
+      accel: hotkeys.captureVideo,
       fn: () => {
         if (isRegionRecording()) stopRegionRecording()
         else void startCapture('video')

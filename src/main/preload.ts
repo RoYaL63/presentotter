@@ -442,6 +442,25 @@ const api = {
     return () => ipcRenderer.off('editor:load-image', handler)
   },
 
+  // ---------- Capture hotkeys (Settings) ----------
+
+  getCaptureHotkeys: (): Promise<{
+    capturePhoto: string
+    captureVideo: string
+  }> => ipcRenderer.invoke('settings:get-capture-hotkeys'),
+  defaultCaptureHotkeys: (): Promise<{
+    capturePhoto: string
+    captureVideo: string
+  }> => ipcRenderer.invoke('settings:default-capture-hotkeys'),
+  setCaptureHotkeys: (next: {
+    capturePhoto?: string
+    captureVideo?: string
+  }): Promise<{
+    hotkeys: { capturePhoto: string; captureVideo: string }
+    capturePhotoOk: boolean
+    captureVideoOk: boolean
+  }> => ipcRenderer.invoke('settings:set-capture-hotkeys', next),
+
   // ---------- Misc ----------
 
   appVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),

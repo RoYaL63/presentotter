@@ -221,6 +221,21 @@ declare global {
         img: { dataUrl: string; width: number; height: number } | null
       ) => void
     ): () => void
+
+    // ---------- Capture hotkeys (Settings) ----------
+    getCaptureHotkeys(): Promise<{ capturePhoto: string; captureVideo: string }>
+    defaultCaptureHotkeys(): Promise<{
+      capturePhoto: string
+      captureVideo: string
+    }>
+    setCaptureHotkeys(next: {
+      capturePhoto?: string
+      captureVideo?: string
+    }): Promise<{
+      hotkeys: { capturePhoto: string; captureVideo: string }
+      capturePhotoOk: boolean
+      captureVideoOk: boolean
+    }>
   }
 
   interface Window {

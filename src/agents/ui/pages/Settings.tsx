@@ -6,8 +6,10 @@ import {
   ExternalLink,
   Film,
   FolderOpen,
+  Keyboard,
   Loader2,
   RefreshCw,
+  RotateCcw,
   ShieldAlert,
   Sparkles,
   Video
@@ -42,11 +44,67 @@ type DownloadState =
   | { kind: 'blocked'; path: string; reason: string }
   | { kind: 'error'; message: string }
 
+type HotkeyId = 'capturePhoto' | 'captureVideo'
+
+/** Map a KeyboardEvent's main (non-modifier) key to an Electron
+ *  accelerator key name, or null if it can't be a shortcut key. */
+function normalizeKey(e: KeyboardEvent): string | null {
+  const k = e.key
+  if (k.length === 1) return k === ' ' ? 'Space' : k.toUpperCase()
+  const map: Record<string, string> = {
+    ArrowUp: 'Up',
+    ArrowDown: 'Down',
+    ArrowLeft: 'Left',
+    ArrowRight: 'Right',
+    Enter: 'Return'
+  }
+  if (map[k] !== undefined) return map[k]
+  if (/^F\d{1,2}$/.test(k)) return k
+  if (
+    [
+      'PrintScreen',
+      'Insert',
+      'Home',
+      'End',
+      'PageUp',
+      'PageDown',
+      'Delete',
+      'Tab',
+      'Backspace'
+    ].includes(k)
+  ) {
+    return k
+  }
+  return null
+}
+
+/** Pretty-print an Electron accelerator for display (FR-ish). */
+function formatCombo(accel: string): string {
+  return accel
+    .split('+')
+    .map((p) =>
+      p === 'Shift'
+        ? 'Maj'
+        : p === 'Control'
+          ? 'Ctrl'
+          : p === 'Super'
+            ? 'Win'
+            : p
+    )
+    .join(' + ')
+}
+
 export function Settings() {
   const [fps, setFps] = useState<CaptureConfig['fps']>(30)
   const [format, setFormat] = useState<ExportFormat>('mp4')
   const [check, setCheck] = useState<CheckState>({ kind: 'idle' })
   const [download, setDownload] = useState<DownloadState>({ kind: 'idle' })
+  const [hotkeys, setHotkeys] = useState<{
+    capturePhoto: string
+    captureVideo: string
+  } | null>(null)
+  const [capturing, setCapturing] = useState<HotkeyId | null>(null)
+  const [hkWarning, setHkWarning] = useState<string | null>(null)
 
   // The renderer never decides on a version on its own. The Vite-
   // injected __APP_VERSION__ is the SAME source as the main process's
@@ -62,6 +120,64 @@ export function Settings() {
       )
     })
     return off
+  }, [])
+
+  // Load current capture hotkeys once.
+  useEffect(() => {
+    void window.api?.getCaptureHotkeys().then(setHotkeys)
+  }, [])
+
+  // While capturing a new combo, listen for the next key chord.
+  useEffect(() => {
+    if (capturing === null) return
+    const onKey = (e: KeyboardEvent): void => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.key === 'Escape') {
+        setCapturing(null)
+        return
+      }
+      if (['Control', 'Alt', 'Shift', 'Meta', 'OS'].includes(e.key)) return
+      const main = normalizeKey(e)
+      if (main === null) return
+      const mods: string[] = []
+      if (e.ctrlKey) mods.push('Control')
+      if (e.altKey) mods.push('Alt')
+      if (e.shiftKey) mods.push('Shift')
+      if (e.metaKey) mods.push('Super')
+      const solo = /^(F\d{1,2}|PrintScreen|Insert|Pause)$/.test(main)
+      if (mods.length === 0 && !solo) {
+        setHkWarning('Ajoute au moins un modificateur (Alt, Ctrl, Maj).')
+        return
+      }
+      const accel = [...mods, main].join('+')
+      const id = capturing
+      setCapturing(null)
+      void window.api
+        ?.setCaptureHotkeys({ [id]: accel })
+        .then((res) => {
+          setHotkeys(res.hotkeys)
+          const ok =
+            id === 'capturePhoto' ? res.capturePhotoOk : res.captureVideoOk
+          setHkWarning(
+            ok
+              ? null
+              : 'Raccourci enregistré, mais une autre app le capte peut-être déjà.'
+          )
+        })
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [capturing])
+
+  const resetHotkeys = useCallback(async () => {
+    const def = await window.api?.defaultCaptureHotkeys()
+    if (def === undefined) return
+    const res = await window.api?.setCaptureHotkeys(def)
+    if (res !== undefined) {
+      setHotkeys(res.hotkeys)
+      setHkWarning(null)
+    }
   }, [])
 
   const handleCheck = useCallback(async () => {
@@ -338,6 +454,63 @@ export function Settings() {
         </div>
       </div>
 
+      {/* Capture hotkeys section */}
+      <div className="glass glass-shine flex flex-col gap-5 rounded-2xl p-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-otter-500/15 border border-otter-400/30 text-otter-300">
+              <Keyboard className="h-5 w-5" strokeWidth={1.75} />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-otter-50">
+                Raccourcis de capture
+              </h2>
+              <p className="text-xs text-otter-200/60">
+                Raccourcis globaux, actifs même quand PresentOtter est en
+                arrière-plan.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void resetHotkeys()}
+            className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.06] px-3 py-1.5 text-[12px] font-semibold text-otter-200/80 ring-1 ring-white/[0.1] transition hover:bg-white/[0.1] hover:text-otter-50"
+            title="Restaurer Alt+Maj+S / Alt+Maj+R"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Défaut
+          </button>
+        </div>
+
+        <HotkeyRow
+          label="Capture photo"
+          help="Ouvre le viseur (zone, plein écran)."
+          combo={hotkeys?.capturePhoto ?? '—'}
+          capturing={capturing === 'capturePhoto'}
+          onStart={() => {
+            setHkWarning(null)
+            setCapturing('capturePhoto')
+          }}
+        />
+        <HotkeyRow
+          label="Vidéo de zone"
+          help="Démarre le viseur, ou arrête l'enregistrement en cours."
+          combo={hotkeys?.captureVideo ?? '—'}
+          capturing={capturing === 'captureVideo'}
+          onStart={() => {
+            setHkWarning(null)
+            setCapturing('captureVideo')
+          }}
+        />
+
+        {hkWarning !== null && (
+          <p className="flex items-center gap-2 text-xs text-sunray-300">
+            <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+            {hkWarning}
+          </p>
+        )}
+      </div>
+
       {/* Export section */}
       <div className="glass glass-shine flex flex-col gap-5 rounded-2xl p-6">
         <div className="flex items-center gap-3">
@@ -364,5 +537,47 @@ export function Settings() {
         </div>
       </div>
     </section>
+  )
+}
+
+interface HotkeyRowProps {
+  label: string
+  help: string
+  combo: string
+  capturing: boolean
+  onStart: () => void
+}
+
+function HotkeyRow({
+  label,
+  help,
+  combo,
+  capturing,
+  onStart
+}: HotkeyRowProps): React.ReactElement {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-otter-50">{label}</p>
+        <p className="mt-0.5 text-xs text-otter-200/60">{help}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onStart}
+        className={`min-w-[150px] rounded-xl px-4 py-2 text-center text-sm font-semibold transition ${
+          capturing
+            ? 'bg-otter-500/20 text-otter-100 ring-2 ring-otter-400/50'
+            : 'bg-white/[0.04] text-otter-50 ring-1 ring-white/[0.1] hover:bg-white/[0.08]'
+        }`}
+      >
+        {capturing ? (
+          <span className="text-xs text-otter-200/80">
+            Appuie sur une combinaison…
+          </span>
+        ) : (
+          <span className="font-mono">{formatCombo(combo)}</span>
+        )}
+      </button>
+    </div>
   )
 }
