@@ -99,21 +99,24 @@ const MAX_SCAN_WIDTH = 2200
 // cost almost nothing — the heavy OCR only runs when something
 // actually changed.
 const DEFAULT_INTERVAL_MS = 250
-// Tiny thumbnail used to fingerprint each frame. 16×9 = 144 cells is
-// enough to detect "the user moved their mouse / scrolled" vs "the
-// screen is the same as 1 s ago" without burning real CPU.
-const SIGNATURE_W = 16
-const SIGNATURE_H = 9
-// Per-cell luminance delta tolerated as "no visible change". 10 means
-// roughly 4% of the 0-255 range — small mouse moves and AA jitter
-// pass, real content changes (text scrolling, new app) get caught.
+// Fingerprint grid. 48×27 = 1296 cells (was 16×9 = 144). The finer grid
+// is what makes the engine FAST: a freshly-pasted key only changes a few
+// cells, so we can OCR just that small region instead of the whole screen.
+// getImageData on a 48×27 thumbnail is still well under a millisecond.
+const SIGNATURE_W = 48
+const SIGNATURE_H = 27
+// Per-cell luminance delta tolerated as "no visible change". 10 ≈ 4% of
+// the 0-255 range — small mouse moves / AA jitter pass, real content
+// changes (a key appearing, scrolling, a new window) get caught.
 const SIGNATURE_TOLERANCE = 10
-// Even if the signature says "nothing changed", we force a real OCR
-// after this many ms elapsed since the last real one. A tiny secret
-// typed into a single 16x9 cell could be averaged out otherwise.
-// At 250 ms cadence + 5 s anti-drift, idle CPU stays low while
-// no secret can hide longer than ~5 s.
-const FORCE_OCR_AFTER_MS = 5000
+// Most scans OCR only the rectangle that changed since the last OCR (tiny
+// → fast). Periodically we still OCR the WHOLE frame so the sticky-mask
+// pool is refreshed and the contextual/entropy passes see the full screen
+// (a label off to the side of the changed region, etc.).
+const FORCE_FULL_OCR_AFTER_MS = 4000
+// Pad the changed region by a couple of cells so glyphs straddling a cell
+// edge stay fully inside the cropped OCR input.
+const REGION_PAD_CELLS = 2
 // JPEG quality used for the OCR input. 0.6 was too aggressive: it
 // blurred small monospace token text into unreadable mush. 0.9 keeps
 // the glyph edges crisp for Tesseract while still being far cheaper
@@ -148,10 +151,9 @@ export class SanitizerLiveEngine {
    *  skip the expensive OCR step when the screen hasn't changed. */
   private sigCanvas: HTMLCanvasElement
   private lastSignature: Uint8Array | null = null
-  /** Wall-clock ts of the last real OCR. Used by the anti-drift force
-   *  path so we re-OCR at least every FORCE_OCR_AFTER_MS even when the
-   *  frame signature reports "stable". */
-  private lastOcrAt = 0
+  /** Wall-clock ts of the last FULL-frame OCR. Drives the periodic full
+   *  rescan that refreshes the sticky pool between region-only scans. */
+  private lastFullOcrAt = 0
   private interval: number | null = null
   private running = false
   private scanInFlight = false
@@ -206,7 +208,7 @@ export class SanitizerLiveEngine {
   async stop(): Promise<void> {
     this.running = false
     this.lastSignature = null
-    this.lastOcrAt = 0
+    this.lastFullOcrAt = 0
     if (this.interval !== null) {
       window.clearInterval(this.interval)
       this.interval = null
@@ -306,7 +308,7 @@ export class SanitizerLiveEngine {
       this.video = null
     }
     this.lastSignature = null
-    this.lastOcrAt = 0
+    this.lastFullOcrAt = 0
     await this.acquireStream()
   }
 
@@ -360,16 +362,6 @@ export class SanitizerLiveEngine {
     return sig
   }
 
-  private signaturesMatch(a: Uint8Array, b: Uint8Array): boolean {
-    if (a.length !== b.length) return false
-    for (let i = 0; i < a.length; i++) {
-      if (Math.abs((a[i] ?? 0) - (b[i] ?? 0)) > SIGNATURE_TOLERANCE) {
-        return false
-      }
-    }
-    return true
-  }
-
   private async scanOnce(
     onScan?: (r: ScanResult) => void,
     onStatus?: (s: 'acquiring' | 'loading-ocr' | 'scanning' | 'idle') => void
@@ -392,30 +384,51 @@ export class SanitizerLiveEngine {
         return null
       }
 
-      // ---- Frame-stable shortcut -----------------------------------
-      // If the screen looks identical to the last scan, skip the OCR
-      // entirely. The Toolbar's sticky pool (15 s TTL) keeps any masks
-      // from the last real scan visible. Safety net: re-OCR after
-      // FORCE_OCR_AFTER_MS even when stable.
+      // ---- Changed-region shortcut ---------------------------------
+      // Compare a fine luminance fingerprint to the last OCR'd frame.
+      //   - nothing changed + no full rescan due → skip (sticky pool holds)
+      //   - something changed → OCR ONLY the rectangle that changed (small
+      //     → fast → a freshly-pasted key is masked in well under a second)
+      //   - periodically → OCR the whole frame (refresh pool + run the
+      //     contextual/entropy passes over the full screen)
       const now = performance.now()
       const sig = this.computeFrameSignature(this.video)
-      const sigStable =
-        sig !== null &&
-        this.lastSignature !== null &&
-        this.signaturesMatch(sig, this.lastSignature)
-      const sinceLastOcr = now - this.lastOcrAt
-      if (sigStable && sinceLastOcr < FORCE_OCR_AFTER_MS) {
-        debug(`frame stable (${sinceLastOcr.toFixed(0)} ms since last OCR) — skipping`)
-        onStatus?.('idle')
-        return null
+      const forceFull =
+        this.lastSignature === null ||
+        now - this.lastFullOcrAt >= FORCE_FULL_OCR_AFTER_MS
+      let region: { x: number; y: number; width: number; height: number } | null =
+        null
+      if (!forceFull) {
+        const changed =
+          sig !== null && this.lastSignature !== null
+            ? changedCellsBounds(
+                sig,
+                this.lastSignature,
+                SIGNATURE_W,
+                SIGNATURE_H,
+                SIGNATURE_TOLERANCE
+              )
+            : null
+        if (changed === null) {
+          debug('frame stable — skipping OCR')
+          onStatus?.('idle')
+          return null
+        }
+        region = cellsToRegion(
+          changed,
+          this.video.videoWidth,
+          this.video.videoHeight
+        )
       }
+      // This frame becomes the new baseline once we commit to OCR'ing it.
       if (sig !== null) this.lastSignature = sig
-      this.lastOcrAt = now
+      if (region === null) this.lastFullOcrAt = now
       // --------------------------------------------------------------
 
       onStatus?.('scanning')
       const startedAt = performance.now()
-      const { dataUrl, scaleX, scaleY } = this.captureFrameToDataUrl(this.video)
+      const { dataUrl, scaleX, scaleY, offsetX, offsetY } =
+        this.captureFrameToDataUrl(this.video, region)
       if (dataUrl.length === 0) {
         debug('empty frame capture')
         return null
@@ -444,6 +457,21 @@ export class SanitizerLiveEngine {
       let words = Array.isArray(data.words) ? data.words : []
       if (words.length === 0 && Array.isArray(data.blocks)) {
         words = flattenBlocksToWords(data.blocks)
+      }
+      // Region OCR returns bboxes relative to the crop. Fold the crop
+      // offset back in (in OCR-canvas units: offset / scale) so every
+      // downstream transform (detectMasks, wordsToCss) stays identical to
+      // the full-frame path. For a full scan offset is 0 → no-op.
+      if (offsetX !== 0 || offsetY !== 0) {
+        const addX = offsetX / scaleX
+        const addY = offsetY / scaleY
+        for (const w of words) {
+          if (!w || !w.bbox) continue
+          w.bbox.x0 += addX
+          w.bbox.x1 += addX
+          w.bbox.y0 += addY
+          w.bbox.y1 += addY
+        }
       }
       const textPreview = (data.text ?? '').slice(0, 120).replace(/\s+/g, ' ').trim()
       // scaleX / scaleY here recover physical source pixels from the
@@ -502,21 +530,30 @@ export class SanitizerLiveEngine {
     }
   }
 
-  private captureFrameToDataUrl(video: HTMLVideoElement): {
+  private captureFrameToDataUrl(
+    video: HTMLVideoElement,
+    region?: { x: number; y: number; width: number; height: number } | null
+  ): {
     dataUrl: string
     scaleX: number
     scaleY: number
+    offsetX: number
+    offsetY: number
   } {
-    const srcW = video.videoWidth
-    const srcH = video.videoHeight
+    // Crop to the changed region when given one (fast path), else the
+    // whole frame. Coordinates are SOURCE pixels of the captured display.
+    const srcX = region?.x ?? 0
+    const srcY = region?.y ?? 0
+    const srcW = region?.width ?? video.videoWidth
+    const srcH = region?.height ?? video.videoHeight
     const scale = srcW > MAX_SCAN_WIDTH ? MAX_SCAN_WIDTH / srcW : 1
-    const dstW = Math.floor(srcW * scale)
-    const dstH = Math.floor(srcH * scale)
+    const dstW = Math.max(1, Math.floor(srcW * scale))
+    const dstH = Math.max(1, Math.floor(srcH * scale))
     this.canvas.width = dstW
     this.canvas.height = dstH
     const ctx = this.canvas.getContext('2d')
     if (!ctx) {
-      return { dataUrl: '', scaleX: 1, scaleY: 1 }
+      return { dataUrl: '', scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 }
     }
     // Boost contrast + force grayscale BEFORE Tesseract sees the
     // pixels. Modern dark-mode UIs (OpenAI, Notion, Linear, Discord…)
@@ -528,16 +565,16 @@ export class SanitizerLiveEngine {
     // Chromium so the cost is sub-millisecond vs the 30-50% OCR
     // accuracy bump it buys on dark UIs.
     ctx.filter = 'grayscale(1) contrast(1.8) brightness(0.95)'
-    ctx.drawImage(video, 0, 0, dstW, dstH)
+    ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, dstW, dstH)
     ctx.filter = 'none'
-    // The scale factor from the (downscaled) OCR coordinates back to
-    // (full-screen) overlay coordinates is the inverse of the downscale.
-    // JPEG q=0.6 is plenty for OCR — PNG was paying lossless encode
-    // cost on every frame for nothing.
+    // scaleX/Y recover source pixels from the downscaled OCR canvas;
+    // offsetX/Y are the crop origin in source pixels (0 for a full frame).
     return {
       dataUrl: this.canvas.toDataURL('image/jpeg', OCR_JPEG_QUALITY),
       scaleX: 1 / scale,
-      scaleY: 1 / scale
+      scaleY: 1 / scale,
+      offsetX: srcX,
+      offsetY: srcY
     }
   }
 
@@ -897,6 +934,62 @@ function rectsOverlap(a: LiveMask, b: LiveMask): boolean {
     a.y < b.y + b.height &&
     a.y + a.height > b.y
   )
+}
+
+/**
+ * Bounding box (in signature-grid cells, inclusive) of every cell whose
+ * luminance changed by more than `tol` between two frame signatures, or
+ * null if nothing changed. Drives the "OCR only the changed region" fast
+ * path: a freshly-pasted key lights up a handful of cells we then crop to.
+ */
+function changedCellsBounds(
+  cur: Uint8Array,
+  last: Uint8Array,
+  cols: number,
+  rows: number,
+  tol: number
+): { minC: number; minR: number; maxC: number; maxR: number } | null {
+  let minC = Infinity
+  let minR = Infinity
+  let maxC = -Infinity
+  let maxR = -Infinity
+  let any = false
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const i = r * cols + c
+      if (Math.abs((cur[i] ?? 0) - (last[i] ?? 0)) > tol) {
+        any = true
+        if (c < minC) minC = c
+        if (c > maxC) maxC = c
+        if (r < minR) minR = r
+        if (r > maxR) maxR = r
+      }
+    }
+  }
+  return any ? { minC, minR, maxC, maxR } : null
+}
+
+/**
+ * Convert a changed-cell bounding box (signature grid) into a padded
+ * pixel rectangle on the source frame, clamped to its bounds.
+ */
+function cellsToRegion(
+  cells: { minC: number; minR: number; maxC: number; maxR: number },
+  videoW: number,
+  videoH: number
+): { x: number; y: number; width: number; height: number } {
+  const cellW = videoW / SIGNATURE_W
+  const cellH = videoH / SIGNATURE_H
+  const x0 = Math.max(0, (cells.minC - REGION_PAD_CELLS) * cellW)
+  const y0 = Math.max(0, (cells.minR - REGION_PAD_CELLS) * cellH)
+  const x1 = Math.min(videoW, (cells.maxC + 1 + REGION_PAD_CELLS) * cellW)
+  const y1 = Math.min(videoH, (cells.maxR + 1 + REGION_PAD_CELLS) * cellH)
+  return {
+    x: Math.floor(x0),
+    y: Math.floor(y0),
+    width: Math.max(1, Math.ceil(x1 - x0)),
+    height: Math.max(1, Math.ceil(y1 - y0))
+  }
 }
 
 /**
