@@ -224,7 +224,6 @@ export function RegionRecorder(): React.ReactElement {
       if (offStop !== undefined) offStop()
       fullCleanup()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ---- Webcam toggle: acquire / release live so the preview updates ----

@@ -208,6 +208,11 @@ export function CaptureEditor(): React.ReactElement {
   const [width, setWidth] = useState(6)
   const [shapes, setShapes] = useState<Shape[]>([])
   const [redoStack, setRedoStack] = useState<Shape[]>([])
+  /** Snapshots taken before each crop ({ image, annotations }) so a crop
+   *  can be undone — restoring the previous image and its shapes. */
+  const [cropHistory, setCropHistory] = useState<
+    Array<{ img: EditorImage; shapes: Shape[] }>
+  >([])
   const [savedPath, setSavedPath] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [textDraft, setTextDraft] = useState<{ pos: Pt; cssX: number; cssY: number } | null>(null)
@@ -237,6 +242,7 @@ export function CaptureEditor(): React.ReactElement {
         setImg(i)
         setShapes([])
         setRedoStack([])
+        setCropHistory([])
         setSavedPath(null)
       }
     })
@@ -256,7 +262,6 @@ export function CaptureEditor(): React.ReactElement {
     if (captionDraft === null) return
     const id = requestAnimationFrame(() => captionInputRef.current?.focus())
     return () => cancelAnimationFrame(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [captionDraft?.shapeIndex])
 
   const deviceFromEvent = useCallback((e: React.PointerEvent): Pt => {
@@ -432,17 +437,32 @@ export function CaptureEditor(): React.ReactElement {
     const c = canvasRef.current
     if (c !== null) ctx.drawImage(c, x, y, w, h, 0, 0, w, h)
     const dataUrl = out.toDataURL('image/png')
+    // Snapshot the pre-crop state so the crop can be undone.
+    if (img !== null) {
+      setCropHistory((h) => [...h, { img, shapes }])
+    }
     setShapes([])
     setRedoStack([])
     setImg({ dataUrl, width: w, height: h })
   }
 
   const undo = () => {
-    if (shapes.length === 0) return
-    const last = shapes[shapes.length - 1]
-    if (last === undefined) return
-    setShapes(shapes.slice(0, -1))
-    setRedoStack([...redoStack, last])
+    // Undo annotations first (most recent actions), then crops.
+    if (shapes.length > 0) {
+      const last = shapes[shapes.length - 1]
+      if (last === undefined) return
+      setShapes(shapes.slice(0, -1))
+      setRedoStack([...redoStack, last])
+      return
+    }
+    if (cropHistory.length > 0) {
+      const snap = cropHistory[cropHistory.length - 1]
+      if (snap === undefined) return
+      setCropHistory(cropHistory.slice(0, -1))
+      setImg(snap.img)
+      setShapes(snap.shapes)
+      setRedoStack([])
+    }
   }
   const redo = () => {
     if (redoStack.length === 0) return
@@ -507,8 +527,7 @@ export function CaptureEditor(): React.ReactElement {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [textDraft, captionDraft, shapes, redoStack])
+  }, [textDraft, captionDraft, shapes, redoStack, cropHistory])
 
   /** Live-update the step caption being typed. */
   const updateCaption = (v: string): void => {
@@ -618,7 +637,7 @@ export function CaptureEditor(): React.ReactElement {
         <span className="mx-1 h-6 w-px bg-[#3BE6C022]" />
 
         <div className="flex items-center gap-1">
-          <button type="button" onClick={undo} disabled={shapes.length === 0} title="Annuler (Ctrl+Z)" className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#3BE6C012] text-[#E7F3ED] transition hover:bg-[#3BE6C024] disabled:opacity-35">
+          <button type="button" onClick={undo} disabled={shapes.length === 0 && cropHistory.length === 0} title="Annuler (Ctrl+Z) — annule aussi le recadrage" className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#3BE6C012] text-[#E7F3ED] transition hover:bg-[#3BE6C024] disabled:opacity-35">
             <Undo2 className="h-4 w-4" />
           </button>
           <button type="button" onClick={redo} disabled={redoStack.length === 0} title="Rétablir (Ctrl+Y)" className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#3BE6C012] text-[#E7F3ED] transition hover:bg-[#3BE6C024] disabled:opacity-35">
