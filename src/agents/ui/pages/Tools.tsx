@@ -293,10 +293,52 @@ export function Tools() {
           <div>
             <h2 className="text-lg font-semibold text-otter-50">Sanitizer LIVE</h2>
             <p className="text-xs text-otter-200/60">
-              Détection en direct par OCR + regex sur l&apos;écran partagé.
+              Masquage en direct des secrets sur l&apos;écran partagé.
             </p>
           </div>
         </header>
+
+        {/* Detection engine */}
+        <div className="flex flex-col gap-2">
+          <label className="text-xs font-semibold uppercase tracking-[0.15em] text-otter-300">
+            Méthode de détection
+          </label>
+          <div className="flex gap-2">
+            {(
+              [
+                { id: 'hybrid', label: 'Hybride', hint: 'UI + OCR' },
+                { id: 'uia', label: 'UI Windows', hint: 'Rapide' },
+                { id: 'ocr', label: 'OCR', hint: 'Universel' }
+              ] as const
+            ).map((opt) => {
+              const active = sanitizer.detectionMode === opt.id
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setSanitizer({ detectionMode: opt.id })}
+                  className={`relative flex-1 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
+                    active
+                      ? 'bg-gradient-to-br from-otter-400 to-otter-600 text-white shadow-glow-otter ring-1 ring-otter-300/40'
+                      : 'bg-white/[0.04] border border-white/[0.08] text-otter-200/80 hover:bg-white/[0.08] hover:text-otter-50'
+                  }`}
+                >
+                  <span className="block">{opt.label}</span>
+                  <span className={`block text-[10px] ${active ? 'text-white/80' : 'text-otter-200/50'}`}>
+                    {opt.hint}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          <p className="text-xs text-otter-200/50">
+            <strong className="text-otter-200">UI Windows</strong> lit
+            directement les champs de la fenêtre active (instantané, léger),
+            mais ne voit pas le texte rendu en image (pages web, canvas).{' '}
+            <strong className="text-otter-200">OCR</strong> lit tous les pixels
+            mais reste plus lent. <strong className="text-otter-200">Hybride</strong> combine les deux (recommandé). Changement pris en compte au prochain démarrage du radar LIVE.
+          </p>
+        </div>
 
         <SanitizerToggle
           label="Détection contextuelle"

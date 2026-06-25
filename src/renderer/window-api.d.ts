@@ -89,6 +89,9 @@ declare global {
       bounds: { x: number; y: number; width: number; height: number }
       scaleFactor: number
     } | null>
+    startUia(): void
+    stopUia(): void
+    onUiaMasks(cb: (masks: LiveMask[]) => void): () => void
 
     // ---------- Recording ----------
     recordingListSources(): Promise<

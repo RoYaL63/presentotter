@@ -48,6 +48,13 @@ export interface CursorSettings {
   size: number
 }
 
+/** How the LIVE sanitizer finds secrets on screen.
+ *   - 'ocr'    : Tesseract OCR only (universal: reads any rendered pixel).
+ *   - 'uia'    : Windows UI Automation only (fast + exact on input fields,
+ *                very light, but blind to canvas / image-rendered text).
+ *   - 'hybrid' : both — UIA masks fields instantly, OCR covers the rest. */
+export type DetectionMode = 'ocr' | 'uia' | 'hybrid'
+
 export interface SanitizerSettings {
   /** Show each OCR-detected word as a small box on the overlay so the
    *  user can see what Tesseract is reading. Off by default — it's a
@@ -56,6 +63,8 @@ export interface SanitizerSettings {
   /** Catch values next to a "secret / mot de passe / token / key / …"
    *  label even when the value doesn't match a known credential format. */
   contextual: boolean
+  /** Detection engine(s) to run while LIVE is on. */
+  detectionMode: DetectionMode
 }
 
 export interface EphemeralSettings {
@@ -107,6 +116,10 @@ const FACTORY_CURSOR: CursorSettings = {
 
 const FACTORY_SANITIZER: SanitizerSettings = {
   debugOcr: false,
+  // Hybrid by default: UIA gives instant masking on input fields, OCR
+  // still covers everything else. If UIA is unavailable the engine simply
+  // behaves like OCR-only, so there's no regression.
+  detectionMode: 'hybrid',
   // Contextual detection is on by default — a strict regex-only mode
   // misses too many real-world cases (Cloud Console "Code secret du
   // client", admin dashboards, etc.).

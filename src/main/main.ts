@@ -41,6 +41,7 @@ import {
   getDefaultCaptureHotkeys,
   type CaptureHotkeys
 } from './app-settings'
+import { startUia, stopUia } from './uia-scanner'
 
 /**
  * PresentOtter main process.
@@ -612,6 +613,16 @@ function registerIpcHandlers(): void {
     setOpenAtLogin(enabled === true)
     return app.getLoginItemSettings().openAtLogin
   })
+
+  // UI-Automation sanitizer (fast path). The renderer starts it when LIVE
+  // is on in 'uia' / 'hybrid' mode; main streams detected masks back to the
+  // toolbar, which feeds them into the same sticky-mask pool as OCR.
+  ipcMain.on('live:uia-start', (e) => {
+    startUia((masks) => {
+      if (!e.sender.isDestroyed()) e.sender.send('live:uia-masks', masks)
+    })
+  })
+  ipcMain.on('live:uia-stop', () => stopUia())
 
   // Updates — see src/main/updater.ts. The renderer triggers a check,
   // we hit the GitHub Releases API. If the user opts in, we download
@@ -1336,6 +1347,7 @@ app.on('before-quit', () => {
 app.on('will-quit', () => {
   stopCursorTracking()
   stopTripleAltDetector()
+  stopUia()
   globalShortcut.unregisterAll()
   if (tray !== null) {
     tray.destroy()

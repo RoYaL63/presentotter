@@ -283,19 +283,14 @@ export function Toolbar() {
   const handleConsole = () => apiRef.current?.openConsole()
   const handleClose = () => apiRef.current?.toolbarClose()
 
-  const handleScanResult = useCallback((result: ScanResult) => {
+  // Merge a fresh batch of masks (from OCR or UIA) into the sticky pool
+  // and push the union to the overlays. Both detection sources call this,
+  // so masks from either keep each other's regions alive via the TTL.
+  const ingestMasks = useCallback((incoming: LiveMask[]) => {
     const now = Date.now()
-    // 15 s sticky TTL (was 6 s). At 1 s scan cadence that's 15 chances
-    // to re-detect the same secret before its mask expires, so a streak
-    // of OCR misses no longer causes a visible flicker.
     const STICKY_MASK_TTL_MS = 15000
-    // Match a fresh mask against a sticky one via bbox overlap. Since
-    // masks are now horizontal stripes (full row to the right edge),
-    // two masks on the same row will overlap massively and merge into
-    // a single refresh, regardless of label. We deliberately drop the
-    // strict label-equality check: OCR sometimes misreads characters
-    // around the secret, which flips a regex hit to a contextual hit
-    // and back, causing flicker. The position is what matters.
+    // Match a fresh mask against a sticky one via bbox overlap. Position is
+    // what matters (a label flip OCR↔context shouldn't re-flicker).
     const MIN_OVERLAP_RATIO = 0.3
     const overlapRatio = (a: LiveMask, b: LiveMask): number => {
       const ix = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x))
@@ -314,36 +309,43 @@ export function Toolbar() {
 
     const refreshedExpiry = now + STICKY_MASK_TTL_MS
     const newSticky: Array<LiveMask & { expiresAt: number }> = []
-    // 1. Carry over previous masks that still have TTL left and are
-    //    NOT already represented in the fresh batch (we'll re-add
-    //    those next with refreshed positions).
     for (const old of stickyMasksRef.current) {
       if (old.expiresAt <= now) continue
-      const matched = result.masks.some((m) => sameRegion(m, old))
-      if (matched) continue // will be added by the fresh-mask loop below
+      if (incoming.some((m) => sameRegion(m, old))) continue
       newSticky.push(old)
     }
-    // 2. Add (or refresh) every mask from the fresh scan.
-    for (const m of result.masks) {
+    for (const m of incoming) {
       newSticky.push({ ...m, expiresAt: refreshedExpiry })
     }
     stickyMasksRef.current = newSticky
-
-    // Status reflects what the LATEST scan actually saw, not the
-    // sticky carryover — useful to spot when OCR loses a region.
-    setLiveStatus({
-      count: result.masks.length,
-      ms: result.scanDurationMs,
-      words: result.wordCount,
-      preview: result.preview,
-      at: now
-    })
-    setLiveError(null)
-    // Send the merged list (fresh + sticky) to the overlays so the
-    // user sees a stable masking even when individual scans wobble.
     apiRef.current?.setLiveMasks(newSticky)
-    apiRef.current?.setLiveOcrWords(result.ocrWords)
   }, [])
+
+  const handleScanResult = useCallback(
+    (result: ScanResult) => {
+      ingestMasks(result.masks)
+      // Status reflects what the LATEST OCR scan saw (not sticky carryover).
+      setLiveStatus({
+        count: result.masks.length,
+        ms: result.scanDurationMs,
+        words: result.wordCount,
+        preview: result.preview,
+        at: Date.now()
+      })
+      setLiveError(null)
+      apiRef.current?.setLiveOcrWords(result.ocrWords)
+    },
+    [ingestMasks]
+  )
+
+  // UI-Automation masks (from the native field scanner in main) feed the
+  // SAME sticky pool as OCR while LIVE is on.
+  useEffect(() => {
+    const off = apiRef.current?.onUiaMasks((masks) => {
+      if (masks.length > 0) ingestMasks(masks)
+    })
+    return off
+  }, [ingestMasks])
 
   // Periodically prune expired sticky masks even if no new scan came
   // in (e.g., user stopped looking at a page that had a secret on it).
@@ -386,6 +388,7 @@ export function Toolbar() {
       stickyMasksRef.current = []
       api.clearLiveMasks()
       api.clearLiveOcrWords()
+      api.stopUia()
       if (engineRef.current) {
         await engineRef.current.stop()
         engineRef.current = null
@@ -397,34 +400,43 @@ export function Toolbar() {
       setLiveError(null)
       setLiveOn(true)
       setLivePhase('acquiring')
-      const engine = new SanitizerLiveEngine()
-      engine.setContextual(sanitizerSettings.contextual)
-      engineRef.current = engine
-      // Let the engine use its DEFAULT_INTERVAL_MS (250 ms in v0.5.12+):
-      // the hash-skip path means most ticks bail out in ~3 ms, and the
-      // 4× faster tick rate cuts the worst-case "secret visible" window
-      // by ~750 ms vs the old 1 s cadence.
-      await engine.start(undefined, handleScanResult, (phase) => setLivePhase(phase))
+      const mode = sanitizerSettings.detectionMode
+      // Fast path: native Windows UI-Automation field scanner (instant,
+      // light). Masks stream back via onUiaMasks into the sticky pool.
+      if (mode !== 'ocr') {
+        api.startUia()
+      }
+      // Universal path: Tesseract OCR. Skipped in UIA-only mode.
+      if (mode !== 'uia') {
+        const engine = new SanitizerLiveEngine()
+        engine.setContextual(sanitizerSettings.contextual)
+        engineRef.current = engine
+        await engine.start(undefined, handleScanResult, (phase) => setLivePhase(phase))
+      } else {
+        setLivePhase('scanning')
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       console.error('[toolbar] live sanitizer failed to start:', err)
       setLiveError(message)
       setLiveOn(false)
       setLivePhase(null)
+      api.stopUia()
       if (engineRef.current) {
         void engineRef.current.stop()
         engineRef.current = null
       }
     }
-  }, [liveOn, handleScanResult, sanitizerSettings.contextual])
+  }, [liveOn, handleScanResult, sanitizerSettings.contextual, sanitizerSettings.detectionMode])
 
-  // Tear down the engine when the toolbar unmounts (app quit)
+  // Tear down the engine + native scanner when the toolbar unmounts.
   useEffect(() => {
     return () => {
       if (engineRef.current !== null) {
         void engineRef.current.stop()
         engineRef.current = null
       }
+      apiRef.current?.stopUia()
     }
   }, [])
 

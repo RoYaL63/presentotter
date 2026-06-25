@@ -110,6 +110,23 @@ const api = {
     scaleFactor: number
   } | null> => ipcRenderer.invoke('live:acquire-target'),
 
+  /** UI-Automation sanitizer (fast path). Start/stop the native field
+   *  scanner; masks (virtual-screen DIP) arrive via onUiaMasks. */
+  startUia: () => ipcRenderer.send('live:uia-start'),
+  stopUia: () => ipcRenderer.send('live:uia-stop'),
+  onUiaMasks: (
+    cb: (
+      masks: Array<{ x: number; y: number; width: number; height: number; label: string }>
+    ) => void
+  ) => {
+    const handler = (
+      _e: unknown,
+      masks: Array<{ x: number; y: number; width: number; height: number; label: string }>
+    ): void => cb(masks)
+    ipcRenderer.on('live:uia-masks', handler)
+    return () => ipcRenderer.off('live:uia-masks', handler)
+  },
+
   // ---------- Recording ----------
 
   recordingListSources: (): Promise<
