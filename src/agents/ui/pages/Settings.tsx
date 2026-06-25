@@ -566,11 +566,11 @@ export function Settings() {
             id="format"
             value={format}
             onChange={(e) => setFormat(e.target.value as ExportFormat)}
-            className="rounded-xl border border-white/[0.1] bg-white/[0.04] backdrop-blur-xl px-4 py-3 text-sm text-otter-50 outline-none transition-colors hover:bg-white/[0.08] focus:border-otter-400/50"
+            className="rounded-xl border border-sea-700/15 bg-white/70 px-4 py-3 text-sm font-medium text-sea-700 outline-none transition-colors hover:bg-white/90 focus:border-otter-400/60 focus:ring-2 focus:ring-otter-400/20"
           >
-            <option value="mp4" className="bg-deep-900">MP4 — universel</option>
-            <option value="webm" className="bg-deep-900">WebM — web optimisé</option>
-            <option value="gif" className="bg-deep-900">GIF — social</option>
+            <option value="mp4" className="bg-white text-sea-700">MP4 — universel</option>
+            <option value="webm" className="bg-white text-sea-700">WebM — web optimisé</option>
+            <option value="gif" className="bg-white text-sea-700">GIF — social</option>
           </select>
         </div>
       </div>

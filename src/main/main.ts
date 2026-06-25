@@ -148,7 +148,7 @@ function createHomeWindow(): BrowserWindow {
     // splash between window-create and renderer-paint.
     backgroundColor: '#E8F4F8',
     title: 'PresentOtter',
-    icon: makeDiscIcon(256),
+    icon: appIcon(256),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -606,12 +606,10 @@ function registerIpcHandlers(): void {
   )
 
   // Run in background + start with Windows so capture works any time.
-  ipcMain.handle('settings:get-open-at-login', () =>
-    app.getLoginItemSettings().openAtLogin
-  )
+  ipcMain.handle('settings:get-open-at-login', () => getOpenAtLogin())
   ipcMain.handle('settings:set-open-at-login', (_e, enabled: boolean) => {
     setOpenAtLogin(enabled === true)
-    return app.getLoginItemSettings().openAtLogin
+    return getOpenAtLogin()
   })
 
   // UI-Automation sanitizer (fast path). The renderer starts it when LIVE
@@ -1231,15 +1229,66 @@ function makeDiscIcon(size: number): Electron.NativeImage {
   return nativeImage.createFromBuffer(encodePng(size, size, rgba))
 }
 
+/**
+ * The window + tray icon. Loads a square logo from
+ * src/renderer/assets/app-icon.png (PNG or ICO) and scales it to `size`.
+ * The file ships inside the asar in prod and is read straight from disk in
+ * dev — app.getAppPath() resolves to the right root in both. Falls back to
+ * the generated mint disc when the file is missing or in a format
+ * nativeImage can't decode (e.g. the portrait .webp mascot).
+ */
+function appIcon(size: number): Electron.NativeImage {
+  try {
+    const file = path.join(app.getAppPath(), 'src', 'renderer', 'assets', 'app-icon.png')
+    const img = nativeImage.createFromPath(file)
+    if (!img.isEmpty()) {
+      return padToSquare(img).resize({ width: size, height: size, quality: 'best' })
+    }
+  } catch {
+    // unreadable path/format — fall back to the generated disc below
+  }
+  return makeDiscIcon(size)
+}
+
+/**
+ * Pad a non-square image onto a transparent square canvas so scaling it down
+ * to an icon size doesn't stretch it (a portrait logo would otherwise get
+ * squished). Channel order is irrelevant: whole pixels are copied and the
+ * padding is fully transparent (all-zero). */
+function padToSquare(img: Electron.NativeImage): Electron.NativeImage {
+  const { width, height } = img.getSize()
+  if (width === height || width === 0 || height === 0) return img
+  const side = Math.max(width, height)
+  const src = img.toBitmap()
+  const dst = Buffer.alloc(side * side * 4)
+  const offX = Math.floor((side - width) / 2)
+  const offY = Math.floor((side - height) / 2)
+  const rowBytes = width * 4
+  for (let y = 0; y < height; y++) {
+    src.copy(dst, ((y + offY) * side + offX) * 4, y * rowBytes, y * rowBytes + rowBytes)
+  }
+  return nativeImage.createFromBitmap(dst, { width: side, height: side })
+}
+
+// `--hidden` so a login launch starts straight into the tray (no window).
+// Windows gates getLoginItemSettings().openAtLogin on the path+args matching
+// what was passed to set; reading WITHOUT these args reads back false even
+// right after enabling, which made the Settings toggle look stuck. Single
+// source of truth so the read and the write can never drift apart.
+const LOGIN_ITEM_ARGS = ['--hidden']
+
+function getOpenAtLogin(): boolean {
+  return app.getLoginItemSettings({ args: LOGIN_ITEM_ARGS }).openAtLogin
+}
+
 function setOpenAtLogin(enabled: boolean): void {
-  // `--hidden` so a login launch starts straight into the tray (no window).
-  app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] })
+  app.setLoginItemSettings({ openAtLogin: enabled, args: LOGIN_ITEM_ARGS })
   rebuildTrayMenu()
 }
 
 function rebuildTrayMenu(): void {
   if (tray === null) return
-  const openAtLogin = app.getLoginItemSettings().openAtLogin
+  const openAtLogin = getOpenAtLogin()
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: 'Capture d\'écran', accelerator: 'Alt+Shift+S', click: () => void startCapture('photo') },
@@ -1273,7 +1322,7 @@ function rebuildTrayMenu(): void {
 
 function createTray(): void {
   if (tray !== null) return
-  tray = new Tray(makeDiscIcon(16))
+  tray = new Tray(appIcon(16))
   tray.setToolTip('PresentOtter — capture & annotation')
   rebuildTrayMenu()
   // Left-click opens the app; the menu is on right-click (Windows default).

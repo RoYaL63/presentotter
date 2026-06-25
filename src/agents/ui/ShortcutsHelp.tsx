@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Keyboard, X } from 'lucide-react'
 import { RiverWave } from './components/RiverWave'
 
@@ -73,7 +73,51 @@ const GROUPS: ShortcutGroup[] = [
   }
 ]
 
+/** Default capture accelerators, mirrored from main's CaptureHotkeys. Shown
+ *  until the live (user-configurable) values load, and as a fallback if the
+ *  api isn't wired. */
+const DEFAULT_CAPTURE = { capturePhoto: 'Alt+Shift+S', captureVideo: 'Alt+Shift+R' }
+
+/** Split an Electron accelerator ("Alt+Shift+S") into display keys
+ *  (["Alt", "Maj", "S"]), matching the French labels used elsewhere. */
+function formatAccel(accel: string): string[] {
+  return accel.split('+').map((part) => {
+    if (part === 'Shift') return 'Maj'
+    if (part === 'Control' || part === 'Ctrl') return 'Ctrl'
+    if (part === 'Super' || part === 'Meta') return 'Win'
+    return part
+  })
+}
+
 export function ShortcutsHelp({ onClose }: ShortcutsHelpProps) {
+  // Capture shortcuts are configurable (Settings), so read the live values
+  // rather than hard-coding them; fall back to the defaults until they load.
+  const [capture, setCapture] = useState(DEFAULT_CAPTURE)
+  useEffect(() => {
+    void window.api?.getCaptureHotkeys().then((hk) => {
+      if (hk !== undefined) setCapture(hk)
+    })
+  }, [])
+
+  // The capture group is built from live state, then prepended to the static
+  // annotation/display groups so it leads the cheat-sheet.
+  const captureGroup: ShortcutGroup = {
+    title: 'Capture (globale)',
+    rows: [
+      {
+        combo: formatAccel(capture.capturePhoto),
+        label: 'Capture d\'écran',
+        note: 'Zone ou plein écran, depuis n\'importe où'
+      },
+      {
+        combo: formatAccel(capture.captureVideo),
+        label: 'Vidéo de zone',
+        note: 'Relance le raccourci pour arrêter l\'enregistrement'
+      }
+    ]
+  }
+  const groups: ShortcutGroup[] = [captureGroup, ...GROUPS]
+
   // Escape closes — same pattern as the sanitizer popup so the user has
   // a consistent way out.
   useEffect(() => {
@@ -125,7 +169,7 @@ export function ShortcutsHelp({ onClose }: ShortcutsHelpProps) {
         </header>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {GROUPS.map((group) => (
+          {groups.map((group) => (
             <section key={group.title} className="rounded-2xl bg-white/45 p-3 ring-1 ring-white/55">
               <h3 className="mb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-sea-700/70">
                 {group.title}
