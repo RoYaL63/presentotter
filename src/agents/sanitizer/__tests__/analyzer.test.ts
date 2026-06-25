@@ -49,7 +49,7 @@ describe('SanitizerAnalyzer.analyzeText', () => {
     const zones = analyzer.analyzeText(text)
     const patternNames = zones.map(z => z.pattern)
 
-    expect(patternNames).toContain('openai-api-key')
+    expect(patternNames).toContain('sk-prefixed-key')
     expect(patternNames).toContain('jwt')
     expect(patternNames).toContain('aws-access-key')
     expect(patternNames).toContain('bearer-token')
@@ -58,10 +58,10 @@ describe('SanitizerAnalyzer.analyzeText', () => {
   it('returns confidence and type matching the pattern definition', () => {
     const text = 'sk-ABCDEFGHIJ1234567890abcdef'
     const zones = analyzer.analyzeText(text)
-    const openai = zones.find(z => z.pattern === 'openai-api-key')
-    expect(openai).toBeDefined()
-    expect(openai?.type).toBe('api-key')
-    expect(openai?.confidence).toBeCloseTo(0.98)
+    const sk = zones.find(z => z.pattern === 'sk-prefixed-key')
+    expect(sk).toBeDefined()
+    expect(sk?.type).toBe('api-key')
+    expect(sk?.confidence).toBeCloseTo(0.95)
   })
 
   it('returns empty array on clean text', () => {

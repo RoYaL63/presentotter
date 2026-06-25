@@ -1,6 +1,6 @@
 {
   "name": "presentotter",
-  "version": "0.1.0",
+  "version": "0.6.9",
   "description": "Open source screen recorder for no-code educators",
   "main": "dist/main/main.js",
   "homepage": "https://github.com/RoYaL63/presentotter",
@@ -17,6 +17,9 @@
     "build:renderer": "vite build",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win",
+    "pack:win": "npm run build && node scripts/package-win.js",
+    "installer:win": "npm run pack:win && node scripts/build-installer.js",
+    "release": "node scripts/release.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "vitest run integration-tests",
@@ -25,6 +28,7 @@
     "check:secrets": "node scripts/check-secrets.js"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.35",
     "better-sqlite3": "^9.4.0",
     "electron-store": "^8.1.0",
     "fluent-ffmpeg": "^2.1.2",
@@ -33,6 +37,7 @@
     "uiohook-napi": "^1.5.3"
   },
   "devDependencies": {
+    "@electron/packager": "^20.0.0",
     "@electron/rebuild": "^3.6.0",
     "@types/better-sqlite3": "^7.6.8",
     "@types/fluent-ffmpeg": "^2.1.24",
@@ -40,6 +45,7 @@
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^4.2.0",
+    "@vitest/coverage-v8": "^1.6.0",
     "autoprefixer": "^10.5.0",
     "concurrently": "^8.2.0",
     "cross-env": "^7.0.3",

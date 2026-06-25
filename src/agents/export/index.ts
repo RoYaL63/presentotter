@@ -16,5 +16,3 @@ export { PRESETS, getPresetForFormat } from './presets'
 
 export { buildWatermarkFilter } from './watermark'
 export type { WatermarkConfig, WatermarkPosition } from './watermark'
-
-export { framesToConcatFileList, framesToRawVideoPipe } from './frames-to-file'

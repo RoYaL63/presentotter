@@ -2,21 +2,760 @@
 @tailwind components;
 @tailwind utilities;
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+/* ------------------------------------------------------------------
+   OtterMorphisme — polices bundlées en local (offline-first).
+   Subsets latin uniquement, hébergés dans src/renderer/fonts/ pour que
+   Vite les fingerprinte et corrige l'URL en dev (/fonts) comme en
+   prod (file://). Special Elite = display, Syne = corps/titres,
+   JetBrains Mono = méta.
+   ------------------------------------------------------------------ */
+@font-face {
+  font-family: 'Special Elite';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/specialelite-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Syne';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/syne-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Syne';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/syne-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Syne';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('./fonts/syne-800.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/jetbrainsmono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/jetbrainsmono-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/jetbrainsmono-700.woff2') format('woff2');
 }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    width: 100%;
+  }
+
+  body {
+    font-family: 'Inter', 'Geist Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color: #1B5E7B; /* deep-sea default — overridden per surface */
+    background-color: #E8F4F8; /* glacier — soft aquatic, never pure white */
+    overflow: hidden;
+  }
+
+  /* ------------------------------------------------------------------
+     Transparency contract for floating windows (toolbar + overlay).
+     Both BrowserWindows are created with transparent: true so the OS
+     lets the desktop show through. Any opaque body bg defeats it.
+     ------------------------------------------------------------------ */
+  html[data-mode='toolbar'],
+  html[data-mode='toolbar'] body,
+  html[data-mode='toolbar'] #root,
+  html[data-mode='overlay'],
+  html[data-mode='overlay'] body,
+  html[data-mode='overlay'] #root {
+    background: transparent !important;
+    background-color: transparent !important;
+  }
+  html[data-mode='overlay'] body {
+    /* Overlay must never block clicks at the body level; child elements
+       opt back in (the canvas re-enables pointer-events on its own). */
+    pointer-events: none;
+  }
+  html[data-mode='overlay'] #root,
+  html[data-mode='overlay'] canvas {
+    pointer-events: auto;
+  }
+
+  /* Capture mode — TRANSPARENT selector over the live screen (just a wash
+     + toolbar). Must not paint an opaque base or it would hide the very
+     content the user is trying to capture. */
+  html[data-mode='capture'],
+  html[data-mode='capture'] body,
+  html[data-mode='capture'] #root {
+    background: transparent !important;
+    background-color: transparent !important;
+    overflow: hidden;
+  }
+
+  /* Editor mode — framed pop-up. Dark base so there's no light flash
+     before React paints its own dark chrome. */
+  html[data-mode='editor'],
+  html[data-mode='editor'] body,
+  html[data-mode='editor'] #root {
+    background: #0a1f1b !important;
+  }
+
+  /* Recorder mode — tiny transparent always-on-top control bar. Must be
+     fully transparent like the toolbar/overlay so only the pill shows. */
+  html[data-mode='recorder'],
+  html[data-mode='recorder'] body,
+  html[data-mode='recorder'] #root {
+    background: transparent !important;
+    background-color: transparent !important;
+    overflow: hidden;
+  }
+
+  /* Scrollbar — aqua-mist, discrete */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(27, 94, 123, 0.20);
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(27, 94, 123, 0.35);
+    background-clip: content-box;
+  }
+
+  /* Selection — aqua-mist tint */
+  ::selection {
+    background: rgba(184, 224, 232, 0.55);
+    color: #1B5E7B;
+  }
+
+  /* Focus outline — coral pop ring for emphasis */
+  :focus-visible {
+    outline: 2px solid #FF8B7B;
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  button:focus-visible,
+  a:focus-visible {
+    outline-offset: 4px;
+  }
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+@layer components {
+  /* ============================================================
+     OTTER MORPHISM — design system signature
+     Liquid Glass + Clay Morphism + Aqua + Loutre
+     Spec : design system OtterMorphisme (Otterwise Solutions)
+     ============================================================ */
+
+  /* ---- 1. LIQUID GLASS — light surfaces (Home, modals, cards) ---- */
+  .otter-glass {
+    background: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.65);
+    border-radius: 24px;
+    box-shadow:
+      0 8px 32px rgba(27, 94, 123, 0.16),
+      inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  }
+
+  .otter-glass-tinted {
+    background: linear-gradient(180deg,
+      rgba(184, 224, 232, 0.50) 0%,
+      rgba(245, 230, 211, 0.30) 100%);
+    backdrop-filter: blur(20px) saturate(170%);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    border: 1px solid rgba(255, 255, 255, 0.65);
+    border-radius: 24px;
+    box-shadow:
+      0 8px 32px rgba(27, 94, 123, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  }
+
+  /* Dark glass — used on toolbar/overlay where we sit on the desktop.
+     Keeps icons readable over a bright editor + still reads "otter". */
+  .otter-glass-dark {
+    background: linear-gradient(
+      180deg,
+      rgba(13, 53, 72, 0.78) 0%,
+      rgba(7, 33, 47, 0.82) 100%
+    );
+    backdrop-filter: blur(20px) saturate(170%);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    border: 1px solid rgba(184, 224, 232, 0.20);
+    border-radius: 24px;
+    box-shadow:
+      0 12px 40px rgba(7, 33, 47, 0.45),
+      inset 0 1px 0 rgba(184, 224, 232, 0.18);
+  }
+
+  /* ---- 2. CLAY — soft 3D for CTAs, badges, mascot ---- */
+  .otter-clay {
+    background: linear-gradient(145deg, #F5E6D3, #EAD6BA);
+    border-radius: 28px;
+    box-shadow:
+      8px 8px 20px rgba(61, 40, 23, 0.16),
+      -6px -6px 16px rgba(255, 255, 255, 0.85),
+      inset 0 2px 4px rgba(255, 255, 255, 0.55);
+    color: #3D2817;
+  }
+  .otter-clay-coral {
+    background: linear-gradient(145deg, #FF8B7B, #F86A57);
+    border-radius: 28px;
+    box-shadow:
+      8px 8px 20px rgba(168, 54, 42, 0.30),
+      -6px -6px 16px rgba(255, 255, 255, 0.45),
+      inset 0 2px 4px rgba(255, 255, 255, 0.40);
+    color: #ffffff;
+  }
+  .otter-clay-sea {
+    background: linear-gradient(145deg, #2A7290, #1B5E7B);
+    border-radius: 28px;
+    box-shadow:
+      8px 8px 20px rgba(13, 53, 72, 0.32),
+      -6px -6px 16px rgba(184, 224, 232, 0.30),
+      inset 0 2px 4px rgba(184, 224, 232, 0.25);
+    color: #ffffff;
+  }
+  .otter-clay-pressed {
+    box-shadow:
+      inset 4px 4px 10px rgba(61, 40, 23, 0.20),
+      inset -3px -3px 8px rgba(255, 255, 255, 0.65);
+  }
+
+  /* ---- 3. AQUA SHEEN — wet shine highlight, ::before overlay ---- */
+  .otter-aqua {
+    position: relative;
+    overflow: hidden;
+  }
+  .otter-aqua::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      160deg,
+      rgba(255, 255, 255, 0.45) 0%,
+      rgba(255, 255, 255, 0.05) 35%,
+      transparent 60%
+    );
+    pointer-events: none;
+    border-radius: inherit;
+  }
+
+  /* ---- 4. MESH AQUATIQUE — hero / Home background ---- */
+  .otter-mesh {
+    background:
+      radial-gradient(at 20% 30%, #B8E0E8 0%, transparent 50%),
+      radial-gradient(at 80% 70%, #F5E6D3 0%, transparent 50%),
+      radial-gradient(at 50% 100%, rgba(27, 94, 123, 0.22) 0%, transparent 60%),
+      linear-gradient(135deg, #E8F4F8 0%, #F5E6D3 100%);
+  }
+
+  /* ---- Decorative bubbles (background orbs) ---- */
+  .otter-bubble {
+    @apply animate-bubble;
+  }
+  .liquid-bg {
+    @apply fixed inset-0 -z-10 overflow-hidden pointer-events-none;
+  }
+  .liquid-orb {
+    @apply absolute rounded-full blur-3xl;
+    opacity: 0.45;
+  }
+
+  /* ---- Glass aliases — scoped by window mode ----
+     The toolbar + overlay float over the user's desktop and need dark glass
+     to stay legible. The home is a normal framed window with the light
+     otter-mesh background, so the same .glass classes should render light.
+     Components share a single class, the data-mode attribute on <html>
+     selects the right variant.                                            */
+  html[data-mode='home'] .glass,
+  html[data-mode='home'] .glass-strong {
+    @apply otter-glass;
+  }
+  html[data-mode='toolbar'] .glass,
+  html[data-mode='toolbar'] .glass-strong,
+  html[data-mode='overlay'] .glass,
+  html[data-mode='overlay'] .glass-strong {
+    @apply otter-glass-dark;
+  }
+  html[data-mode='home'] .glass-subtle {
+    background: rgba(255, 255, 255, 0.45);
+    @apply relative backdrop-blur-md border border-white/60 shadow-glass-sm;
+  }
+  html[data-mode='toolbar'] .glass-subtle,
+  html[data-mode='overlay'] .glass-subtle {
+    background: rgba(13, 53, 72, 0.45);
+    @apply relative backdrop-blur-md border border-white/[0.08] shadow-glass-sm;
+  }
+  .glass-interactive {
+    @apply transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-glow-coral;
+  }
+  .glass-shine::before {
+    content: '';
+    @apply absolute inset-x-0 top-0 h-px pointer-events-none rounded-t-[inherit];
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(184, 224, 232, 0.55) 50%,
+      transparent 100%
+    );
+  }
+
+  /* ---- BUTTON RECIPES ---- */
+
+  /* Primary CTA — coral pop clay, the signature Otterwise action */
+  .btn-otter {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-7 py-3 text-sm font-bold;
+    background: linear-gradient(145deg, #FF8B7B, #F86A57);
+    color: #ffffff;
+    box-shadow:
+      6px 6px 18px rgba(168, 54, 42, 0.28),
+      -4px -4px 12px rgba(255, 255, 255, 0.35),
+      inset 0 2px 4px rgba(255, 255, 255, 0.40);
+    transition: transform 300ms cubic-bezier(0.34, 1.56, 0.64, 1),
+                box-shadow 300ms ease-out;
+  }
+  .btn-otter:hover {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow:
+      8px 10px 24px rgba(168, 54, 42, 0.34),
+      -5px -5px 16px rgba(255, 255, 255, 0.40),
+      inset 0 2px 4px rgba(255, 255, 255, 0.45);
+  }
+  .btn-otter:active {
+    transform: translateY(0) scale(0.99);
+  }
+  .btn-otter:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  /* Glass button — light surface (used on Home) */
+  .btn-glass {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold;
+    background: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(16px) saturate(170%);
+    -webkit-backdrop-filter: blur(16px) saturate(170%);
+    border: 1px solid rgba(255, 255, 255, 0.65);
+    color: #1B5E7B;
+    box-shadow:
+      0 4px 16px rgba(27, 94, 123, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.85);
+    transition: all 200ms ease-out;
+  }
+  .btn-glass:hover {
+    background: rgba(255, 255, 255, 0.75);
+    transform: translateY(-1px);
+  }
+
+  /* Danger / stop button — kept for parity with previous codepaths */
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-6 py-2.5 text-sm font-bold text-white;
+    background: linear-gradient(145deg, #F86A57, #D94A37);
+    box-shadow:
+      6px 6px 18px rgba(168, 54, 42, 0.28),
+      inset 0 2px 4px rgba(255, 255, 255, 0.30);
+    transition: transform 200ms ease-out;
+  }
+  .btn-danger:hover {
+    transform: translateY(-1px) scale(1.02);
+  }
+
+  /* ============================================================
+     HOME-MODE COLOR REMAP
+     ----------------------------------------------------------------
+     Tools / Library / Settings sections were authored against a dark
+     panel (text-otter-50 = light, on dark glass). The new otter-mesh
+     Home is light, so those text classes invert to "light on light"
+     and become invisible. Rather than edit 3 pages we remap the most
+     common color utilities to their light-mode equivalents inside
+     html[data-mode='home']. Toolbar/Overlay (dark) remain untouched.
+     ============================================================ */
+  html[data-mode='home'] [class*='text-otter-50'] { color: #1B5E7B; }
+  html[data-mode='home'] [class*='text-otter-100'] { color: #1B5E7B; }
+  html[data-mode='home'] [class*='text-otter-200'] { color: #3D2817; }
+  html[data-mode='home'] [class*='text-otter-300'] { color: #FF8B7B; }
+  html[data-mode='home'] [class*='bg-otter-500/15'] {
+    background-color: rgba(255, 139, 123, 0.15);
+  }
+  html[data-mode='home'] [class*='border-otter-400/30'] {
+    border-color: rgba(255, 139, 123, 0.40);
+  }
+  html[data-mode='home'] [class*='bg-fur-500/15'] {
+    background-color: rgba(200, 158, 118, 0.20);
+  }
+  html[data-mode='home'] [class*='border-fur-400/30'] {
+    border-color: rgba(200, 158, 118, 0.45);
+  }
+  html[data-mode='home'] [class*='text-fur-300'] { color: #C89E76; }
+  html[data-mode='home'] [class*='bg-white\\/'] {
+    background-color: rgba(27, 94, 123, 0.06);
+  }
+  html[data-mode='home'] [class*='border-white\\/'] {
+    border-color: rgba(27, 94, 123, 0.12);
+  }
+  html[data-mode='home'] [class*='bg-deep-950'] {
+    background-color: rgba(255, 255, 255, 0.65);
+  }
+
+  /* Badge loutre — cream clay pill */
+  .otter-badge {
+    @apply inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold;
+    background: linear-gradient(145deg, #F5E6D3, #EAD6BA);
+    color: #3D2817;
+    box-shadow:
+      4px 4px 12px rgba(61, 40, 23, 0.14),
+      -3px -3px 8px rgba(255, 255, 255, 0.80),
+      inset 0 1px 2px rgba(255, 255, 255, 0.55);
+  }
+
+  /* ============================================================
+     OTTERMORPHISME — thème menthe pour la PAGE LOGICIELLE
+     ----------------------------------------------------------------
+     Tout est scopé sous html[data-mode='home'] : la toolbar et
+     l'overlay (data-mode toolbar/overlay) ne sont JAMAIS touchés et
+     gardent leur verre sombre flottant. Ici on remplace l'ancien
+     univers crème/corail par : fond frais menthe, surfaces pâte
+     claires, accent menthe unique, polices Syne / Special Elite.
+     Réf : design system OtterMorphisme.
+     ============================================================ */
+
+  /* Fond + typo de la page */
+  html[data-mode='home'] body {
+    font-family: 'Syne', 'Inter', system-ui, sans-serif;
+    color: #15201C; /* encre */
+  }
+  /* Titres display → machine à écrire (gros titres uniquement) */
+  html[data-mode='home'] .font-display {
+    font-family: 'Special Elite', 'Syne', system-ui, serif;
+    letter-spacing: -0.01em;
+  }
+
+  /* Mesh aquatique → frais menthe */
+  html[data-mode='home'] .otter-mesh {
+    background:
+      radial-gradient(at 18% 28%, #C9F4E8 0%, transparent 52%),
+      radial-gradient(at 82% 72%, #E7F0EC 0%, transparent 50%),
+      radial-gradient(at 50% 100%, rgba(15, 165, 135, 0.14) 0%, transparent 60%),
+      linear-gradient(135deg, #E7F0EC 0%, #EFF6F2 100%);
+  }
+
+  /* Orbes décoratives → teintes menthe */
+  html[data-mode='home'] .liquid-orb.bg-sea-200 { background-color: #9DEEDA; }
+  html[data-mode='home'] .liquid-orb.bg-cream-100 { background-color: #E8FBF5; }
+  html[data-mode='home'] .liquid-orb.bg-coral-200 { background-color: #5FE3C0; }
+
+  /* Verre liquide clair → liseré + ombre menthe */
+  html[data-mode='home'] .otter-glass {
+    background: rgba(255, 255, 255, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    box-shadow:
+      0 20px 48px rgba(15, 165, 135, 0.14),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.32);
+  }
+
+  /* Pâte neutre → dégradé OtterMorphisme clair */
+  html[data-mode='home'] .otter-clay {
+    background: linear-gradient(145deg, #FCFEFD, #E6EFEB);
+    box-shadow:
+      10px 12px 28px rgba(40, 96, 82, 0.13),
+      -8px -8px 22px rgba(255, 255, 255, 0.9),
+      inset 1.5px 1.5px 4px rgba(255, 255, 255, 0.8),
+      inset -2px -2px 6px rgba(40, 96, 82, 0.07);
+    color: #15201C;
+  }
+
+  /* CTA principal : la pâte "corail" du code devient pâte MENTHE.
+     C'est l'accent d'action unique du système. */
+  html[data-mode='home'] .otter-clay-coral,
+  html[data-mode='home'] .btn-otter {
+    background: linear-gradient(145deg, #3BE6C0, #19C49E);
+    color: #06231C;
+    box-shadow:
+      8px 8px 20px rgba(15, 165, 135, 0.30),
+      -6px -6px 16px rgba(255, 255, 255, 0.55),
+      inset 0 2px 4px rgba(255, 255, 255, 0.45);
+  }
+
+  /* État "actif/pressé" du CTA (anciennement clay-sea) → encre profonde
+     pour contraster avec la menthe d'appel. */
+  html[data-mode='home'] .otter-clay-sea {
+    background: linear-gradient(145deg, #1C3A33, #122A24);
+    color: #E7F3ED;
+    box-shadow:
+      8px 8px 20px rgba(10, 31, 27, 0.30),
+      -6px -6px 16px rgba(157, 238, 218, 0.18),
+      inset 0 2px 4px rgba(157, 238, 218, 0.15);
+  }
+
+  /* Badge loutre → pâte menthe pâle */
+  html[data-mode='home'] .otter-badge {
+    background: linear-gradient(145deg, #E8FBF5, #C9F4E8);
+    color: #0B806A;
+    box-shadow:
+      4px 4px 12px rgba(40, 96, 82, 0.14),
+      -3px -3px 8px rgba(255, 255, 255, 0.85),
+      inset 0 1px 2px rgba(255, 255, 255, 0.6);
+  }
+
+  /* Survol des surfaces interactives → halo menthe (au lieu de corail) */
+  html[data-mode='home'] .glass-interactive:hover {
+    box-shadow: 0 0 32px 0 rgba(43, 217, 172, 0.40);
+  }
+
+  /* Remap couleurs en mode home : l'accent passe corail → menthe.
+     (surcharge les règles génériques plus haut, même spécificité,
+     déclarées après donc prioritaires) */
+  html[data-mode='home'] [class*='text-otter-300'] { color: #0FA587; }
+  html[data-mode='home'] [class*='bg-otter-500/15'] {
+    background-color: rgba(15, 165, 135, 0.14);
+  }
+  html[data-mode='home'] [class*='border-otter-400/30'] {
+    border-color: rgba(15, 165, 135, 0.38);
+  }
+  /* Le corail explicite des composants (texte, bg, ring, from/to) vire
+     menthe sur la page logicielle. Liste ciblée pour ne pas toucher la
+     palette de dessin de l'overlay (autre data-mode). */
+  html[data-mode='home'] [class*='text-coral-400'],
+  html[data-mode='home'] [class*='text-coral-500'] { color: #0FA587; }
+  html[data-mode='home'] [class*='bg-coral-500'] { background-color: #19C49E; }
+  /* Dégradés corail des boutons (Paramètres/Outils) → menthe */
+  html[data-mode='home'] [class*='from-coral-400'] {
+    --tw-gradient-from: #3BE6C0 var(--tw-gradient-from-position);
+    --tw-gradient-to: rgb(59 230 192 / 0) var(--tw-gradient-to-position);
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
+  }
+  html[data-mode='home'] [class*='to-coral-500'] {
+    --tw-gradient-to: #19C49E var(--tw-gradient-to-position);
+  }
+  /* Anneaux corail → menthe */
+  html[data-mode='home'] [class*='ring-coral-300'],
+  html[data-mode='home'] [class*='ring-coral-400'] {
+    --tw-ring-color: rgba(43, 217, 172, 0.5);
+  }
+
+  /* Anneau de focus → menthe */
+  html[data-mode='home'] :focus-visible { outline-color: #19C49E; }
+
+  /* Vague rivière — en-tête de modale (deux vagues SVG qui dérivent en
+     sens opposés). Le SVG fait 200% de large et glisse de -50%. */
+  @keyframes gwave {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+  .river-wave-a { animation: gwave 6s linear infinite; }
+  .river-wave-b { animation: gwave 9s linear infinite reverse; opacity: 0.7; }
+
+  /* Goutte de navigation — indicateur d'onglet actif qui glisse d'un
+     onglet à l'autre avec un léger dépassement élastique, et s'étire
+     pendant le trajet comme une goutte d'eau qui se reforme. */
+  .nav-drop {
+    background: linear-gradient(145deg, #E8FBF5, #C9F4E8);
+    box-shadow:
+      0 4px 14px rgba(15, 165, 135, 0.22),
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      inset 0 0 0 1px rgba(43, 217, 172, 0.35);
+    transition:
+      left 0.55s cubic-bezier(0.5, 1.5, 0.42, 1),
+      width 0.55s cubic-bezier(0.5, 1.5, 0.42, 1);
+  }
+  @keyframes nav-drop-stretch {
+    0% { transform: translateY(-50%) scaleX(1); }
+    45% { transform: translateY(-50%) scaleX(1.18); }
+    100% { transform: translateY(-50%) scaleX(1); }
+  }
+  .nav-drop-move {
+    animation: nav-drop-stretch 0.55s ease;
+  }
+
+  /* Soulignement rivière — mot-clé d'un titre. Jamais de couleur de
+     texte, un trait menthe qui coule sous le mot. */
+  @keyframes riv-flow {
+    0% { background-position: -60% bottom; }
+    100% { background-position: 160% bottom; }
+  }
+  .riv-underline {
+    display: inline-block;
+    color: inherit;
+    padding: 0 2px 6px;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(43, 217, 172, 0.46) 10%,
+        rgba(59, 230, 192, 0.7) 50%,
+        rgba(43, 217, 172, 0.46) 90%,
+        transparent 100%
+      )
+      no-repeat bottom / 200% 3.5px;
+    animation: riv-flow 3.2s ease-in-out infinite alternate;
+  }
+
+  /* ============================================================
+     OTTERMORPHISME — MODE NUIT (opt-in)
+     ----------------------------------------------------------------
+     Scopé html[data-mode='home'][data-theme='night']. Spécificité plus
+     forte que les règles jour (attribut supplémentaire) → l'emporte.
+     Le défaut reste le jour : sans data-theme='night', rien de ceci ne
+     s'applique. Toolbar/overlay (autre data-mode) jamais touchés.
+     ============================================================ */
+  html[data-mode='home'][data-theme='night'] body {
+    background-color: #0A1F1B;
+    color: #E7F3ED;
+  }
+  html[data-mode='home'][data-theme='night'] .otter-mesh {
+    background:
+      radial-gradient(at 18% 28%, #14342B 0%, transparent 52%),
+      radial-gradient(at 82% 72%, #102A24 0%, transparent 50%),
+      radial-gradient(at 50% 100%, rgba(59, 230, 192, 0.10) 0%, transparent 60%),
+      linear-gradient(135deg, #0A1F1B 0%, #143029 100%);
+  }
+  html[data-mode='home'][data-theme='night'] .liquid-orb.bg-sea-200 { background-color: #14342B; }
+  html[data-mode='home'][data-theme='night'] .liquid-orb.bg-cream-100 { background-color: #102A24; }
+  html[data-mode='home'][data-theme='night'] .liquid-orb.bg-coral-200 { background-color: #0F7A66; }
+
+  /* Verre liquide sombre (comme un panneau translucide sur l'eau nuit) */
+  html[data-mode='home'][data-theme='night'] .otter-glass {
+    background: rgba(24, 60, 50, 0.55);
+    border: 1px solid rgba(157, 238, 218, 0.14);
+    box-shadow:
+      0 20px 48px rgba(0, 0, 0, 0.45),
+      inset 0 1px 0 rgba(157, 238, 218, 0.12),
+      inset 0 0 0 1px rgba(157, 238, 218, 0.06);
+  }
+  /* Pâte sombre */
+  html[data-mode='home'][data-theme='night'] .otter-clay {
+    background: linear-gradient(145deg, #183C32, #0F2922);
+    box-shadow:
+      10px 12px 28px rgba(0, 0, 0, 0.4),
+      -8px -8px 22px rgba(157, 238, 218, 0.05),
+      inset 1.5px 1.5px 4px rgba(157, 238, 218, 0.1),
+      inset -2px -2px 6px rgba(0, 0, 0, 0.3);
+    color: #E7F3ED;
+  }
+  /* Badge + goutte de nav en menthe sombre */
+  html[data-mode='home'][data-theme='night'] .otter-badge,
+  html[data-mode='home'][data-theme='night'] .nav-drop {
+    background: linear-gradient(145deg, #1C3A33, #16302A);
+    color: #3BE6C0;
+    box-shadow:
+      0 4px 14px rgba(0, 0, 0, 0.4),
+      inset 0 0 0 1px rgba(59, 230, 192, 0.35);
+  }
+
+  /* Texte : tout ce qui était sombre-sur-clair passe clair-sur-sombre.
+     Les variantes d'opacité (/70 etc.) sont couvertes par le match de
+     sous-chaîne ; on perd la nuance d'alpha mais le texte reste lisible. */
+  html[data-mode='home'][data-theme='night'] [class*='text-sea-700'],
+  html[data-mode='home'][data-theme='night'] [class*='text-otter-50'],
+  html[data-mode='home'][data-theme='night'] [class*='text-otter-100'] {
+    color: #E7F3ED;
+  }
+  html[data-mode='home'][data-theme='night'] [class*='text-otter-200'],
+  html[data-mode='home'][data-theme='night'] [class*='text-cream-800'] {
+    color: rgba(231, 243, 237, 0.7);
+  }
+  html[data-mode='home'][data-theme='night'] [class*='text-otter-300'],
+  html[data-mode='home'][data-theme='night'] [class*='text-fur-300'] {
+    color: #3BE6C0;
+  }
+  html[data-mode='home'][data-theme='night'] [class*='text-coral-400'],
+  html[data-mode='home'][data-theme='night'] [class*='text-coral-500'] {
+    color: #3BE6C0;
+  }
+
+  /* Surfaces verre des pages Tools / Library / Settings.
+     .glass et .glass-strong sont remplies via `@apply otter-glass`, donc
+     les valeurs JOUR (verre blanc) sont figées dans la règle .glass à la
+     compilation. L'override nuit de .otter-glass ne les atteint jamais
+     (ces éléments portent la classe .glass, pas .otter-glass). On doit
+     donc cibler .glass directement ici, sinon : cartes blanches + texte
+     clair = illisible. */
+  html[data-mode='home'][data-theme='night'] .glass,
+  html[data-mode='home'][data-theme='night'] .glass-strong {
+    background: rgba(22, 56, 47, 0.66);
+    border-color: rgba(157, 238, 218, 0.14);
+    box-shadow:
+      0 20px 48px rgba(0, 0, 0, 0.45),
+      inset 0 1px 0 rgba(157, 238, 218, 0.12),
+      inset 0 0 0 1px rgba(157, 238, 218, 0.05);
+  }
+  html[data-mode='home'][data-theme='night'] .glass-subtle {
+    background: rgba(18, 48, 40, 0.62);
+    border-color: rgba(157, 238, 218, 0.12);
+  }
+  /* La barre de brillance du haut était claire (eau de jour) → menthe */
+  html[data-mode='home'][data-theme='night'] .glass-shine::before {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(59, 230, 192, 0.22) 50%,
+      transparent 100%
+    );
+  }
+
+  /* Bouton verre (ex. « Réinitialiser ») — blanc en dur côté jour, donc
+     gris clair illisible en nuit. Surface sombre + encre claire. */
+  html[data-mode='home'][data-theme='night'] .btn-glass {
+    background: rgba(28, 66, 56, 0.72);
+    border-color: rgba(157, 238, 218, 0.18);
+    color: #E7F3ED;
+    box-shadow:
+      0 4px 16px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(157, 238, 218, 0.1);
+  }
+  html[data-mode='home'][data-theme='night'] .btn-glass:hover {
+    background: rgba(38, 84, 71, 0.85);
+  }
+
+  /* Surfaces blanches translucides → menthe translucide sur sombre.
+     Tailwind écrit bg-white/NN sans backslash dans l'attribut class, donc
+     le sélecteur correct est [class*='bg-white/'] (pas de \\/). */
+  html[data-mode='home'][data-theme='night'] [class*='bg-white/'] {
+    background-color: rgba(157, 238, 218, 0.08);
+  }
+  html[data-mode='home'][data-theme='night'] [class*='border-white/'] {
+    border-color: rgba(157, 238, 218, 0.16);
+  }
+  html[data-mode='home'][data-theme='night'] [class*='bg-deep-950'] {
+    background-color: rgba(24, 60, 50, 0.6);
+  }
+  html[data-mode='home'][data-theme='night'] :focus-visible {
+    outline-color: #3BE6C0;
+  }
 }

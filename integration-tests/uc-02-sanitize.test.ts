@@ -63,7 +63,7 @@ describe('UC-02 — Sanitizer détecte les secrets', () => {
     expect(report.zonesDetected.length).toBeGreaterThanOrEqual(2)
 
     const openaiZone = report.zonesDetected.find(
-      z => z.type === 'api-key' && z.pattern.toLowerCase().includes('openai')
+      z => z.type === 'api-key' && z.pattern === 'sk-prefixed-key'
     )
     expect(openaiZone).toBeDefined()
     expect(openaiZone?.frameIndices).toContain(1)

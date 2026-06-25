@@ -6,27 +6,29 @@ directories:
   buildResources: build
 files:
   - dist/**/*
-  - resources/**/*
-  - node_modules/**/*
   - "!node_modules/.cache"
-extraResources:
-  - from: resources/ffmpeg
-    to: ffmpeg
-  - from: resources/tesseract
-    to: tesseract
+  # Native modules we deliberately do not ship in v0.1.x-alpha (the renderer
+  # uses mock adapters; including them would just bloat the installer and
+  # potentially crash the renderer when accessed without a rebuild).
+  - "!node_modules/better-sqlite3/**/*"
+  - "!node_modules/uiohook-napi/**/*"
+  - "!node_modules/fluent-ffmpeg/**/*"
+  - "!node_modules/tesseract.js-core/**/*"
+# Skip rebuilding native modules during pack — we never ship them.
+asar: true
+asarUnpack: []
+npmRebuild: false
+buildDependenciesFromSource: false
+# Don't choke if these dirs are empty (they will be in a future release that
+# bundles ffmpeg and tessdata, but the alpha doesn't need them).
+extraResources: []
 win:
+  # `dir` target ONLY: produces release/win-unpacked/ with PresentOtter.exe
+  # directly runnable by double-click. We skip NSIS / portable because both
+  # pull in the winCodeSign toolkit, which can't unpack on Windows without
+  # Developer Mode enabled (symbolic-link privilege required for darwin libs).
+  # NSIS-based installers will return in v0.2 once we ship a signed build.
   target:
-    - target: nsis
+    - target: dir
       arch: [x64]
-  icon: build/icon.ico
-nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
-  installerIcon: build/installer.ico
-  installerHeaderIcon: build/installer.ico
-  createDesktopShortcut: true
-  createStartMenuShortcut: true
-  shortcutName: PresentOtter
-publish:
-  provider: github
-  releaseType: draft
+publish: null
