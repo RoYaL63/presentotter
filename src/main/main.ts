@@ -6,9 +6,11 @@ import {
   globalShortcut,
   ipcMain,
   Menu,
+  nativeImage,
   screen,
   session,
   shell,
+  Tray,
   type Display,
   type WebContents
 } from 'electron'
@@ -65,6 +67,10 @@ import {
 
 let homeWindow: BrowserWindow | null = null
 let toolbarWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+/** True once the user explicitly chose to quit (tray → Quitter / before-quit),
+ *  so closing the last window keeps the app alive in the tray otherwise. */
+let isQuitting = false
 const overlayWindows = new Map<number, BrowserWindow>() // keyed by Display.id
 let cursorInterval: ReturnType<typeof setInterval> | null = null
 let cursorHighlightOn = false
@@ -595,6 +601,15 @@ function registerIpcHandlers(): void {
       }
     }
   )
+
+  // Run in background + start with Windows so capture works any time.
+  ipcMain.handle('settings:get-open-at-login', () =>
+    app.getLoginItemSettings().openAtLogin
+  )
+  ipcMain.handle('settings:set-open-at-login', (_e, enabled: boolean) => {
+    setOpenAtLogin(enabled === true)
+    return app.getLoginItemSettings().openAtLogin
+  })
 
   // Updates — see src/main/updater.ts. The renderer triggers a check,
   // we hit the GitHub Releases API. If the user opts in, we download
@@ -1139,8 +1154,98 @@ function setupDisplayHotPlug(): void {
 }
 
 // ============================================================================
+// System tray — keeps PresentOtter alive in the background so the global
+// capture shortcuts work even with no window open.
+// ============================================================================
+
+/**
+ * Build a small mint disc tray icon in memory (BGRA bitmap) so we don't
+ * need to ship/decode an .ico file. 32×32 with a soft 1px alpha edge.
+ */
+function makeTrayIcon(): Electron.NativeImage {
+  const size = 32
+  const buf = Buffer.alloc(size * size * 4)
+  const cx = (size - 1) / 2
+  const cy = (size - 1) / 2
+  const r = 14
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4
+      const d = Math.hypot(x - cx, y - cy)
+      const a = d <= r ? 1 : d <= r + 1 ? r + 1 - d : 0 // 1px feathered edge
+      // mint #2BD9AC in BGRA
+      buf[i] = 0xac
+      buf[i + 1] = 0xd9
+      buf[i + 2] = 0x2b
+      buf[i + 3] = Math.round(a * 255)
+    }
+  }
+  return nativeImage.createFromBitmap(buf, { width: size, height: size })
+}
+
+function setOpenAtLogin(enabled: boolean): void {
+  // `--hidden` so a login launch starts straight into the tray (no window).
+  app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] })
+  rebuildTrayMenu()
+}
+
+function rebuildTrayMenu(): void {
+  if (tray === null) return
+  const openAtLogin = app.getLoginItemSettings().openAtLogin
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Capture d\'écran', accelerator: 'Alt+Shift+S', click: () => void startCapture('photo') },
+      {
+        label: 'Vidéo de zone',
+        accelerator: 'Alt+Shift+R',
+        click: () => {
+          if (isRegionRecording()) stopRegionRecording()
+          else void startCapture('video')
+        }
+      },
+      { type: 'separator' },
+      { label: 'Ouvrir PresentOtter', click: () => bringHomeToFront() },
+      {
+        label: 'Démarrer avec Windows',
+        type: 'checkbox',
+        checked: openAtLogin,
+        click: (item) => setOpenAtLogin(item.checked)
+      },
+      { type: 'separator' },
+      {
+        label: 'Quitter',
+        click: () => {
+          isQuitting = true
+          app.quit()
+        }
+      }
+    ])
+  )
+}
+
+function createTray(): void {
+  if (tray !== null) return
+  tray = new Tray(makeTrayIcon())
+  tray.setToolTip('PresentOtter — capture & annotation')
+  rebuildTrayMenu()
+  // Left-click opens the app; the menu is on right-click (Windows default).
+  tray.on('click', () => bringHomeToFront())
+}
+
+// ============================================================================
 // Lifecycle
 // ============================================================================
+
+// Single instance: a second launch (double-click while in tray, or login
+// item firing twice) just focuses the running one instead of duplicating.
+const gotInstanceLock = app.requestSingleInstanceLock()
+if (!gotInstanceLock) {
+  app.quit()
+}
+
+app.on('second-instance', () => {
+  bringHomeToFront()
+})
 
 app
   .whenReady()
@@ -1164,7 +1269,15 @@ app
       hideOwnUi: hideOwnUiForCapture,
       isDev
     })
-    homeWindow = createHomeWindow()
+    createTray()
+    // When launched at login (or with --hidden) we start straight into the
+    // tray so capture shortcuts are armed without popping a window.
+    const startHidden =
+      process.argv.includes('--hidden') ||
+      app.getLoginItemSettings().wasOpenedAtLogin
+    if (!startHidden) {
+      homeWindow = createHomeWindow()
+    }
     registerGlobalShortcuts()
     setupDisplayHotPlug()
     startTripleAltDetector(handleTripleAlt)
@@ -1179,14 +1292,27 @@ app
     console.error('[main] startup failed:', err)
   })
 
+app.on('before-quit', () => {
+  isQuitting = true
+})
+
 app.on('will-quit', () => {
   stopCursorTracking()
   stopTripleAltDetector()
   globalShortcut.unregisterAll()
+  if (tray !== null) {
+    tray.destroy()
+    tray = null
+  }
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  // Do NOT quit when the last window closes: PresentOtter lives in the tray
+  // so its global capture shortcuts keep working in the background. The user
+  // exits explicitly via the tray → Quitter (which sets isQuitting). The
+  // capture/editor/recorder windows opening and closing therefore never end
+  // the process.
+  if (isQuitting && process.platform !== 'darwin') {
     app.quit()
   }
 })

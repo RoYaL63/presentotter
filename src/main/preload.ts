@@ -474,6 +474,12 @@ const api = {
     captureVideoOk: boolean
   }> => ipcRenderer.invoke('settings:set-capture-hotkeys', next),
 
+  /** Run at Windows startup (in tray) so capture works any time. */
+  getOpenAtLogin: (): Promise<boolean> =>
+    ipcRenderer.invoke('settings:get-open-at-login'),
+  setOpenAtLogin: (enabled: boolean): Promise<boolean> =>
+    ipcRenderer.invoke('settings:set-open-at-login', enabled),
+
   // ---------- Misc ----------
 
   appVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),

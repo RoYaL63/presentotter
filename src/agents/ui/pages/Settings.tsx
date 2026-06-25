@@ -105,6 +105,7 @@ export function Settings() {
   } | null>(null)
   const [capturing, setCapturing] = useState<HotkeyId | null>(null)
   const [hkWarning, setHkWarning] = useState<string | null>(null)
+  const [openAtLogin, setOpenAtLoginState] = useState(false)
 
   // The renderer never decides on a version on its own. The Vite-
   // injected __APP_VERSION__ is the SAME source as the main process's
@@ -122,10 +123,17 @@ export function Settings() {
     return off
   }, [])
 
-  // Load current capture hotkeys once.
+  // Load current capture hotkeys + startup setting once.
   useEffect(() => {
     void window.api?.getCaptureHotkeys().then(setHotkeys)
+    void window.api?.getOpenAtLogin().then(setOpenAtLoginState)
   }, [])
+
+  const toggleStartup = useCallback(async () => {
+    const next = !openAtLogin
+    const applied = await window.api?.setOpenAtLogin(next)
+    if (applied !== undefined) setOpenAtLoginState(applied)
+  }, [openAtLogin])
 
   // While capturing a new combo, listen for the next key chord.
   useEffect(() => {
@@ -509,6 +517,36 @@ export function Settings() {
             {hkWarning}
           </p>
         )}
+
+        {/* Always-on background / startup */}
+        <div className="flex items-start justify-between gap-4 border-t border-white/[0.06] pt-4">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-otter-50">
+              Démarrer avec Windows
+            </p>
+            <p className="mt-0.5 text-xs text-otter-200/60">
+              PresentOtter reste dans la barre système : les raccourcis de
+              capture fonctionnent à tout moment, même sans fenêtre ouverte.
+              Fermer la fenêtre ne quitte plus l&apos;app (clic droit sur
+              l&apos;icône → Quitter).
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={openAtLogin}
+            onClick={() => void toggleStartup()}
+            className={`relative mt-1 inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+              openAtLogin ? 'bg-kelp-500' : 'bg-white/[0.12]'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                openAtLogin ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
       </div>
 
       {/* Export section */}

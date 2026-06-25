@@ -236,6 +236,8 @@ declare global {
       capturePhotoOk: boolean
       captureVideoOk: boolean
     }>
+    getOpenAtLogin(): Promise<boolean>
+    setOpenAtLogin(enabled: boolean): Promise<boolean>
   }
 
   interface Window {
