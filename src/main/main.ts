@@ -15,6 +15,7 @@ import {
   type WebContents
 } from 'electron'
 import { promises as fsp, accessSync, constants as fsConstants } from 'node:fs'
+import { deflateSync } from 'node:zlib'
 import path from 'path'
 import {
   startTripleAltDetector,
@@ -146,6 +147,7 @@ function createHomeWindow(): BrowserWindow {
     // splash between window-create and renderer-paint.
     backgroundColor: '#E8F4F8',
     title: 'PresentOtter',
+    icon: makeDiscIcon(256),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -1158,29 +1160,64 @@ function setupDisplayHotPlug(): void {
 // capture shortcuts work even with no window open.
 // ============================================================================
 
-/**
- * Build a small mint disc tray icon in memory (BGRA bitmap) so we don't
- * need to ship/decode an .ico file. 32×32 with a soft 1px alpha edge.
- */
-function makeTrayIcon(): Electron.NativeImage {
-  const size = 32
-  const buf = Buffer.alloc(size * size * 4)
-  const cx = (size - 1) / 2
-  const cy = (size - 1) / 2
-  const r = 14
+/** Minimal PNG (RGBA, no compression filter) — reliable across platforms,
+ *  unlike createFromBitmap which silently produced an empty image (so the
+ *  tray fell back to the default Electron logo). */
+function crc32(buf: Buffer): number {
+  let c = ~0
+  for (let i = 0; i < buf.length; i++) {
+    c ^= buf[i] ?? 0
+    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1))
+  }
+  return (~c) >>> 0
+}
+function pngChunk(type: string, data: Buffer): Buffer {
+  const len = Buffer.alloc(4)
+  len.writeUInt32BE(data.length, 0)
+  const typeBuf = Buffer.from(type, 'ascii')
+  const crc = Buffer.alloc(4)
+  crc.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0)
+  return Buffer.concat([len, typeBuf, data, crc])
+}
+function encodePng(width: number, height: number, rgba: Buffer): Buffer {
+  const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(width, 0)
+  ihdr.writeUInt32BE(height, 4)
+  ihdr[8] = 8 // bit depth
+  ihdr[9] = 6 // color type RGBA
+  const stride = width * 4
+  const raw = Buffer.alloc((stride + 1) * height)
+  for (let y = 0; y < height; y++) {
+    rgba.copy(raw, y * (stride + 1) + 1, y * stride, y * stride + stride)
+  }
+  const idat = deflateSync(raw)
+  return Buffer.concat([
+    sig,
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', idat),
+    pngChunk('IEND', Buffer.alloc(0))
+  ])
+}
+
+/** A mint disc icon at the given size — used for the tray and the window
+ *  icon so we don't need to ship an .ico. */
+function makeDiscIcon(size: number): Electron.NativeImage {
+  const rgba = Buffer.alloc(size * size * 4)
+  const c = (size - 1) / 2
+  const r = size / 2 - Math.max(1, size * 0.06)
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const i = (y * size + x) * 4
-      const d = Math.hypot(x - cx, y - cy)
-      const a = d <= r ? 1 : d <= r + 1 ? r + 1 - d : 0 // 1px feathered edge
-      // mint #2BD9AC in BGRA
-      buf[i] = 0xac
-      buf[i + 1] = 0xd9
-      buf[i + 2] = 0x2b
-      buf[i + 3] = Math.round(a * 255)
+      const d = Math.hypot(x - c, y - c)
+      const a = d <= r ? 1 : d <= r + 1.2 ? r + 1.2 - d : 0
+      rgba[i] = 0x2b // R
+      rgba[i + 1] = 0xd9 // G
+      rgba[i + 2] = 0xac // B
+      rgba[i + 3] = Math.round(Math.max(0, Math.min(1, a)) * 255)
     }
   }
-  return nativeImage.createFromBitmap(buf, { width: size, height: size })
+  return nativeImage.createFromBuffer(encodePng(size, size, rgba))
 }
 
 function setOpenAtLogin(enabled: boolean): void {
@@ -1225,7 +1262,7 @@ function rebuildTrayMenu(): void {
 
 function createTray(): void {
   if (tray !== null) return
-  tray = new Tray(makeTrayIcon())
+  tray = new Tray(makeDiscIcon(16))
   tray.setToolTip('PresentOtter — capture & annotation')
   rebuildTrayMenu()
   // Left-click opens the app; the menu is on right-click (Windows default).

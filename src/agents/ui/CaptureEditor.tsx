@@ -220,6 +220,8 @@ export function CaptureEditor(): React.ReactElement {
 
   const baseImgRef = useRef<HTMLImageElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const textInputRef = useRef<HTMLInputElement | null>(null)
+  const captionInputRef = useRef<HTMLInputElement | null>(null)
   const draftRef = useRef<Shape | null>(null)
   const cropRef = useRef<{ a: Pt; b: Pt } | null>(null)
   const [cropBox, setCropBox] = useState<{ a: Pt; b: Pt } | null>(null)
@@ -240,6 +242,22 @@ export function CaptureEditor(): React.ReactElement {
     })
     return off
   }, [])
+
+  // Focus the inline text / caption inputs AFTER the pointerdown that
+  // created them is fully processed. Doing it via rAF (instead of autoFocus)
+  // avoids the browser's default pointerdown focus handling blurring — and
+  // thus closing (onBlur) — the field before the user can type.
+  useEffect(() => {
+    if (textDraft === null) return
+    const id = requestAnimationFrame(() => textInputRef.current?.focus())
+    return () => cancelAnimationFrame(id)
+  }, [textDraft])
+  useEffect(() => {
+    if (captionDraft === null) return
+    const id = requestAnimationFrame(() => captionInputRef.current?.focus())
+    return () => cancelAnimationFrame(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [captionDraft?.shapeIndex])
 
   const deviceFromEvent = useCallback((e: React.PointerEvent): Pt => {
     const c = canvasRef.current
@@ -302,6 +320,7 @@ export function CaptureEditor(): React.ReactElement {
     if (e.button !== 0 || img === null) return
     const p = deviceFromEvent(e)
     if (tool === 'text') {
+      e.preventDefault()
       const r = canvasRef.current?.getBoundingClientRect()
       setTextDraft({
         pos: p,
@@ -311,6 +330,7 @@ export function CaptureEditor(): React.ReactElement {
       return
     }
     if (tool === 'step') {
+      e.preventDefault()
       // Click drops the next numbered disc; a caption field opens next to it.
       const num = shapes.filter((s) => s.t === 'step').length + 1
       const r = Math.max(20, width * 3)
@@ -631,7 +651,7 @@ export function CaptureEditor(): React.ReactElement {
             />
             {textDraft !== null && (
               <input
-                autoFocus
+                ref={textInputRef}
                 type="text"
                 onBlur={(e) => commitText(e.target.value)}
                 onKeyDown={(e) => {
@@ -645,7 +665,7 @@ export function CaptureEditor(): React.ReactElement {
             )}
             {captionDraft !== null && (
               <input
-                autoFocus
+                ref={captionInputRef}
                 type="text"
                 value={captionDraft.value}
                 onChange={(e) => updateCaption(e.target.value)}
