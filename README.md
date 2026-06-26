@@ -17,11 +17,12 @@
 
 ## C'est quoi PresentOtter
 
-Une barre d'outils flottante pour Windows qui se pose par-dessus n'importe quelle application pendant que tu présentes ou que tu enregistres. Trois usages principaux :
+Une barre d'outils flottante pour Windows qui se pose par-dessus n'importe quelle application pendant que tu présentes ou que tu enregistres. Quatre usages principaux :
 
 1. **Annoter en direct** : crayon, formes, flèches, texte, spotlight, surligneur éphémère, par-dessus le bureau ou l'app que tu montres.
-2. **Masquer les secrets en direct** : un scan continu de l'écran repère les clés API, tokens et identifiants, et pose un masque dessus avant que ton audience ne les voie. Plus un outil manuel pour flouter n'importe quelle zone instantanément.
-3. **Enregistrer l'écran** : capture écran/fenêtre/onglet, audio, webcam en incrustation, fond personnalisé, export MP4/WebM.
+2. **Masquer les secrets en direct** : un scan continu de l'écran repère les clés API, tokens et identifiants, et pose un masque dessus avant que ton audience ne les voie. Deux moteurs (UI Automation natif + OCR), plus un outil manuel pour flouter n'importe quelle zone instantanément.
+3. **Capturer l'écran (façon Snipping Tool)** : raccourci global, sélection de zone, copie automatique dans le presse-papier, éditeur (annotations, étapes numérotées, recadrage) et enregistrement vidéo d'une zone. Vit dans la barre système, dispo en permanence.
+4. **Enregistrer l'écran** : capture écran/fenêtre/onglet, audio, webcam en incrustation, fond personnalisé, export MP4/WebM.
 
 Le tout open source, sans compte, sans cloud, tout en local.
 
@@ -46,9 +47,20 @@ Le tout open source, sans compte, sans cloud, tout en local.
 - Undo au clic droit.
 
 ### Masquage des secrets (sanitizer)
-- **LIVE** : scanne l'écran en continu (OCR + motifs), masque les secrets détectés en temps réel, visible aussi par ton audience pendant un partage.
+- **LIVE — deux moteurs au choix** (Paramètres → Méthode de détection) :
+  - **UI Windows** : lit directement le texte des champs de la fenêtre active via les API d'accessibilité (UI Automation). Quasi instantané, exact, très léger.
+  - **OCR** : relit les pixels (Tesseract) ; universel, voit même le texte rendu en image.
+  - **Hybride** (défaut) : les deux, UI Automation pour la rapidité, OCR pour le reste.
 - **Manuel (Floute)** : tu glisses un rectangle sur n'importe quoi, masquage instantané et 100 % fiable.
 - **Manuel (coller)** : colle un texte, il te dit s'il contient un secret avant que tu le partages.
+
+### Capture d'écran (façon Snipping Tool)
+- Raccourci global (`Alt+Maj+S` par défaut, configurable) ou bouton sur l'accueil.
+- Sélecteur **transparent** sur l'écran réel, multi-moniteur, voile + bordure qui suit d'un écran à l'autre.
+- **Copie automatique** dans le presse-papier + sauvegarde dans `Images\PresentOtter\Captures`, notification cliquable.
+- **Éditeur** : crayon, flèche, rectangle, ellipse, surligneur, texte, **étapes numérotées**, **recadrage annulable**, puis copier / enregistrer.
+- **Vidéo de zone** (`Alt+Maj+R`) façon ShareX : aperçu live, micro / webcam / son système, pause, arrêt.
+- **Toujours disponible** : l'app vit dans la barre système ; option « Démarrer avec Windows » pour que la capture marche en permanence.
 
 ### Enregistrement
 - Source : écran entier, fenêtre, ou onglet.
@@ -59,6 +71,10 @@ Le tout open source, sans compte, sans cloud, tout en local.
 
 ### Fenêtre Miroir (pour Meet / Zoom / Teams)
 - Une page qui affiche un flux live de ton écran **avec les annotations déjà incrustées**, à partager dans Meet en mode « une fenêtre ». Voir [pourquoi plus bas](#3-la-fenêtre-miroir--contourner-le-partage-donglet).
+
+### Interface (OtterMorphisme)
+- Design clair claymorphisme + verre liquide, accent menthe, **mode jour / nuit** (bascule soleil/lune, mémorisée).
+- La toolbar flottante garde sa structure compacte et lisible sur tout fond.
 
 ### Mises à jour intégrées
 - Paramètres → « Vérifier les mises à jour » compare ta version à la dernière publiée, télécharge et lance l'installeur.
@@ -82,14 +98,16 @@ L'overlay est en « clic-traversant » par défaut (`setIgnoreMouseEvents(true)`
 **Le principe.** Toutes les ~250 ms : on capture une image de l'écran, on la passe à un moteur OCR (Tesseract) qui lit le texte, puis des expressions régulières + des heuristiques repèrent les secrets, et on pose un masque opaque dessus aux bonnes coordonnées.
 
 **Pourquoi c'est lent.** L'OCR d'une image plein écran prend ~500 ms, parfois plus. C'est le goulot d'étranglement incompressible de cette approche. On a empilé plusieurs optimisations :
-- **Saut sur image stable** : avant chaque OCR, on calcule une empreinte d'image minuscule (vignette 16×9, luminance). Si l'écran n'a pas bougé, on saute complètement l'OCR. En usage réel, ça évite la grande majorité des scans.
+- **OCR de la zone changée** : une empreinte fine (48×27, luminance) repère les cellules qui ont changé depuis le dernier scan ; on n'OCR-ise QUE ce petit rectangle (une clé qui apparaît est masquée en bien moins d'une seconde), avec un scan complet périodique en filet. Si rien ne change, on saute l'OCR entièrement.
 - **Pool collant (hysteresis)** : un masque détecté reste affiché 15 s même si un scan suivant le rate, pour éviter le clignotement (l'OCR est non déterministe d'une frame à l'autre).
 - **Stripe horizontale** : le masque s'étend jusqu'au bord de l'écran, pour que la moindre dérive de l'OCR ne le décale pas hors du secret.
 - **JPEG plutôt que PNG** + **mode texte épars** de Tesseract : quelques dizaines de ms gagnées par scan.
 - **Pré-traitement contraste/niveaux de gris** : les interfaces sombres (texte gris sur fond gris) sont dures à lire pour l'OCR ; on force un quasi noir-sur-blanc avant lecture.
 - **Détecteur d'entropie générique** : toute chaîne longue, aléatoire, mélangeant lettres et chiffres est masquée même sans préfixe connu. Ça attrape une clé « qui ressemble à une clé » sur un site random.
 
-**Ce qui ne marche pas (encore).** Même optimisé, ça reste de l'OCR : ~0,5 à 1 s de latence entre l'apparition d'un secret et son masquage. Pour un vrai « instantané » il faudrait lire le texte directement via les **API d'accessibilité Windows (UI Automation)** au lieu de relire des pixels. C'est précis et rapide (~50 ms) mais ça demande un module natif Windows. C'est le chantier prévu pour la v0.6.
+**La parade rapide : UI Automation.** Pour ne plus dépendre de l'OCR, on lit désormais le texte **directement dans les champs de la fenêtre active** via les API d'accessibilité Windows (UI Automation), pilotées par un petit process PowerShell + .NET (gratuit, intégré, aucun module natif à compiler). C'est quasi instantané et exact, et très léger (scopé à la fenêtre active, lecture groupée). Mode **Hybride** par défaut : UI Automation masque les champs en temps réel, l'OCR couvre le reste (texte rendu en image, canvas, pages web). Repli sans régression : si l'UI Automation échoue, l'OCR continue.
+
+**Ce qui reste imparfait.** L'UI Automation ne voit que les contrôles accessibles (champs de saisie), pas les pixels « dessinés ». L'OCR comble ce trou mais garde sa latence. Et l'outil **Floute manuel** reste l'option 100 % fiable et instantanée quand tu veux garantir un masquage.
 
 **La leçon perf la plus utile :** on appliquait un `backdrop-filter: blur` sur les masques. Sur une fenêtre transparente, ce flou n'a rien à flouter (rien d'opaque dessous) : c'était donc un coût GPU pur pour zéro effet, qui forçait un repaint complet à chaque scan et **gelait l'interface**. Retiré = plus de freeze. Morale : un effet visuel inutile peut coûter très cher.
 
@@ -163,6 +181,8 @@ npm run installer:win   # produit release/PresentOtter-Setup-<version>.exe
 
 | Action | Raccourci |
 |---|---|
+| **Capture d'écran** | **Alt+Maj+S** |
+| **Vidéo d'une zone (démarrer / arrêter)** | **Alt+Maj+R** |
 | Sélection / passe-through | Alt+S |
 | Crayon | Alt+P |
 | Surligneur éphémère | Alt+E |
@@ -204,17 +224,29 @@ Le projet a beaucoup itéré en public. Grandes étapes :
 | **v0.5.19** | Aide au déblocage quand Smart App Control refuse l'installeur. |
 | **v0.5.20** | Outil Floute manuel, correction du gel pendant le scan, détecteur d'entropie générique. |
 | **v0.5.21** | Échap nettoie l'état actif (plus de croix résiduelle). |
-| **v0.6.0** | Début de la refonte design OtterMorphisme (accent menthe), fondations posées. |
+| **v0.6.0–0.6.5** | Refonte design OtterMorphisme sur les pages de l'app (claymorphisme, verre liquide, polices), accent menthe ; sanitizer fiabilisé (lecture quasi-native, suivi multi-écran, correctif tesseract 5.1). |
+| **v0.6.6–0.6.9** | Goutte de navigation, en-têtes de modales à vague, **mode jour/nuit** + contrastes nuit corrigés. |
+| **v1.0** | **Suite Capture type Snipping Tool** (sélection transparente multi-écran, presse-papier, éditeur avec étapes numérotées + recadrage annulable, vidéo de zone façon ShareX, app en barre système + démarrage Windows). **Sanitizer UI Automation** (détection native instantanée) + mode hybride. OCR de la zone changée (masquage < 1 s). Stabilisation + correctifs CI. |
 
 Détail complet par version dans la [page Releases](https://github.com/RoYaL63/presentotter/releases).
 
 ---
 
-## Ce qui arrive (roadmap)
+## Roadmap
 
-- **Sanitizer automatique instantané** : lecture du texte via les API d'accessibilité Windows (UI Automation) au lieu de l'OCR, pour passer de ~0,5 s à ~50 ms et une fiabilité bien supérieure.
-- **Refonte design OtterMorphisme** : les pages de l'app adoptent un design clair claymorphisme + verre liquide, mode jour/nuit, accent menthe. La toolbar flottante garde sa structure lisible et change juste sa couleur d'action.
-- **Stabilisation v1.0**.
+### Fait (v1.0)
+- ✅ **Sanitizer UI Automation** : détection native quasi-instantanée des secrets dans les champs, + mode hybride avec l'OCR.
+- ✅ **OCR de la zone changée** : masquage en moins d'une seconde au lieu de ~15 s.
+- ✅ **Suite Capture (Snipping Tool)** : sélection de zone, presse-papier, éditeur (annotations, étapes numérotées, recadrage annulable), vidéo de zone.
+- ✅ **App en barre système** + démarrage avec Windows (capture dispo en permanence).
+- ✅ **Design OtterMorphisme** + mode jour/nuit sur l'app.
+
+### En cours / à venir
+- **Bibliothèque des captures** : retrouver photos et vidéos de zone dans l'app.
+- **Caméra virtuelle** pour Meet/Zoom (apparaître comme une source vidéo) — nécessite un pilote signé, à l'étude.
+- **UI Automation plus large** : lire aussi certains contrôles texte hors champs de saisie.
+- **Polish design** : bulles ambiantes, passe d'accessibilité fine du mode nuit.
+- **Build signé** pour lever les blocages SmartScreen / Smart App Control.
 
 ---
 
@@ -230,6 +262,8 @@ Détail complet par version dans la [page Releases](https://github.com/RoYaL63/p
 | Enregistrement | MediaRecorder + canvas de composition |
 | Segmentation webcam | MediaPipe Tasks Vision |
 | OCR | Tesseract.js 5 |
+| Détection native | Windows UI Automation (PowerShell + .NET) |
+| Capture photo | desktopCapturer + nativeImage.crop |
 | Raccourcis globaux | uiohook-napi |
 | Packaging | @electron/packager + Inno Setup |
 
