@@ -5,6 +5,8 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  # Manual trigger only for the heavy installer build (see build-electron).
+  workflow_dispatch:
 
 jobs:
   lint-typecheck:
@@ -69,7 +71,10 @@ jobs:
   build-electron:
     runs-on: windows-latest
     needs: unit-tests
-    if: github.ref == 'refs/heads/main'
+    # MANUAL only. Building the installer on every push to main spammed
+    # failure mails (and is redundant with the Release workflow that builds
+    # on version tags). Trigger from the Actions tab when needed.
+    if: github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

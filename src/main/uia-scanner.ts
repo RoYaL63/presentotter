@@ -3,7 +3,6 @@ import { writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { screen } from 'electron'
-import { PATTERNS } from '../agents/sanitizer/patterns'
 
 /**
  * UI Automation scanner — the FAST detection path (alongside OCR).
@@ -21,14 +20,19 @@ import { PATTERNS } from '../agents/sanitizer/patterns'
  *
  * OCR stays as the universal fallback for rendered text / canvas / page
  * content that has no accessible value (hybrid mode runs both).
+ *
+ * This module is a THIN OS bridge only: it collects {text, rect} and hands
+ * them to the renderer, which runs the secret detection (so the main-process
+ * tsc build stays self-contained — no cross-package import).
  */
 
-export interface UiaMask {
+/** A text-bearing UI element + its rect already in virtual-screen DIP. */
+export interface UiaElement {
+  text: string
   x: number
   y: number
   width: number
   height: number
-  label: string
 }
 
 // PowerShell UIA loop. Scoped to the foreground window, Edit + ComboBox
@@ -93,46 +97,8 @@ while ($true) {
 `
 
 let proc: ChildProcess | null = null
-let onMasksCb: ((masks: UiaMask[]) => void) | null = null
+let onElementsCb: ((els: UiaElement[]) => void) | null = null
 let stdoutBuf = ''
-
-/** Compact entropy/charset test for unknown key-shaped tokens. */
-function looksLikeSecret(token: string): boolean {
-  const t = token.trim()
-  if (t.length < 18 || t.length > 200) return false
-  if (!/^[A-Za-z0-9_\-.+/=]+$/.test(t)) return false
-  if (/^https?:\/\//i.test(t)) return false
-  if (/@/.test(t)) return false
-  if (/[\\/]/.test(t) && !/[_\-]/.test(t)) return false // looks like a path
-  if (/^\d+$/.test(t)) return false
-  const hasLower = /[a-z]/.test(t)
-  const hasUpper = /[A-Z]/.test(t)
-  const hasDigit = /[0-9]/.test(t)
-  const classes = (hasLower ? 1 : 0) + (hasUpper ? 1 : 0) + (hasDigit ? 1 : 0)
-  if (classes < 2) return false
-  // Shannon entropy
-  const freq: Record<string, number> = {}
-  for (const c of t) freq[c] = (freq[c] ?? 0) + 1
-  let h = 0
-  for (const k in freq) {
-    const p = (freq[k] ?? 0) / t.length
-    h -= p * Math.log2(p)
-  }
-  return h >= 3.5
-}
-
-/** Does this field text contain a secret? Returns a label or null. */
-function detect(text: string): string | null {
-  for (const pattern of PATTERNS) {
-    pattern.regex.lastIndex = 0
-    if (pattern.regex.test(text)) return pattern.name
-  }
-  // Entropy fallback for provider formats we don't enumerate.
-  for (const token of text.split(/\s+/)) {
-    if (looksLikeSecret(token)) return 'entropy'
-  }
-  return null
-}
 
 function handleLine(line: string): void {
   const s = line.trim()
@@ -146,12 +112,10 @@ function handleLine(line: string): void {
   let els = parsed?.els
   if (els === undefined || els === null) return
   if (!Array.isArray(els)) els = [els]
-  const masks: UiaMask[] = []
+  const out: UiaElement[] = []
   for (const raw of els as Array<Record<string, unknown>>) {
     const text = typeof raw.t === 'string' ? raw.t : ''
-    if (text.length < 6) continue
-    const label = detect(text)
-    if (label === null) continue
+    if (text.length < 4) continue
     const phys = {
       x: Math.round(Number(raw.x) || 0),
       y: Math.round(Number(raw.y) || 0),
@@ -165,20 +129,20 @@ function handleLine(line: string): void {
     } catch {
       /* fall back to physical if conversion unavailable */
     }
-    masks.push({
+    out.push({
+      text,
       x: Math.floor(dip.x),
       y: Math.floor(dip.y),
       width: Math.ceil(dip.width),
-      height: Math.ceil(dip.height),
-      label: `uia:${label}`
+      height: Math.ceil(dip.height)
     })
   }
-  if (masks.length > 0) onMasksCb?.(masks)
+  if (out.length > 0) onElementsCb?.(out)
 }
 
-export function startUia(onMasks: (masks: UiaMask[]) => void): void {
+export function startUia(onElements: (els: UiaElement[]) => void): void {
   if (proc !== null) return
-  onMasksCb = onMasks
+  onElementsCb = onElements
   stdoutBuf = ''
   const file = path.join(os.tmpdir(), 'presentotter-uia.ps1')
   try {
@@ -237,7 +201,7 @@ export function stopUia(): void {
     }
     proc = null
   }
-  onMasksCb = null
+  onElementsCb = null
   stdoutBuf = ''
 }
 

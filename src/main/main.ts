@@ -618,8 +618,8 @@ function registerIpcHandlers(): void {
   // is on in 'uia' / 'hybrid' mode; main streams detected masks back to the
   // toolbar, which feeds them into the same sticky-mask pool as OCR.
   ipcMain.on('live:uia-start', (e) => {
-    startUia((masks) => {
-      if (!e.sender.isDestroyed()) e.sender.send('live:uia-masks', masks)
+    startUia((elements) => {
+      if (!e.sender.isDestroyed()) e.sender.send('live:uia-elements', elements)
     })
   })
   ipcMain.on('live:uia-stop', () => stopUia())

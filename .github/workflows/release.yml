@@ -1,9 +1,11 @@
 name: Release
 
+# Manual only. Auto-building on every version tag spammed failure mails
+# (electron-builder's "dir" target + winCodeSign quirks). Releases are cut
+# locally with `npm run installer:win` (Inno Setup) and published with the
+# gh CLI. Trigger this from the Actions tab if you ever want the CI build.
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  workflow_dispatch:
 
 jobs:
   build-release:

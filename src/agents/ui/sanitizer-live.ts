@@ -49,6 +49,57 @@ export interface LiveMask {
   label: string
 }
 
+/** A text-bearing UI element read by the native UI-Automation scanner:
+ *  its full text + on-screen rect already in virtual-screen CSS (DIP). */
+export interface UiaTextElement {
+  text: string
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * Detection for the UI-Automation path. Each element carries the COMPLETE
+ * text of a field, so detection is a direct regex/entropy test (no OCR word
+ * reassembly). A hit masks the whole field rect — exactly what we want for a
+ * credential typed/pasted into an input. Runs in the renderer so it reuses
+ * the canonical PATTERNS (keeping the main process free of business logic,
+ * which also keeps its tsc output structure intact).
+ */
+export function detectMasksFromElements(elements: UiaTextElement[]): LiveMask[] {
+  const masks: LiveMask[] = []
+  for (const el of elements) {
+    const text = typeof el.text === 'string' ? el.text : ''
+    if (text.trim().length < 4) continue
+    let label: string | null = null
+    for (const pattern of PATTERNS) {
+      pattern.regex.lastIndex = 0
+      if (pattern.regex.test(text)) {
+        label = pattern.name
+        break
+      }
+    }
+    if (label === null) {
+      for (const token of text.split(/\s+/)) {
+        if (looksLikeSecretToken(token)) {
+          label = 'entropy'
+          break
+        }
+      }
+    }
+    if (label === null) continue
+    masks.push({
+      x: Math.floor(el.x),
+      y: Math.floor(el.y),
+      width: Math.ceil(el.width),
+      height: Math.ceil(el.height),
+      label: `uia:${label}`
+    })
+  }
+  return mergeOverlappingMasks(masks)
+}
+
 export interface ScanResult {
   masks: LiveMask[]
   /** Bounding boxes of every word OCR'd this cycle (virtual-screen CSS).

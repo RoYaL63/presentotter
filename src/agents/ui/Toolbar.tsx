@@ -24,7 +24,11 @@ import {
   X
 } from 'lucide-react'
 import { Mascot } from './components/Mascot'
-import { SanitizerLiveEngine, type ScanResult } from './sanitizer-live'
+import {
+  SanitizerLiveEngine,
+  detectMasksFromElements,
+  type ScanResult
+} from './sanitizer-live'
 import { useToolSettingsStore, type ToolId as SettingsToolId } from './stores/useToolSettingsStore'
 
 const TOOLS = [
@@ -338,10 +342,12 @@ export function Toolbar() {
     [ingestMasks]
   )
 
-  // UI-Automation masks (from the native field scanner in main) feed the
+  // UI-Automation elements (from the native field scanner in main) are
+  // detected here (renderer keeps the canonical PATTERNS), then feed the
   // SAME sticky pool as OCR while LIVE is on.
   useEffect(() => {
-    const off = apiRef.current?.onUiaMasks((masks) => {
+    const off = apiRef.current?.onUiaElements((elements) => {
+      const masks = detectMasksFromElements(elements)
       if (masks.length > 0) ingestMasks(masks)
     })
     return off
@@ -402,7 +408,7 @@ export function Toolbar() {
       setLivePhase('acquiring')
       const mode = sanitizerSettings.detectionMode
       // Fast path: native Windows UI-Automation field scanner (instant,
-      // light). Masks stream back via onUiaMasks into the sticky pool.
+      // light). Detected fields stream back via onUiaElements.
       if (mode !== 'ocr') {
         api.startUia()
       }

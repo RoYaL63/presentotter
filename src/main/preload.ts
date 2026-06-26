@@ -114,17 +114,17 @@ const api = {
    *  scanner; masks (virtual-screen DIP) arrive via onUiaMasks. */
   startUia: () => ipcRenderer.send('live:uia-start'),
   stopUia: () => ipcRenderer.send('live:uia-stop'),
-  onUiaMasks: (
+  onUiaElements: (
     cb: (
-      masks: Array<{ x: number; y: number; width: number; height: number; label: string }>
+      els: Array<{ text: string; x: number; y: number; width: number; height: number }>
     ) => void
   ) => {
     const handler = (
       _e: unknown,
-      masks: Array<{ x: number; y: number; width: number; height: number; label: string }>
-    ): void => cb(masks)
-    ipcRenderer.on('live:uia-masks', handler)
-    return () => ipcRenderer.off('live:uia-masks', handler)
+      els: Array<{ text: string; x: number; y: number; width: number; height: number }>
+    ): void => cb(els)
+    ipcRenderer.on('live:uia-elements', handler)
+    return () => ipcRenderer.off('live:uia-elements', handler)
   },
 
   // ---------- Recording ----------
