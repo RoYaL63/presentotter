@@ -566,6 +566,9 @@ export function Settings() {
             id="format"
             value={format}
             onChange={(e) => setFormat(e.target.value as ExportFormat)}
+            // colorScheme:dark forces the native dropdown popup to render
+            // dark instead of the default white panel.
+            style={{ colorScheme: 'dark' }}
             className="rounded-xl border border-white/[0.1] bg-white/[0.04] backdrop-blur-xl px-4 py-3 text-sm text-otter-50 outline-none transition-colors hover:bg-white/[0.08] focus:border-otter-400/50"
           >
             <option value="mp4" className="bg-deep-900">MP4 — universel</option>

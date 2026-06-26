@@ -43,6 +43,21 @@ const GROUPS: ShortcutGroup[] = [
     ]
   },
   {
+    title: 'Capture & enregistrement',
+    rows: [
+      {
+        combo: ['Alt', 'Maj', 'S'],
+        label: 'Capture d\'écran',
+        note: 'Sélection de zone → presse-papier + éditeur'
+      },
+      {
+        combo: ['Alt', 'Maj', 'R'],
+        label: 'Enregistrer une zone (vidéo)',
+        note: 'Démarrer / arrêter l\'enregistrement'
+      }
+    ]
+  },
+  {
     title: 'Manipuler les annotations',
     rows: [
       { combo: ['Alt', 'Z'], label: 'Annuler le dernier trait' },

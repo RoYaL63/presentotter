@@ -1185,7 +1185,8 @@ function WebcamConfig({
               value={deviceId ?? ''}
               onChange={(e) => onSelectDevice(e.target.value)}
               disabled={!enabled}
-              className="flex-1 rounded-lg border border-white/60 bg-white/70 px-2 py-1 text-[11px] text-sea-700"
+              style={{ colorScheme: 'dark' }}
+              className="flex-1 rounded-lg border border-white/[0.12] bg-deep-900/80 px-2 py-1 text-[11px] text-otter-50"
             >
               {devices.map((d) => (
                 <option key={d.deviceId} value={d.deviceId}>
@@ -1838,7 +1839,8 @@ function ActiveView({
             <select
               value={bgPresetId}
               onChange={(e) => onBgPresetChange(e.target.value)}
-              className="rounded-full bg-white/70 px-2 py-1 text-[10px] font-semibold text-sea-700 ring-1 ring-white/60"
+              style={{ colorScheme: 'dark' }}
+              className="rounded-full bg-deep-900/80 px-2 py-1 text-[10px] font-semibold text-otter-50 ring-1 ring-white/[0.12]"
             >
               {BG_PRESETS.map((p) => (
                 <option key={p.id} value={p.id}>
