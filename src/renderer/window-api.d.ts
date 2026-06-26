@@ -28,6 +28,7 @@ declare global {
   interface PresentOtterAPI {
     getRole(): Promise<'home' | 'toolbar' | 'overlay' | 'console'>
     appVersion(): Promise<string>
+    setAppIcon(dataUrl: string): void
 
     // ---------- Mirror page (embedded in Home) ----------
     mirrorListDisplays(): Promise<

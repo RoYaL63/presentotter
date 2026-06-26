@@ -14,7 +14,7 @@ import {
   type Display,
   type WebContents
 } from 'electron'
-import { promises as fsp, accessSync, constants as fsConstants } from 'node:fs'
+import { promises as fsp, accessSync, writeFileSync, constants as fsConstants } from 'node:fs'
 import { deflateSync } from 'node:zlib'
 import path from 'path'
 import {
@@ -148,7 +148,7 @@ function createHomeWindow(): BrowserWindow {
     // splash between window-create and renderer-paint.
     backgroundColor: '#E8F4F8',
     title: 'PresentOtter',
-    icon: makeDiscIcon(256),
+    icon: loadCachedAppIcon() ?? makeDiscIcon(256),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -583,6 +583,8 @@ function reRegisterShortcuts(): void {
 function registerIpcHandlers(): void {
   ipcMain.handle('window:get-role', (event) => getWindowRole(event.sender))
   ipcMain.handle('app:version', () => app.getVersion())
+  // Renderer hands us the mascot rasterized to PNG → tray + window icon.
+  ipcMain.on('app:set-icon', (_e, dataUrl: string) => applyAppIcon(dataUrl))
   ipcMain.handle('toolbar:is-enabled', () => toolbarWindow !== null && !toolbarWindow.isDestroyed())
 
   // Capture hotkeys — read/rebind. Persisted in app-settings (userData).
@@ -1231,6 +1233,40 @@ function makeDiscIcon(size: number): Electron.NativeImage {
   return nativeImage.createFromBuffer(encodePng(size, size, rgba))
 }
 
+/** Where the renderer-rasterized mascot PNG is cached so the otter icon is
+ *  available from the very first frame on subsequent launches. */
+function appIconCachePath(): string {
+  return path.join(app.getPath('userData'), 'app-icon.png')
+}
+
+/** The cached mascot icon if we have one, else null (→ disc fallback). */
+function loadCachedAppIcon(): Electron.NativeImage | null {
+  try {
+    const img = nativeImage.createFromPath(appIconCachePath())
+    return img.isEmpty() ? null : img
+  } catch {
+    return null
+  }
+}
+
+/** Receive the PNG icon from the renderer (it can decode the webp mascot,
+ *  main can't): cache it and apply it to the tray + Home window. */
+function applyAppIcon(dataUrl: string): void {
+  const img = nativeImage.createFromDataURL(dataUrl)
+  if (img.isEmpty()) return
+  try {
+    writeFileSync(appIconCachePath(), img.toPNG())
+  } catch {
+    /* cache write failed — icon still applies for this session */
+  }
+  if (tray !== null && !tray.isDestroyed()) {
+    tray.setImage(img.resize({ width: 16, height: 16 }))
+  }
+  if (homeWindow !== null && !homeWindow.isDestroyed()) {
+    homeWindow.setIcon(img.resize({ width: 256, height: 256 }))
+  }
+}
+
 function setOpenAtLogin(enabled: boolean): void {
   // `--hidden` so a login launch starts straight into the tray (no window).
   app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] })
@@ -1273,7 +1309,8 @@ function rebuildTrayMenu(): void {
 
 function createTray(): void {
   if (tray !== null) return
-  tray = new Tray(makeDiscIcon(16))
+  const cached = loadCachedAppIcon()
+  tray = new Tray(cached !== null ? cached.resize({ width: 16, height: 16 }) : makeDiscIcon(16))
   tray.setToolTip('PresentOtter — capture & annotation')
   rebuildTrayMenu()
   // Left-click opens the app; the menu is on right-click (Windows default).

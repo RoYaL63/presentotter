@@ -6,6 +6,7 @@ import { Overlay } from '../agents/ui/Overlay'
 import { CaptureOverlay } from '../agents/ui/CaptureOverlay'
 import { CaptureEditor } from '../agents/ui/CaptureEditor'
 import { RegionRecorder } from '../agents/ui/RegionRecorder'
+import mascotUrl from './assets/mascot.webp'
 import './index.css'
 
 /**
@@ -37,6 +38,41 @@ function detectMode(): Mode {
 
 const mode = detectMode()
 document.documentElement.dataset['mode'] = mode
+
+/**
+ * The main process can't decode the .webp mascot for the tray / taskbar
+ * icon. So in the Home window (which Chromium renders, webp included) we
+ * rasterize the mascot to a PNG once and hand it to main, which caches it
+ * and uses it everywhere. No native dependency, no extra asset file.
+ */
+function sendAppIconToMain(): void {
+  try {
+    const img = new Image()
+    img.src = mascotUrl
+    void img
+      .decode()
+      .then(() => {
+        const size = 256
+        const canvas = document.createElement('canvas')
+        canvas.width = size
+        canvas.height = size
+        const ctx = canvas.getContext('2d')
+        if (ctx === null) return
+        // The mascot is square; draw it to fill the icon canvas.
+        ctx.drawImage(img, 0, 0, size, size)
+        window.api?.setAppIcon(canvas.toDataURL('image/png'))
+      })
+      .catch(() => {
+        /* mascot failed to decode — main keeps its fallback icon */
+      })
+  } catch {
+    /* ignore */
+  }
+}
+
+if (mode === 'home') {
+  sendAppIconToMain()
+}
 
 const Root: () => React.ReactElement = () => {
   if (mode === 'toolbar') return <Toolbar />

@@ -499,6 +499,10 @@ const api = {
 
   // ---------- Misc ----------
 
+  /** Hand main a PNG data URL of the app icon (rasterized from the webp
+   *  mascot by the renderer, since main can't decode webp). */
+  setAppIcon: (dataUrl: string) => ipcRenderer.send('app:set-icon', dataUrl),
+
   appVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
 
   // ---------- Self-update ----------
