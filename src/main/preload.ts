@@ -157,6 +157,23 @@ const api = {
     ipcRenderer.send('overlay:set-live-masks', zones),
   clearLiveMasks: () => ipcRenderer.send('overlay:clear-live-masks'),
 
+  /** Overlay-side: the user clicked the ✕ on a mask. Main forwards this
+   *  to the toolbar (the mask source) so it suppresses the region instead
+   *  of re-masking it on the next scan. */
+  dismissLiveMask: (region: { x: number; y: number; width: number; height: number }) =>
+    ipcRenderer.send('sanitizer:dismiss-mask', region),
+  /** Toolbar-side: a dismissal forwarded from an overlay. */
+  onDismissLiveMask: (
+    cb: (region: { x: number; y: number; width: number; height: number }) => void
+  ) => {
+    const handler = (
+      _e: unknown,
+      region: { x: number; y: number; width: number; height: number }
+    ) => cb(region)
+    ipcRenderer.on('sanitizer:dismiss-mask', handler)
+    return () => ipcRenderer.off('sanitizer:dismiss-mask', handler)
+  },
+
   /** Diagnostic feed: the OCR word boxes from the last scan. The
    *  overlay only renders these if its local debugOcr flag is on. */
   setLiveOcrWords: (

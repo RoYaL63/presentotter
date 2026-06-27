@@ -68,6 +68,15 @@ declare global {
 
     setLiveMasks(zones: LiveMask[]): void
     clearLiveMasks(): void
+    dismissLiveMask(region: {
+      x: number
+      y: number
+      width: number
+      height: number
+    }): void
+    onDismissLiveMask(
+      cb: (region: { x: number; y: number; width: number; height: number }) => void
+    ): () => void
     onSetLiveMasks(cb: (zones: LiveMask[]) => void): () => void
     onClearLiveMasks(cb: () => void): () => void
     setLiveOcrWords(

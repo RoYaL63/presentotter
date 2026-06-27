@@ -952,6 +952,13 @@ function registerIpcHandlers(): void {
   ipcMain.on('overlay:clear-live-masks', () => {
     forwardToOverlays('overlay:clear-live-masks')
   })
+  // Overlay → toolbar: a mask was dismissed by the user. Route it to the
+  // toolbar window (where masks are generated) so it stops re-emitting it.
+  ipcMain.on('sanitizer:dismiss-mask', (_e, region: unknown) => {
+    if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
+      toolbarWindow.webContents.send('sanitizer:dismiss-mask', region)
+    }
+  })
   ipcMain.on('overlay:set-live-ocr-words', (_e, words: unknown) => {
     forwardToOverlays('overlay:set-live-ocr-words', words)
   })

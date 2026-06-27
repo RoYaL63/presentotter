@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Droplet, X } from 'lucide-react'
 
 type ToolId =
   | 'select'
@@ -133,6 +134,13 @@ export function Overlay() {
   // pixels behind the overlay) rather than canvas fills — gives a real
   // frosted-glass blur on the secret, not an opaque black rectangle.
   const [liveMasks, setLiveMasks] = useState<LiveMask[]>([])
+  // The overlay is click-through in select/spotlight mode, so a mask's ✕
+  // can't be clicked unless we momentarily make the window interactive
+  // while the cursor hovers it. toolRef tells us the "base" interactivity
+  // (drawing tools already capture the pointer), closeHoverRef tracks
+  // whether we're currently over a ✕ so we only toggle on real changes.
+  const toolRef = useRef<ToolId>('select')
+  const closeHoverRef = useRef(false)
   const overlayOriginRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
   const idCounter = useRef(0)
   const animationRef = useRef<number | null>(null)
@@ -153,7 +161,10 @@ export function Overlay() {
   useEffect(() => {
     const api = window.api
     if (!api) return
-    const off1 = api.onSetTool((t) => setTool(t))
+    const off1 = api.onSetTool((t) => {
+      setTool(t)
+      toolRef.current = t
+    })
     const off2 = api.onSetColor((c) => setColor(c))
     const off3 = api.onSetOpacity((o) => setOpacity(o))
     const off4 = api.onSetStrokeWidth((w) => {
@@ -342,6 +353,41 @@ export function Overlay() {
     update()
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
+  }, [])
+
+  // Make a mask's ✕ clickable on the otherwise click-through overlay.
+  // In select/spotlight mode the window ignores the mouse (forward:true),
+  // so it still delivers move events: when the cursor is over a ✕ we flip
+  // the window interactive, and back to click-through when it leaves. In a
+  // drawing tool the window is already interactive, so we leave it alone.
+  useEffect(() => {
+    const onMove = (e: MouseEvent): void => {
+      const base =
+        toolRef.current !== 'select' && toolRef.current !== 'spotlight'
+      if (base) return
+      if (liveMasksRef.current.length === 0) {
+        if (closeHoverRef.current) {
+          closeHoverRef.current = false
+          window.api?.setOverlayInteractive(false)
+        }
+        return
+      }
+      const el = document.elementFromPoint(e.clientX, e.clientY)
+      const overClose =
+        el instanceof Element && el.closest('[data-mask-close]') !== null
+      if (overClose !== closeHoverRef.current) {
+        closeHoverRef.current = overClose
+        window.api?.setOverlayInteractive(overClose)
+      }
+    }
+    window.addEventListener('mousemove', onMove)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      if (closeHoverRef.current) {
+        closeHoverRef.current = false
+        window.api?.setOverlayInteractive(false)
+      }
+    }
   }, [])
 
   // Animation pump — only runs when something is actually animating
@@ -592,6 +638,21 @@ export function Overlay() {
   // The canvas only receives pointer events when `tool !== 'select'`.
   // We don't need to gate it here because the main process toggles
   // setIgnoreMouseEvents on the window itself.
+  // Remove a single sanitizer mask. Drop it locally for instant feedback,
+  // then tell the toolbar so its detector suppresses the region instead of
+  // re-masking it on the next scan.
+  const dismissMask = (mask: LiveMask): void => {
+    const remaining = liveMasksRef.current.filter((m) => m !== mask)
+    liveMasksRef.current = remaining
+    setLiveMasks(remaining)
+    window.api?.dismissLiveMask({
+      x: mask.x,
+      y: mask.y,
+      width: mask.width,
+      height: mask.height
+    })
+  }
+
   const commitTextInput = () => {
     if (textInput === null) return
     const value = textInput.value.trim()
@@ -679,14 +740,14 @@ export function Overlay() {
           )
         })}
 
-      {/* Live sanitizer masks — DOM layer with a solid frosted-glass-like
-          background. We tried CSS backdrop-filter alone, but on transparent
-          Electron windows it has nothing real to blur (the WebContents itself
-          has no opaque siblings underneath the DOM element) so it falls back
-          to a no-op. Solution: paint an opaque-ish frosted gradient with a
-          subtle striped texture overlay, giving a "matte glass" look that
-          reliably hides the pixels beneath. Translated from absolute screen
-          coords to this overlay's local frame. */}
+      {/* Live sanitizer masks — DOM layer with an opaque "deep water"
+          gradient that reliably hides the pixels behind (a transparent
+          Electron overlay has no opaque siblings to blur, so backdrop-filter
+          is a no-op — and animating it on every scan caused freezes). The
+          aquatic look is pure static CSS: a teal gradient + caustic sheen +
+          a thin wave line. Each mask carries a ✕ to dismiss it; the hover
+          bridge above flips the window interactive so the click lands.
+          Coords are translated from absolute screen space to local. */}
       {liveMasks.map((mask, idx) => {
         const localX = mask.x - overlayOriginRef.current.x
         const localY = mask.y - overlayOriginRef.current.y
@@ -698,6 +759,9 @@ export function Overlay() {
         ) {
           return null
         }
+        const showLabel = mask.height >= 18
+        const showWave = mask.height >= 24
+        const showClose = mask.width >= 28 && mask.height >= 16
         return (
           <div
             key={`live-mask-${idx}-${mask.x}-${mask.y}`}
@@ -708,42 +772,113 @@ export function Overlay() {
               width: mask.width,
               height: mask.height,
               background:
-                // Otter-morphism mask: deep-sea base with cream stripes,
-                // visually reads "frosted protective shield" rather than
-                // the previous near-black bar.
-                'repeating-linear-gradient(135deg, rgba(13,53,72,0.95) 0px, rgba(13,53,72,0.95) 7px, rgba(245,230,211,0.92) 7px, rgba(245,230,211,0.92) 14px)',
-              // NO backdrop-filter: on a transparent Electron overlay there
-              // are no opaque siblings beneath the DOM node, so blur() has
-              // nothing to sample and is a pure-cost no-op. Worse, applying
-              // it to several wide row-stripes forced a full compositor
-              // repaint on every scan → the freeze the user reported. The
-              // solid gradient above already hides the pixels behind.
-              border: '1.5px dashed rgba(255, 139, 123, 0.95)', // coral pop
-              borderRadius: 8,
+                'linear-gradient(155deg, rgba(7,42,63,0.97) 0%, rgba(10,74,92,0.96) 48%, rgba(17,116,120,0.95) 100%)',
+              border: '1.5px solid rgba(140,228,236,0.6)',
+              borderRadius: 10,
               boxShadow:
-                'inset 0 1px 0 rgba(255,255,255,0.18), 0 0 0 1px rgba(255,139,123,0.35), 0 6px 18px rgba(13,53,72,0.40)',
+                'inset 0 1px 0 rgba(200,248,252,0.35), inset 0 -10px 16px rgba(3,26,40,0.55), 0 6px 18px rgba(6,38,56,0.45)',
               pointerEvents: 'none',
               overflow: 'hidden'
             }}
             aria-label={`Zone masquée : ${mask.label}`}
           >
-            {mask.height >= 18 && (
+            {/* Caustic sheen — soft light at the surface, deeper teal below. */}
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                backgroundImage:
+                  'radial-gradient(130% 80% at 12% -20%, rgba(190,244,250,0.20), transparent 55%), radial-gradient(90% 70% at 95% 130%, rgba(34,150,160,0.34), transparent 60%)',
+                pointerEvents: 'none'
+              }}
+              aria-hidden
+            />
+            {/* Water-surface ripple near the bottom. */}
+            {showWave && (
+              <svg
+                width="100%"
+                height="100%"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                style={{ position: 'absolute', inset: 0, opacity: 0.5, pointerEvents: 'none' }}
+                aria-hidden
+              >
+                <path
+                  d="M0,72 Q25,62 50,72 T100,72"
+                  fill="none"
+                  stroke="rgba(176,238,245,0.5)"
+                  strokeWidth="1.4"
+                />
+                <path
+                  d="M0,84 Q25,76 50,84 T100,84"
+                  fill="none"
+                  stroke="rgba(120,210,220,0.4)"
+                  strokeWidth="1.2"
+                />
+              </svg>
+            )}
+            {showLabel && (
               <span
                 style={{
                   position: 'absolute',
                   top: 2,
-                  left: 4,
+                  left: 6,
+                  right: showClose ? 22 : 6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 3,
                   fontSize: 10,
                   fontWeight: 700,
-                  color: '#FFE0D9', // coral-100 — readable on the dark stripes
-                  textShadow: '0 1px 2px rgba(0,0,0,0.9)',
-                  letterSpacing: 0.3,
-                  pointerEvents: 'none',
-                  whiteSpace: 'nowrap'
+                  color: '#DFFAFF',
+                  textShadow: '0 1px 2px rgba(0,0,0,0.85)',
+                  letterSpacing: 0.2,
+                  pointerEvents: 'none'
                 }}
               >
-                🛡 {mask.label}
+                <Droplet size={10} strokeWidth={2.25} style={{ flexShrink: 0 }} />
+                <span
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {mask.label}
+                </span>
               </span>
+            )}
+            {showClose && (
+              <button
+                type="button"
+                data-mask-close="1"
+                title="Retirer ce masque"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  dismissMask(mask)
+                }}
+                style={{
+                  position: 'absolute',
+                  top: 2,
+                  right: 2,
+                  width: 15,
+                  height: 15,
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: 9999,
+                  background: 'rgba(6,28,40,0.82)',
+                  border: '1px solid rgba(150,232,240,0.75)',
+                  color: '#E8FCFF',
+                  cursor: 'pointer',
+                  pointerEvents: 'auto',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.5)',
+                  lineHeight: 0
+                }}
+              >
+                <X size={9} strokeWidth={3} />
+              </button>
             )}
           </div>
         )
@@ -915,23 +1050,27 @@ function drawShape(
     }
     case 'blur': {
       // Manual privacy box. Real canvas pixels (so screen-share tools
-      // capture it), opaque so nothing leaks through. Frosted look:
-      // deep-sea fill + diagonal cream stripes + coral dashed border,
-      // matching the auto-sanitizer masks' visual language.
+      // capture it), opaque so nothing leaks through. Aquatic look:
+      // deep-water gradient + soft caustic hatch + aqua border, matching
+      // the auto-sanitizer masks' visual language.
       const x = Math.min(shape.from.x, shape.to.x)
       const y = Math.min(shape.from.y, shape.to.y)
       const w = Math.abs(shape.to.x - shape.from.x)
       const h = Math.abs(shape.to.y - shape.from.y)
       ctx.save()
-      // Solid base — guarantees the pixels underneath are hidden.
-      ctx.fillStyle = 'rgba(13, 53, 72, 0.97)'
+      // Solid deep-water gradient — guarantees the pixels underneath are hidden.
+      const grad = ctx.createLinearGradient(x, y, x + w, y + h)
+      grad.addColorStop(0, 'rgba(7, 42, 63, 0.98)')
+      grad.addColorStop(0.5, 'rgba(10, 74, 92, 0.97)')
+      grad.addColorStop(1, 'rgba(17, 116, 120, 0.96)')
+      ctx.fillStyle = grad
       ctx.beginPath()
-      ctx.roundRect(x, y, w, h, 8)
+      ctx.roundRect(x, y, w, h, 10)
       ctx.fill()
-      // Diagonal cream hatch so it reads as a "protected zone", clipped
-      // to the rounded box.
+      // Soft aqua caustic hatch so it reads as "under water", clipped to
+      // the rounded box.
       ctx.clip()
-      ctx.strokeStyle = 'rgba(245, 230, 211, 0.18)'
+      ctx.strokeStyle = 'rgba(176, 238, 245, 0.12)'
       ctx.lineWidth = 6
       for (let d = -h; d < w; d += 16) {
         ctx.beginPath()
@@ -940,13 +1079,12 @@ function drawShape(
         ctx.stroke()
       }
       ctx.restore()
-      // Coral dashed border.
+      // Aqua border.
       ctx.save()
-      ctx.strokeStyle = 'rgba(255, 139, 123, 0.95)'
+      ctx.strokeStyle = 'rgba(140, 228, 236, 0.85)'
       ctx.lineWidth = 1.5
-      ctx.setLineDash([6, 4])
       ctx.beginPath()
-      ctx.roundRect(x, y, w, h, 8)
+      ctx.roundRect(x, y, w, h, 10)
       ctx.stroke()
       ctx.restore()
       break

@@ -45,6 +45,33 @@ const TOOLS = [
 
 type ToolId = (typeof TOOLS)[number]['id']
 
+/** Bounding-box overlap as a fraction of the smaller box. Shared by the
+ *  sticky-mask merge and the dismissal denylist (a mask the user removed
+ *  with the ✕ must not pop back when the next scan re-detects the same
+ *  region). */
+function bboxOverlapRatio(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number }
+): number {
+  const ix = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x))
+  const iy = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y))
+  const inter = ix * iy
+  if (inter === 0) return 0
+  const minArea = Math.min(a.width * a.height, b.width * b.height)
+  return minArea > 0 ? inter / minArea : 0
+}
+
+/** Region the user explicitly removed. Suppressed while detections keep
+ *  refreshing `lastSeen`; forgotten a few seconds after the content moves
+ *  on so a genuinely new secret at the same spot can mask again. */
+interface DismissedRegion {
+  x: number
+  y: number
+  width: number
+  height: number
+  lastSeen: number
+}
+
 // Two rows of 7 — first row is the soft otter-morphism palette (good
 // for elegant annotations during presentations), second row is the
 // punchy "demo emphasis" set (high-saturation primaries + neutrals
@@ -109,6 +136,9 @@ export function Toolbar() {
   const stickyMasksRef = useRef<
     Array<LiveMask & { expiresAt: number }>
   >([])
+  // Regions the user dismissed via the ✕ on a mask. ingestMasks filters
+  // against these so a removed mask doesn't reappear on the next scan.
+  const dismissedMasksRef = useRef<DismissedRegion[]>([])
 
   // Per-tool defaults persisted via Tools page (auto-synced across windows
   // through the storage event hooked inside useToolSettingsStore).
@@ -296,33 +326,57 @@ export function Toolbar() {
     // Match a fresh mask against a sticky one via bbox overlap. Position is
     // what matters (a label flip OCR↔context shouldn't re-flicker).
     const MIN_OVERLAP_RATIO = 0.3
-    const overlapRatio = (a: LiveMask, b: LiveMask): number => {
-      const ix = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x))
-      const iy = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y))
-      const inter = ix * iy
-      if (inter === 0) return 0
-      const aArea = a.width * a.height
-      const bArea = b.width * b.height
-      const minArea = Math.min(aArea, bArea)
-      return minArea > 0 ? inter / minArea : 0
-    }
     const sameRegion = (
       a: LiveMask,
       b: LiveMask & { expiresAt: number }
-    ): boolean => overlapRatio(a, b) >= MIN_OVERLAP_RATIO
+    ): boolean => bboxOverlapRatio(a, b) >= MIN_OVERLAP_RATIO
+
+    // Drop anything the user dismissed; touching `lastSeen` keeps the
+    // suppression alive as long as the secret is still being detected.
+    const fresh = incoming.filter((m) => {
+      const hit = dismissedMasksRef.current.find(
+        (d) => bboxOverlapRatio(m, d) >= MIN_OVERLAP_RATIO
+      )
+      if (hit) {
+        hit.lastSeen = now
+        return false
+      }
+      return true
+    })
 
     const refreshedExpiry = now + STICKY_MASK_TTL_MS
     const newSticky: Array<LiveMask & { expiresAt: number }> = []
     for (const old of stickyMasksRef.current) {
       if (old.expiresAt <= now) continue
-      if (incoming.some((m) => sameRegion(m, old))) continue
+      if (fresh.some((m) => sameRegion(m, old))) continue
       newSticky.push(old)
     }
-    for (const m of incoming) {
+    for (const m of fresh) {
       newSticky.push({ ...m, expiresAt: refreshedExpiry })
     }
     stickyMasksRef.current = newSticky
     apiRef.current?.setLiveMasks(newSticky)
+  }, [])
+
+  // Overlay → here: the user removed a mask with its ✕. Suppress that
+  // region and pull it from the live pool immediately so it vanishes
+  // without waiting for the next scan.
+  useEffect(() => {
+    const off = apiRef.current?.onDismissLiveMask((region) => {
+      const now = Date.now()
+      const existing = dismissedMasksRef.current.find(
+        (d) => bboxOverlapRatio(region, d) >= 0.3
+      )
+      if (existing) existing.lastSeen = now
+      else dismissedMasksRef.current.push({ ...region, lastSeen: now })
+
+      const next = stickyMasksRef.current.filter(
+        (m) => bboxOverlapRatio(m, region) < 0.3
+      )
+      stickyMasksRef.current = next
+      apiRef.current?.setLiveMasks(next)
+    })
+    return off
   }, [])
 
   const handleScanResult = useCallback(
@@ -357,8 +411,14 @@ export function Toolbar() {
   // in (e.g., user stopped looking at a page that had a secret on it).
   useEffect(() => {
     if (!liveOn) return
+    const DISMISS_FORGET_MS = 8000
     const id = window.setInterval(() => {
       const now = Date.now()
+      // Forget dismissals once the content they covered has been gone for
+      // a few seconds, so a new secret at the same spot masks again.
+      dismissedMasksRef.current = dismissedMasksRef.current.filter(
+        (d) => now - d.lastSeen < DISMISS_FORGET_MS
+      )
       const before = stickyMasksRef.current.length
       const next = stickyMasksRef.current.filter((m) => m.expiresAt > now)
       if (next.length !== before) {
@@ -392,6 +452,7 @@ export function Toolbar() {
       // Empty the sticky pool — otherwise stopping and restarting
       // LIVE in the same session would carry over stale masks.
       stickyMasksRef.current = []
+      dismissedMasksRef.current = []
       api.clearLiveMasks()
       api.clearLiveOcrWords()
       api.stopUia()
