@@ -608,12 +608,10 @@ function registerIpcHandlers(): void {
   )
 
   // Run in background + start with Windows so capture works any time.
-  ipcMain.handle('settings:get-open-at-login', () =>
-    app.getLoginItemSettings().openAtLogin
-  )
+  ipcMain.handle('settings:get-open-at-login', () => getOpenAtLogin())
   ipcMain.handle('settings:set-open-at-login', (_e, enabled: boolean) => {
     setOpenAtLogin(enabled === true)
-    return app.getLoginItemSettings().openAtLogin
+    return getOpenAtLogin()
   })
 
   // UI-Automation sanitizer (fast path). The renderer starts it when LIVE
@@ -1267,15 +1265,23 @@ function applyAppIcon(dataUrl: string): void {
   }
 }
 
+// `--hidden` so a login launch starts straight into the tray (no window).
+// IMPORTANT: on Windows `getLoginItemSettings` only reports `openAtLogin: true`
+// when you pass it the *same* args used at set-time, so both paths share this.
+const LOGIN_ITEM_ARGS = ['--hidden']
+
+function getOpenAtLogin(): boolean {
+  return app.getLoginItemSettings({ args: LOGIN_ITEM_ARGS }).openAtLogin
+}
+
 function setOpenAtLogin(enabled: boolean): void {
-  // `--hidden` so a login launch starts straight into the tray (no window).
-  app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] })
+  app.setLoginItemSettings({ openAtLogin: enabled, args: LOGIN_ITEM_ARGS })
   rebuildTrayMenu()
 }
 
 function rebuildTrayMenu(): void {
   if (tray === null) return
-  const openAtLogin = app.getLoginItemSettings().openAtLogin
+  const openAtLogin = getOpenAtLogin()
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: 'Capture d\'écran', accelerator: 'Alt+Shift+S', click: () => void startCapture('photo') },
