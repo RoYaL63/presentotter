@@ -110,9 +110,9 @@ export function ShortcutsHelp({ onClose }: ShortcutsHelpProps) {
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="otter-glass otter-aqua w-full max-w-xl rounded-3xl p-5 animate-fade-in-up">
+      <div className="otter-glass otter-aqua flex max-h-[calc(100vh-6rem)] w-full max-w-xl flex-col rounded-3xl p-5 animate-fade-in-up">
         <RiverWave topClass="rounded-t-3xl" />
-        <header className="mb-4 flex items-center justify-between">
+        <header className="mb-4 flex shrink-0 items-center justify-between">
           <div className="flex items-center gap-3">
             <div
               className="otter-clay flex h-10 w-10 items-center justify-center text-sea-700"
@@ -139,6 +139,7 @@ export function ShortcutsHelp({ onClose }: ShortcutsHelpProps) {
           </button>
         </header>
 
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {GROUPS.map((group) => (
             <section key={group.title} className="rounded-2xl bg-white/45 p-3 ring-1 ring-white/55">
@@ -176,6 +177,7 @@ export function ShortcutsHelp({ onClose }: ShortcutsHelpProps) {
         <p className="mt-3 text-[10px] leading-snug text-cream-800/60">
           Astuce : cliquer une seconde fois sur l&apos;icône d&apos;un outil actif te ramène au mode passe-through. Plus besoin d&apos;Échap pour sortir d&apos;un crayon.
         </p>
+        </div>
       </div>
     </div>
   )
