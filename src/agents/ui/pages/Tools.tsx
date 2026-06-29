@@ -1,20 +1,31 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUpRight,
   Circle,
   Crosshair,
+  Image as ImageIcon,
+  Palette,
   Pencil,
+  Pipette,
   RotateCcw,
   ShieldCheck,
+  Sparkles,
   Square,
   Sun,
-  Type
+  Type,
+  Video,
+  X
 } from 'lucide-react'
 import {
   useToolSettingsStore,
   type CursorStyle,
   type ToolId
 } from '../stores/useToolSettingsStore'
+import {
+  fileToBackgroundDataUrl,
+  type BlurIntensity,
+  type CamBgMode
+} from '../webcam-effects'
 
 /**
  * Tools page — one card per drawing tool with a French description, the
@@ -109,14 +120,27 @@ const TOOLS: ToolDef[] = [
   }
 ]
 
+// A broad spectrum for quick picks. Any colour is reachable beyond these
+// via the pipette (native picker) and the HEX field — total freedom.
 const COLOR_SWATCHES = [
   '#ef4444',
   '#f97316',
+  '#f59e0b',
   '#eab308',
-  '#22d3ee',
+  '#84cc16',
+  '#22c55e',
+  '#10b981',
+  '#14b8a6',
+  '#06b6d4',
   '#3b82f6',
+  '#6366f1',
+  '#8b5cf6',
   '#a855f7',
-  '#ffffff'
+  '#d946ef',
+  '#ec4899',
+  '#f43f5e',
+  '#ffffff',
+  '#000000'
 ]
 
 export function Tools() {
@@ -124,6 +148,8 @@ export function Tools() {
   const cursor = useToolSettingsStore((s) => s.cursor)
   const sanitizer = useToolSettingsStore((s) => s.sanitizer)
   const ephemeral = useToolSettingsStore((s) => s.ephemeral)
+  const webcam = useToolSettingsStore((s) => s.webcam)
+  const setWebcam = useToolSettingsStore((s) => s.setWebcam)
   const setToolColor = useToolSettingsStore((s) => s.setToolColor)
   const setToolStroke = useToolSettingsStore((s) => s.setToolStroke)
   const setToolOpacity = useToolSettingsStore((s) => s.setToolOpacity)
@@ -265,6 +291,12 @@ export function Tools() {
           </div>
         </header>
 
+        <ColorRow
+          label="Couleur"
+          value={defaults.ephemeral.color}
+          onChange={(hex) => setToolColor('ephemeral', hex)}
+        />
+
         <SliderRow
           label="Temps avant disparition"
           unit="s"
@@ -282,6 +314,28 @@ export function Tools() {
           leur durée d&apos;origine.
         </p>
       </div>
+
+      {/* Webcam background — persistent default applied to the recorder's
+          PiP. Editable here AND live during a recording (shared store). */}
+      <WebcamSection
+        bgMode={webcam.bgMode}
+        blur={webcam.blur}
+        color={webcam.color}
+        imageName={webcam.imageName}
+        onMode={(m) => setWebcam({ bgMode: m })}
+        onBlur={(b) => setWebcam({ blur: b })}
+        onColor={(c) => setWebcam({ color: c })}
+        onImage={(dataUrl, name) =>
+          setWebcam({ imageDataUrl: dataUrl, imageName: name, bgMode: 'image' })
+        }
+        onClearImage={() =>
+          setWebcam({
+            imageDataUrl: null,
+            imageName: null,
+            bgMode: 'none'
+          })
+        }
+      />
 
       {/* Sanitizer section — controls for the live OCR scanner that runs
           when the radar in the toolbar is on. */}
@@ -355,6 +409,157 @@ export function Tools() {
         />
       </div>
     </section>
+  )
+}
+
+interface WebcamSectionProps {
+  bgMode: CamBgMode
+  blur: BlurIntensity
+  color: string
+  imageName: string | null
+  onMode(m: CamBgMode): void
+  onBlur(b: BlurIntensity): void
+  onColor(c: string): void
+  onImage(dataUrl: string, name: string): void
+  onClearImage(): void
+}
+
+function WebcamSection({
+  bgMode,
+  blur,
+  color,
+  imageName,
+  onMode,
+  onBlur,
+  onColor,
+  onImage,
+  onClearImage
+}: WebcamSectionProps) {
+  const fileRef = useRef<HTMLInputElement | null>(null)
+  const modes: Array<{ id: CamBgMode; label: string; Icon: typeof Video }> = [
+    { id: 'none', label: 'Aucun', Icon: Video },
+    { id: 'blur', label: 'Flou', Icon: Sparkles },
+    { id: 'image', label: 'Image', Icon: ImageIcon },
+    { id: 'color', label: 'Couleur', Icon: Palette }
+  ]
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = e.target.files?.[0]
+    if (file === undefined) return
+    try {
+      const dataUrl = await fileToBackgroundDataUrl(file)
+      onImage(dataUrl, file.name)
+    } catch {
+      /* unreadable image — ignore */
+    } finally {
+      e.target.value = ''
+    }
+  }
+
+  return (
+    <div className="glass glass-shine flex flex-col gap-4 rounded-2xl p-6">
+      <header className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-otter-500/15 border border-otter-400/30 text-otter-300">
+          <Video className="h-5 w-5" strokeWidth={1.75} />
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold text-otter-50">Fond webcam</h2>
+          <p className="text-xs text-otter-200/60">
+            Le fond appliqué à la webcam incrustée pendant l&apos;enregistrement
+            de zone. Conservé d&apos;une session à l&apos;autre, modifiable à tout
+            moment depuis le panneau d&apos;enregistrement.
+          </p>
+        </div>
+      </header>
+
+      <div className="flex gap-2">
+        {modes.map(({ id, label, Icon }) => {
+          const active = bgMode === id
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => {
+                if (id === 'image') {
+                  fileRef.current?.click()
+                  return
+                }
+                onMode(id)
+              }}
+              className={`flex flex-1 flex-col items-center gap-1.5 rounded-xl px-3 py-3 text-xs font-medium transition-all ${
+                active
+                  ? 'bg-gradient-to-br from-otter-400 to-otter-600 text-white shadow-glow-otter ring-1 ring-otter-300/40'
+                  : 'bg-white/[0.04] border border-white/[0.08] text-otter-200/80 hover:bg-white/[0.08] hover:text-otter-50'
+              }`}
+            >
+              <Icon className="h-5 w-5" strokeWidth={1.75} />
+              {label}
+            </button>
+          )
+        })}
+      </div>
+
+      {bgMode === 'blur' && (
+        <div className="flex gap-2">
+          {(['light', 'medium', 'strong'] as BlurIntensity[]).map((b) => {
+            const active = blur === b
+            return (
+              <button
+                key={b}
+                type="button"
+                onClick={() => onBlur(b)}
+                className={`flex-1 rounded-xl px-3 py-2 text-sm font-medium transition-all ${
+                  active
+                    ? 'bg-gradient-to-br from-otter-400 to-otter-600 text-white shadow-glow-otter ring-1 ring-otter-300/40'
+                    : 'bg-white/[0.04] border border-white/[0.08] text-otter-200/80 hover:bg-white/[0.08]'
+                }`}
+              >
+                {b === 'light' ? 'Léger' : b === 'medium' ? 'Moyen' : 'Fort'}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {bgMode === 'color' && (
+        <ColorRow label="Couleur du fond" value={color} onChange={onColor} />
+      )}
+
+      {bgMode === 'image' && (
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="btn-glass"
+          >
+            <ImageIcon className="h-4 w-4" />
+            <span>Changer l&apos;image</span>
+          </button>
+          {imageName !== null ? (
+            <span className="flex flex-1 items-center gap-2 truncate text-xs text-otter-200/70">
+              <span className="truncate">{imageName}</span>
+              <button
+                type="button"
+                onClick={onClearImage}
+                title="Retirer l'image"
+                className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-white/[0.06] text-otter-200 hover:bg-white/[0.12]"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ) : (
+            <span className="text-xs text-otter-200/50">Aucune image choisie</span>
+          )}
+        </div>
+      )}
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        onChange={(e) => void onFile(e)}
+        className="hidden"
+      />
+    </div>
   )
 }
 
@@ -468,36 +673,63 @@ interface ColorRowProps {
 }
 
 function ColorRow({ label, value, onChange, compact = false }: ColorRowProps) {
+  // Local draft for the HEX field so the user can type freely; we only
+  // commit when it parses as a full #RRGGBB (or #RGB).
+  const [draft, setDraft] = useState(value)
+  useEffect(() => setDraft(value), [value])
+
+  const commitHex = (raw: string): void => {
+    let v = raw.trim().replace(/[^#0-9a-fA-F]/g, '')
+    if (!v.startsWith('#')) v = `#${v}`
+    // Expand #RGB → #RRGGBB
+    const short = /^#([0-9a-fA-F]{3})$/.exec(v)
+    if (short !== null) {
+      const [r, g, b] = short[1]!.split('')
+      v = `#${r}${r}${g}${g}${b}${b}`
+    }
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+      onChange(v.toLowerCase())
+    } else {
+      setDraft(value) // revert invalid input
+    }
+  }
+
   return (
-    <div className={`flex items-center ${compact ? 'gap-3' : 'gap-4'}`}>
-      <span
-        className={`${compact ? 'w-20 text-[10px]' : 'w-32 text-xs'} font-semibold uppercase tracking-[0.15em] text-otter-300`}
-      >
-        {label}
-      </span>
-      <div className="flex items-center gap-1.5">
-        {COLOR_SWATCHES.map((hex) => {
-          const active = hex.toLowerCase() === value.toLowerCase()
-          return (
-            <button
-              key={hex}
-              type="button"
-              onClick={() => onChange(hex)}
-              aria-pressed={active}
-              title={hex}
-              className={`h-5 w-5 rounded-full transition-all duration-200 ${
-                active
-                  ? 'ring-2 ring-white/80 ring-offset-2 ring-offset-deep-900 scale-110'
-                  : 'ring-1 ring-white/25 hover:scale-105'
-              }`}
-              style={{ backgroundColor: hex }}
-            />
-          )
-        })}
-        <label
-          className="ml-1 inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md hover:bg-white/[0.06]"
-          title="Choisir une couleur libre"
+    <div className="flex flex-col gap-2">
+      <div className={`flex items-start ${compact ? 'gap-3' : 'gap-4'}`}>
+        <span
+          className={`${compact ? 'w-20 text-[10px]' : 'w-32 text-xs'} mt-1 font-semibold uppercase tracking-[0.15em] text-otter-300`}
         >
+          {label}
+        </span>
+        <div className="flex flex-1 flex-wrap items-center gap-1.5">
+          {COLOR_SWATCHES.map((hex) => {
+            const active = hex.toLowerCase() === value.toLowerCase()
+            return (
+              <button
+                key={hex}
+                type="button"
+                onClick={() => onChange(hex)}
+                aria-pressed={active}
+                title={hex}
+                className={`h-5 w-5 rounded-full transition-all duration-200 ${
+                  active
+                    ? 'ring-2 ring-white/80 ring-offset-2 ring-offset-deep-900 scale-110'
+                    : 'ring-1 ring-white/25 hover:scale-105'
+                }`}
+                style={{ backgroundColor: hex }}
+              />
+            )
+          })}
+        </div>
+      </div>
+      {/* Free picker + HEX field — anything goes. */}
+      <div className={`flex items-center gap-2 ${compact ? 'pl-[5.75rem]' : 'pl-36'}`}>
+        <label
+          className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.04] px-2 text-[11px] font-medium text-otter-200 transition hover:bg-white/[0.08]"
+          title="Choisir n'importe quelle couleur"
+        >
+          <Pipette className="h-3.5 w-3.5" />
           <span
             className="h-3.5 w-3.5 rounded-full ring-1 ring-white/40"
             style={{ backgroundColor: value }}
@@ -509,6 +741,23 @@ function ColorRow({ label, value, onChange, compact = false }: ColorRowProps) {
             className="sr-only"
           />
         </label>
+        <div className="inline-flex h-7 items-center rounded-lg border border-white/[0.1] bg-white/[0.04] px-2 font-mono text-[11px] text-otter-100">
+          <span className="text-otter-300/70">#</span>
+          <input
+            type="text"
+            value={draft.replace(/^#/, '')}
+            spellCheck={false}
+            maxLength={6}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => commitHex(draft)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitHex(draft)
+            }}
+            placeholder="RRGGBB"
+            aria-label={`${label} — code hexadécimal`}
+            className="w-[7ch] bg-transparent uppercase tracking-wider text-otter-50 outline-none placeholder:text-otter-300/40"
+          />
+        </div>
       </div>
     </div>
   )

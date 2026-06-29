@@ -474,7 +474,7 @@ function controlPosition(
   scaleFactor: number
 ): { x: number; y: number; width: number; height: number } {
   const W = 360
-  const H = 440
+  const H = 480
   const gap = 12
   const regX = bounds.x + rect.x / scaleFactor
   const regY = bounds.y + rect.y / scaleFactor
@@ -659,6 +659,42 @@ export function registerCaptureIpc(d: CaptureDeps): void {
       pendingRestore = null
     }
     notifyRecorded(savePath)
+  })
+
+  /** Recorder window resizes itself (compact pill ↔ full panel). Keep the
+   *  top-left corner pinned so it doesn't jump when collapsing. */
+  ipcMain.on(
+    'recorder:set-size',
+    (_e, size: { width: number; height: number }) => {
+      if (recorderWindow === null || recorderWindow.isDestroyed()) return
+      const [x, y] = recorderWindow.getPosition()
+      recorderWindow.setBounds({
+        x,
+        y,
+        width: Math.max(120, Math.round(size.width)),
+        height: Math.max(48, Math.round(size.height))
+      })
+    }
+  )
+
+  /** Recorder window hops to the next display, centered, so it never sits
+   *  on the screen being filmed. */
+  ipcMain.on('recorder:cycle-display', () => {
+    if (recorderWindow === null || recorderWindow.isDestroyed()) return
+    const displays = screen.getAllDisplays()
+    if (displays.length < 2) return
+    const cur = screen.getDisplayMatching(recorderWindow.getBounds())
+    const idx = displays.findIndex((d) => d.id === cur.id)
+    const next = displays[(idx + 1) % displays.length]
+    if (next === undefined) return
+    const b = recorderWindow.getBounds()
+    const wa = next.workArea
+    recorderWindow.setBounds({
+      x: Math.round(wa.x + (wa.width - b.width) / 2),
+      y: Math.round(wa.y + (wa.height - b.height) / 2),
+      width: b.width,
+      height: b.height
+    })
   })
 
   /** Esc / cancel from any capture window cancels the whole session. */

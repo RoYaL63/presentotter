@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { BlurIntensity, CamBgMode } from '../webcam-effects'
 
 /**
  * Persistent per-tool defaults + cursor highlight preferences.
@@ -74,17 +75,32 @@ export interface EphemeralSettings {
   lifeMs: number
 }
 
+/** Persistent webcam-PiP background preference. The region recorder reads
+ *  this on launch so the user's blur / image / color choice is always
+ *  there, and writes back when they change it live during a recording. */
+export interface WebcamSettings {
+  bgMode: CamBgMode
+  blur: BlurIntensity
+  color: string
+  /** Custom background image, stored downscaled as a JPEG data URL so it
+   *  survives a relaunch without blowing the localStorage quota. */
+  imageDataUrl: string | null
+  imageName: string | null
+}
+
 export interface ToolSettingsState {
   defaults: Record<ToolId, ToolDefaults>
   cursor: CursorSettings
   sanitizer: SanitizerSettings
   ephemeral: EphemeralSettings
+  webcam: WebcamSettings
   setToolColor(tool: ToolId, hex: string): void
   setToolStroke(tool: ToolId, width: number): void
   setToolOpacity(tool: ToolId, opacity: number): void
   setCursor(patch: Partial<CursorSettings>): void
   setSanitizer(patch: Partial<SanitizerSettings>): void
   setEphemeral(patch: Partial<EphemeralSettings>): void
+  setWebcam(patch: Partial<WebcamSettings>): void
   resetAll(): void
 }
 
@@ -130,11 +146,20 @@ const FACTORY_EPHEMERAL: EphemeralSettings = {
   lifeMs: 5000
 }
 
+const FACTORY_WEBCAM: WebcamSettings = {
+  bgMode: 'none',
+  blur: 'medium',
+  color: '#0D3548', // deep-sea
+  imageDataUrl: null,
+  imageName: null
+}
+
 interface PersistedShape {
   defaults: Record<ToolId, ToolDefaults>
   cursor: CursorSettings
   sanitizer: SanitizerSettings
   ephemeral: EphemeralSettings
+  webcam: WebcamSettings
 }
 
 function emptyShape(): PersistedShape {
@@ -142,7 +167,8 @@ function emptyShape(): PersistedShape {
     defaults: { ...FACTORY_DEFAULTS },
     cursor: { ...FACTORY_CURSOR },
     sanitizer: { ...FACTORY_SANITIZER },
-    ephemeral: { ...FACTORY_EPHEMERAL }
+    ephemeral: { ...FACTORY_EPHEMERAL },
+    webcam: { ...FACTORY_WEBCAM }
   }
 }
 
@@ -165,7 +191,8 @@ function parsePersisted(raw: string): PersistedShape {
     defaults: { ...FACTORY_DEFAULTS, ...(candidate.defaults ?? {}) },
     cursor: { ...FACTORY_CURSOR, ...(candidate.cursor ?? {}) },
     sanitizer: { ...FACTORY_SANITIZER, ...(candidate.sanitizer ?? {}) },
-    ephemeral: { ...FACTORY_EPHEMERAL, ...(candidate.ephemeral ?? {}) }
+    ephemeral: { ...FACTORY_EPHEMERAL, ...(candidate.ephemeral ?? {}) },
+    webcam: { ...FACTORY_WEBCAM, ...(candidate.webcam ?? {}) }
   }
 }
 
@@ -190,13 +217,15 @@ export const useToolSettingsStore = create<ToolSettingsState>((set) => {
     defaults: patch.defaults ?? s.defaults,
     cursor: patch.cursor ?? s.cursor,
     sanitizer: patch.sanitizer ?? s.sanitizer,
-    ephemeral: patch.ephemeral ?? s.ephemeral
+    ephemeral: patch.ephemeral ?? s.ephemeral,
+    webcam: patch.webcam ?? s.webcam
   })
   return {
     defaults: hydrated.defaults,
     cursor: hydrated.cursor,
     sanitizer: hydrated.sanitizer,
     ephemeral: hydrated.ephemeral,
+    webcam: hydrated.webcam,
     setToolColor(tool, hex) {
       set((s) => {
         const updated = {
@@ -277,6 +306,13 @@ export const useToolSettingsStore = create<ToolSettingsState>((set) => {
         return { ephemeral: updated }
       })
     },
+    setWebcam(patch) {
+      set((s) => {
+        const updated: WebcamSettings = { ...s.webcam, ...patch }
+        persist(snap(s, { webcam: updated }))
+        return { webcam: updated }
+      })
+    },
     resetAll() {
       const next: PersistedShape = emptyShape()
       persist(next)
@@ -307,7 +343,9 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
       useToolSettingsStore.setState({
         defaults: next.defaults,
         cursor: next.cursor,
-        sanitizer: next.sanitizer
+        sanitizer: next.sanitizer,
+        ephemeral: next.ephemeral,
+        webcam: next.webcam
       })
     } catch {
       // ignore malformed payload from another tab

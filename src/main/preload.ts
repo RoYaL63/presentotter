@@ -445,6 +445,14 @@ const api = {
   recorderDone: (savePath: string | null) =>
     ipcRenderer.send('recorder:done', savePath),
 
+  /** Recorder window: resize itself (compact pill ↔ full panel). */
+  recorderSetSize: (width: number, height: number) =>
+    ipcRenderer.send('recorder:set-size', { width, height }),
+
+  /** Recorder window: hop to the next display (so it never sits on the
+   *  screen being filmed). */
+  recorderCycleDisplay: () => ipcRenderer.send('recorder:cycle-display'),
+
   /** Recorder window: main asks it to stop (hotkey toggle). */
   onRecorderStop: (cb: () => void) => {
     const handler = (): void => cb()

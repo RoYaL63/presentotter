@@ -221,6 +221,8 @@ declare global {
       fps: number
     } | null>
     recorderDone(savePath: string | null): void
+    recorderSetSize(width: number, height: number): void
+    recorderCycleDisplay(): void
     onRecorderStop(cb: () => void): () => void
 
     // ---------- Capture editor ----------

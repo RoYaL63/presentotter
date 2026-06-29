@@ -134,6 +134,14 @@ export function Overlay() {
   // pixels behind the overlay) rather than canvas fills — gives a real
   // frosted-glass blur on the secret, not an opaque black rectangle.
   const [liveMasks, setLiveMasks] = useState<LiveMask[]>([])
+  // Manual privacy boxes (kind: 'blur') get a ✕ to remove them one by one,
+  // mirroring the auto-sanitizer masks. They live on the canvas (shapesRef),
+  // so we mirror their rects into React state to render DOM crosses, and
+  // keep a ref count so the hover bridge knows to make the ✕ clickable.
+  const [blurBoxes, setBlurBoxes] = useState<
+    Array<{ id: number; x: number; y: number; width: number; height: number }>
+  >([])
+  const blurBoxesRef = useRef(0)
   // The overlay is click-through in select/spotlight mode, so a mask's ✕
   // can't be clicked unless we momentarily make the window interactive
   // while the cursor hovers it. toolRef tells us the "base" interactivity
@@ -180,10 +188,12 @@ export function Overlay() {
       shapesRef.current = []
       draftRef.current = null
       redraw()
+      syncBlurBoxes()
     })
     const off6 = api.onUndo(() => {
       shapesRef.current.pop()
       redraw()
+      syncBlurBoxes()
     })
     const off7 = api.onSetLiveMasks((zones) => {
       // Cap the rendered masks so a pathological OCR result cannot explode
@@ -365,7 +375,7 @@ export function Overlay() {
       const base =
         toolRef.current !== 'select' && toolRef.current !== 'spotlight'
       if (base) return
-      if (liveMasksRef.current.length === 0) {
+      if (liveMasksRef.current.length === 0 && blurBoxesRef.current === 0) {
         if (closeHoverRef.current) {
           closeHoverRef.current = false
           window.api?.setOverlayInteractive(false)
@@ -628,6 +638,7 @@ export function Overlay() {
         // Ephemeral shapes need the rAF pump to drive their fade-out;
         // kick it so the redraw loop starts (or stays) running.
         if (draft.kind === 'ephemeral') kickAnimationRef.current()
+        if (draft.kind === 'blur') syncBlurBoxes()
       }
       draftRef.current = null
       redraw()
@@ -641,6 +652,29 @@ export function Overlay() {
   // Remove a single sanitizer mask. Drop it locally for instant feedback,
   // then tell the toolbar so its detector suppresses the region instead of
   // re-masking it on the next scan.
+  // Mirror the manual blur boxes from the canvas into React state so each
+  // gets a removable ✕. Called whenever shapesRef changes.
+  const syncBlurBoxes = (): void => {
+    const boxes = shapesRef.current
+      .filter((s): s is Extract<Shape, { kind: 'blur' }> => s.kind === 'blur')
+      .map((s) => ({
+        id: s.id,
+        x: Math.min(s.from.x, s.to.x),
+        y: Math.min(s.from.y, s.to.y),
+        width: Math.abs(s.to.x - s.from.x),
+        height: Math.abs(s.to.y - s.from.y)
+      }))
+    blurBoxesRef.current = boxes.length
+    setBlurBoxes(boxes)
+  }
+
+  // Remove a single manual blur box by id, then resync.
+  const removeBlurBox = (id: number): void => {
+    shapesRef.current = shapesRef.current.filter((s) => s.id !== id)
+    redraw()
+    syncBlurBoxes()
+  }
+
   const dismissMask = (mask: LiveMask): void => {
     const remaining = liveMasksRef.current.filter((m) => m !== mask)
     liveMasksRef.current = remaining
@@ -700,6 +734,7 @@ export function Overlay() {
           if (shapesRef.current.length > 0) {
             shapesRef.current.pop()
             redraw()
+            syncBlurBoxes()
           }
         }}
         style={{ display: 'block', width: '100%', height: '100%' }}
@@ -772,7 +807,7 @@ export function Overlay() {
               width: mask.width,
               height: mask.height,
               background:
-                'linear-gradient(155deg, rgba(7,42,63,0.97) 0%, rgba(10,74,92,0.96) 48%, rgba(17,116,120,0.95) 100%)',
+                'linear-gradient(155deg, rgba(3,18,28,1) 0%, rgba(5,38,49,1) 48%, rgba(8,62,66,1) 100%)',
               border: '1.5px solid rgba(140,228,236,0.6)',
               borderRadius: 10,
               boxShadow:
@@ -883,6 +918,51 @@ export function Overlay() {
           </div>
         )
       })}
+
+      {/* Manual privacy boxes — the box itself is painted on the canvas
+          (so screen-share tools capture it); here we only overlay a ✕ at
+          its top-right so the user can pull a single box without undoing
+          everything. Shown only in select/spotlight mode so it never
+          intercepts an active drawing stroke. The hover bridge above flips
+          the window interactive while the cursor is over a ✕. */}
+      {(tool === 'select' || tool === 'spotlight') &&
+        blurBoxes.map((box) => {
+          if (box.width < 24 || box.height < 16) return null
+          return (
+            <button
+              key={`blur-close-${box.id}`}
+              type="button"
+              data-mask-close="1"
+              title="Retirer ce masque"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                removeBlurBox(box.id)
+              }}
+              style={{
+                position: 'absolute',
+                left: box.x + box.width - 17,
+                top: box.y + 2,
+                width: 15,
+                height: 15,
+                padding: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 9999,
+                background: 'rgba(6,28,40,0.82)',
+                border: '1px solid rgba(150,232,240,0.75)',
+                color: '#E8FCFF',
+                cursor: 'pointer',
+                pointerEvents: 'auto',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.5)',
+                lineHeight: 0
+              }}
+            >
+              <X size={9} strokeWidth={3} />
+            </button>
+          )
+        })}
 
       {textInput !== null && (
         <input
@@ -1060,9 +1140,9 @@ function drawShape(
       ctx.save()
       // Solid deep-water gradient — guarantees the pixels underneath are hidden.
       const grad = ctx.createLinearGradient(x, y, x + w, y + h)
-      grad.addColorStop(0, 'rgba(7, 42, 63, 0.98)')
-      grad.addColorStop(0.5, 'rgba(10, 74, 92, 0.97)')
-      grad.addColorStop(1, 'rgba(17, 116, 120, 0.96)')
+      grad.addColorStop(0, 'rgba(3, 18, 28, 1)')
+      grad.addColorStop(0.5, 'rgba(5, 38, 49, 1)')
+      grad.addColorStop(1, 'rgba(8, 62, 66, 1)')
       ctx.fillStyle = grad
       ctx.beginPath()
       ctx.roundRect(x, y, w, h, 10)

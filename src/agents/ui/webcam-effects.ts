@@ -288,6 +288,38 @@ function paintBackground(
 }
 
 /**
+ * Read an uploaded image file into a compact data URL suitable for
+ * persisting in localStorage: downscaled to 1920 px wide max and
+ * re-encoded as JPEG so a 4K photo doesn't blow the storage quota.
+ */
+export async function fileToBackgroundDataUrl(file: File): Promise<string> {
+  const bmp = await createImageBitmap(file)
+  const maxW = 1920
+  const scale = Math.min(1, maxW / bmp.width)
+  const w = Math.max(1, Math.round(bmp.width * scale))
+  const h = Math.max(1, Math.round(bmp.height * scale))
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  const ctx = c.getContext('2d')
+  if (ctx === null) {
+    bmp.close()
+    throw new Error('Canvas 2D indisponible pour l’image de fond.')
+  }
+  ctx.drawImage(bmp, 0, 0, w, h)
+  bmp.close()
+  return c.toDataURL('image/jpeg', 0.85)
+}
+
+/** Decode a (persisted) data URL back into an ImageBitmap for the effects
+ *  loop. */
+export async function dataUrlToBitmap(url: string): Promise<ImageBitmap> {
+  const res = await fetch(url)
+  const blob = await res.blob()
+  return createImageBitmap(blob)
+}
+
+/**
  * Free the cached segmenter. Call when the app shuts down or if the
  * user disables the feature for the whole session.
  */
