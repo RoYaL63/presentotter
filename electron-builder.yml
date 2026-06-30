@@ -31,4 +31,6 @@ win:
   target:
     - target: dir
       arch: [x64]
+  # App icon (built by scripts/make-icon.js from the mascot).
+  icon: build/icon.ico
 publish: null

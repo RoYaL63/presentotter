@@ -57,6 +57,9 @@ OutputBaseFilename=PresentOtter-Setup-{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 
+; Icon shown on the Setup.exe itself and in the wizard. Same otter as the app.
+SetupIconFile=icon.ico
+
 ; UX
 WizardStyle=modern
 DisableProgramGroupPage=yes

@@ -17,6 +17,7 @@
     "build:renderer": "vite build",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win",
+    "icon": "electron scripts/make-icon.js",
     "pack:win": "npm run build && node scripts/package-win.js",
     "installer:win": "npm run pack:win && node scripts/build-installer.js",
     "release": "node scripts/release.js",

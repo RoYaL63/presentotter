@@ -129,6 +129,17 @@ async function main() {
       .readdirSync(electronCache)
       .some((f) => /^electron-v[\d.]+-win32-x64\.zip$/.test(f))
 
+  // The .ico (built by scripts/make-icon.js from the mascot) becomes the
+  // PresentOtter.exe icon — what Windows shows on the desktop, the Start
+  // menu, the taskbar and the "Apps & features" list.
+  const iconPath = path.join(projectRoot, 'build', 'icon.ico')
+  if (!fs.existsSync(iconPath)) {
+    console.warn(
+      `[package-win] ${iconPath} missing — run 'npm run icon' first. ` +
+        'Packaging with the default Electron icon.'
+    )
+  }
+
   const out = await packager({
     dir: projectRoot,
     name: 'PresentOtter',
@@ -136,6 +147,7 @@ async function main() {
     arch: 'x64',
     out: path.join(projectRoot, 'release'),
     overwrite: true,
+    ...(fs.existsSync(iconPath) ? { icon: iconPath } : {}),
     ...(cacheHasZip ? { electronZipDir: electronCache } : {}),
     // Native .node binaries must live OUTSIDE asar so dlopen() can mmap
     // them — uiohook-napi.node would otherwise fail with "Cannot find
