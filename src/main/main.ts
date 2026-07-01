@@ -7,6 +7,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  Notification,
   screen,
   session,
   shell,
@@ -1320,6 +1321,41 @@ function rebuildTrayMenu(): void {
   )
 }
 
+/**
+ * Notify the user after a capture, in a way that survives PresentOtter
+ * running with no visible window (tray-only background mode — the normal
+ * state after closing Home, or after a `--hidden` login launch).
+ *
+ * A Windows toast (`Notification`) needs the app's AppUserModelID to match
+ * an installed Start Menu shortcut, which our Inno Setup installer does not
+ * currently guarantee — when it doesn't match, `notif.show()` fails
+ * silently (no error, no toast). The tray balloon (`Tray.displayBalloon`)
+ * has no such requirement: it is anchored to the tray icon's own HWND,
+ * which is always alive whenever a capture can even be triggered (the tray
+ * is created before the global shortcuts are registered). So it is the
+ * reliable path; `Notification` is kept only as a non-Windows / no-tray
+ * fallback.
+ */
+function showCaptureNotification(opts: {
+  title: string
+  body: string
+  onClick: () => void
+}): void {
+  if (tray !== null && !tray.isDestroyed() && process.platform === 'win32') {
+    // Only one capture is ever pending at a time, but guard against a
+    // stale handler firing for an old balloon if a second capture lands
+    // before the first balloon is dismissed.
+    tray.removeAllListeners('balloon-click')
+    tray.once('balloon-click', opts.onClick)
+    tray.displayBalloon({ title: opts.title, content: opts.body })
+    return
+  }
+  if (!Notification.isSupported()) return
+  const notif = new Notification({ title: opts.title, body: opts.body, silent: false })
+  notif.on('click', opts.onClick)
+  notif.show()
+}
+
 function createTray(): void {
   if (tray !== null) return
   const cached = loadCachedAppIcon()
@@ -1361,13 +1397,14 @@ app
     app.setAppUserModelId('com.otterwise.presentotter')
     configureDisplayMedia()
     registerIpcHandlers()
+    createTray()
     registerCaptureIpc({
       rendererUrl,
       preloadPath: path.join(__dirname, 'preload.js'),
       hideOwnUi: hideOwnUiForCapture,
-      isDev
+      isDev,
+      showNotification: showCaptureNotification
     })
-    createTray()
     // When launched at login (or with --hidden) we start straight into the
     // tray so capture shortcuts are armed without popping a window.
     const startHidden =

@@ -6,7 +6,6 @@ import {
   dialog,
   ipcMain,
   nativeImage,
-  Notification,
   screen,
   shell,
   type Display,
@@ -49,6 +48,10 @@ export interface CaptureDeps {
    *  (they need an installed Start-menu shortcut matching the AUMID). In
    *  production we stay non-intrusive and only notify. */
   isDev: boolean
+  /** Post-capture notification, implemented in main.ts (tray balloon,
+   *  falling back to a native Notification) so it keeps working even when
+   *  PresentOtter has no visible window. */
+  showNotification: (opts: { title: string; body: string; onClick: () => void }) => void
 }
 
 /**
@@ -319,16 +322,12 @@ async function saveScreenshot(buf: Buffer): Promise<string | null> {
 }
 
 function notifyCaptured(savePath: string | null): void {
-  if (!Notification.isSupported()) return
-  const notif = new Notification({
+  if (deps === null) return
+  deps.showNotification({
     title: 'Capture copiée 🦦',
     body: 'Cliquez pour annoter, recadrer ou enregistrer.',
-    silent: false
+    onClick: () => openEditor()
   })
-  notif.on('click', () => {
-    openEditor()
-  })
-  notif.show()
   // Keep a reference to the save path is implicit via lastCapture; the
   // click handler reads lastCapture directly.
   void savePath
@@ -592,19 +591,17 @@ export function stopRegionRecording(): void {
 }
 
 function notifyRecorded(savePath: string | null): void {
-  if (!Notification.isSupported()) return
-  const notif = new Notification({
+  if (deps === null) return
+  deps.showNotification({
     title: 'Zone enregistrée 🦦',
     body:
       savePath !== null
         ? 'Vidéo sauvegardée. Cliquez pour ouvrir le dossier.'
         : 'Enregistrement terminé.',
-    silent: false
+    onClick: () => {
+      if (savePath !== null) shell.showItemInFolder(savePath)
+    }
   })
-  if (savePath !== null) {
-    notif.on('click', () => shell.showItemInFolder(savePath))
-  }
-  notif.show()
 }
 
 // ============================================================================

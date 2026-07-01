@@ -87,8 +87,14 @@ Name: "startmenuicon"; Description: "Ajouter dans le menu Démarrer"; GroupDescr
 Source: "..\release\PresentOtter-win32-x64\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startmenuicon
+; AppUserModelID must match the value passed to app.setAppUserModelId() in
+; src/main/main.ts — Windows toast notifications only render reliably when
+; the running process's AUMID matches an installed shortcut's. Without this,
+; Notification.show() can fail silently once the app is running tray-only
+; (no visible window), which is exactly when the post-capture notification
+; matters most.
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; AppUserModelID: "com.otterwise.presentotter"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startmenuicon; AppUserModelID: "com.otterwise.presentotter"
 Name: "{group}\Désinstaller {#MyAppName}"; Filename: "{uninstallexe}"; Tasks: startmenuicon
 
 [Run]
