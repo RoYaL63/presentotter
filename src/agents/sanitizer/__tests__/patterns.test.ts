@@ -160,6 +160,124 @@ const CASES: PatternCase[] = [
     name: 'private-key-header',
     positive: 'cat key.pem\n-----BEGIN RSA PRIVATE KEY-----\n...',
     negative: 'no key block here, just a header line'
+  },
+  // ---- Extension catalogue (fausses clés générées pour le test) ----
+  {
+    name: 'github-fine-grained-pat',
+    positive:
+      'GH_TOKEN=github_pat_11ABCDEFG0abcdefghijklmnopqrstuvwxyz1234 end',
+    negative: 'github_pat_short'
+  },
+  {
+    name: 'gitlab-token',
+    positive: 'CI token glpat-aBcDeF123456789012345 end',
+    negative: 'glpat-short'
+  },
+  {
+    name: 'npm-token',
+    positive: 'NPM_TOKEN=npm_aBcDeF1234567890ghIjKlMnOpQrStUv end',
+    negative: 'npm_short'
+  },
+  {
+    name: 'google-api-key',
+    positive: 'key=AIzaSyA1bC2dE3fG4hI5jK6lM7nO8pQ9rS0tUv end',
+    negative: 'AIza-short'
+  },
+  {
+    name: 'huggingface-token',
+    positive: 'HF_TOKEN=hf_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456 end',
+    negative: 'hf_short'
+  },
+  {
+    name: 'groq-api-key',
+    positive: 'GROQ_API_KEY=gsk_aBcDeF1234567890ghIjKlMn end',
+    negative: 'gsk_short'
+  },
+  {
+    name: 'xai-api-key',
+    positive: 'XAI_KEY=xai-aBcDeF1234567890ghIjKlMn end',
+    negative: 'xai-short'
+  },
+  {
+    name: 'replicate-token',
+    positive: 'REPLICATE_API_TOKEN=r8_aBcDeF1234567890ghIjKlMn end',
+    negative: 'r8_short'
+  },
+  {
+    name: 'perplexity-api-key',
+    positive: 'PPLX=pplx-aBcDeF1234567890ghIjKlMn end',
+    negative: 'pplx-short'
+  },
+  {
+    name: 'digitalocean-token',
+    positive:
+      'doctl auth init dop_v1_' + 'a1b2c3d4e5f6'.repeat(4) + ' end',
+    negative: 'dop_v1_short'
+  },
+  {
+    name: 'shopify-token',
+    positive: 'X-Shopify-Access-Token: shpat_' + 'ab12cd34'.repeat(4) + ' end',
+    negative: 'shpat_short'
+  },
+  {
+    name: 'stripe-webhook-secret',
+    positive: 'whsec_aBcDeF1234567890ghIjKlMnOp end',
+    negative: 'whsec_short'
+  },
+  {
+    name: 'twilio-api-key',
+    positive: 'TWILIO_KEY=SK' + '0123456789abcdef'.repeat(2) + ' end',
+    negative: 'SKUPPERCASEWORDSDONTMATCH1234567890AB'
+  },
+  {
+    name: 'linear-api-key',
+    positive: 'LINEAR_API_KEY=lin_api_aBcDeF1234567890ghIjKlMn end',
+    negative: 'lin_api_short'
+  },
+  {
+    name: 'figma-token',
+    positive: 'FIGMA_TOKEN=figd_aBcDeF1234567890-ghIjKlMn end',
+    negative: 'figd_short'
+  },
+  {
+    name: 'docker-pat',
+    positive: 'docker login -p dckr_pat_aBcDeF1234567890ghIjKlMn end',
+    negative: 'dckr_pat_short'
+  },
+  {
+    name: 'resend-api-key',
+    // Digit-lookahead: a real Resend key has digits…
+    positive: 'RESEND_API_KEY=re_aBcDeF1234567890ghIjKlMn end',
+    // …a re_-prefixed code identifier (no digit) must NOT match.
+    negative: 'call re_compilepatterncache before use'
+  },
+  {
+    name: 'req-prefixed-token',
+    positive: 'signing secret req_aBcDeF1234567890gh end',
+    negative: 'req_shortid'
+  },
+  {
+    name: 'azure-sas-signature',
+    positive:
+      'https://acc.blob.core.windows.net/c/b.txt?sv=2024&sig=aB1cD2eF3gH4iJ5kL6mN7oP8%2FqR9sT0u',
+    negative: 'https://example.com/?sig=short'
+  },
+  {
+    name: 'url-basic-auth',
+    positive: 'curl https://admin:Sup3rS3cret@internal.example.com/health',
+    negative: 'https://internal.example.com/health (no credentials)'
+  },
+  {
+    name: 'x-api-key-header',
+    positive: 'curl -H "x-api-key: aBcDeF1234567890ghIj" https://api.example.com',
+    negative: 'x-api-key: short'
+  },
+  {
+    name: 'named-secret-assignment',
+    positive: 'client_secret: "aBcDeF1234567890"',
+    // Un mot long SANS chiffre après le libellé ne doit pas matcher
+    // (garde-fou lookahead \d dans la valeur).
+    negative: 'client_secret documentation page (no value assigned)'
   }
 ]
 

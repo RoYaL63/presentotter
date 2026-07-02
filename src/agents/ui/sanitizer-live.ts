@@ -145,11 +145,12 @@ interface CaptureTarget {
 // legible. OCR is in a worker + gated by the frame-hash skip, so the
 // extra cost only hits on actual screen changes.
 const MAX_SCAN_WIDTH = 2200
-// 250 ms cadence (was 1 s) means the engine notices a frame change in
-// at most a quarter second. Hash check is ~3 ms so the extra ticks
-// cost almost nothing — the heavy OCR only runs when something
-// actually changed.
-const DEFAULT_INTERVAL_MS = 250
+// 100 ms cadence (was 250 ms) means the engine notices a frame change
+// in a tenth of a second. Hash check is ~3 ms so the extra ticks cost
+// almost nothing — the heavy OCR only runs when something actually
+// changed, and the pre-shield covers the changed region the instant
+// the change is noticed (before OCR even starts).
+const DEFAULT_INTERVAL_MS = 100
 // Fingerprint grid. 48×27 = 1296 cells (was 16×9 = 144). The finer grid
 // is what makes the engine FAST: a freshly-pasted key only changes a few
 // cells, so we can OCR just that small region instead of the whole screen.
@@ -168,6 +169,16 @@ const FORCE_FULL_OCR_AFTER_MS = 4000
 // Pad the changed region by a couple of cells so glyphs straddling a cell
 // edge stay fully inside the cropped OCR input.
 const REGION_PAD_CELLS = 2
+// Pre-shield: the instant a frame change is detected, the changed region
+// is masked (opaque overlay) while the OCR runs. This closes the
+// screenshot window: a freshly-pasted key is covered within one tick
+// (~100 ms) instead of staying visible for the 300-1500 ms an OCR pass
+// takes. The shield is lifted (or replaced by a tight mask) as soon as
+// the scan completes. Changes bigger than this fraction of the frame
+// (scrolling, window switches) skip the shield — flashing a full-screen
+// blackout 10× per second while scrolling would make the tool unusable,
+// and big repaints are almost never "a secret just appeared".
+const PRESHIELD_MAX_AREA_RATIO = 0.45
 // JPEG quality used for the OCR input. 0.6 was too aggressive: it
 // blurred small monospace token text into unreadable mush. 0.9 keeps
 // the glyph edges crisp for Tesseract while still being far cheaper
@@ -212,6 +223,11 @@ export class SanitizerLiveEngine {
   /** Whether to run the label-based contextual detection pass on top
    *  of the regex pass. Toggleable live via setContextual(). */
   private contextual = true
+  /** Whether to raise a provisional mask over a changed region while
+   *  the OCR analyses it. Toggleable live via setPreShield(). */
+  private preShield = true
+  /** Callback used to raise the pre-shield mask (set at start()). */
+  private onShield: ((mask: LiveMask) => void) | null = null
 
   constructor() {
     this.canvas = document.createElement('canvas')
@@ -224,14 +240,20 @@ export class SanitizerLiveEngine {
     this.contextual = enabled
   }
 
+  setPreShield(enabled: boolean): void {
+    this.preShield = enabled
+  }
+
   /** Start the periodic scan loop. Idempotent. */
   async start(
     intervalMs: number = DEFAULT_INTERVAL_MS,
     onScan?: (r: ScanResult) => void,
-    onStatus?: (s: 'acquiring' | 'loading-ocr' | 'scanning' | 'idle') => void
+    onStatus?: (s: 'acquiring' | 'loading-ocr' | 'scanning' | 'idle') => void,
+    onShield?: (mask: LiveMask) => void
   ): Promise<void> {
     if (this.running) return
     this.running = true
+    this.onShield = onShield ?? null
     onStatus?.('acquiring')
     debug('acquireStream...')
     await this.acquireStream()
@@ -260,6 +282,7 @@ export class SanitizerLiveEngine {
     this.running = false
     this.lastSignature = null
     this.lastFullOcrAt = 0
+    this.onShield = null
     if (this.interval !== null) {
       window.clearInterval(this.interval)
       this.interval = null
@@ -447,19 +470,22 @@ export class SanitizerLiveEngine {
       const forceFull =
         this.lastSignature === null ||
         now - this.lastFullOcrAt >= FORCE_FULL_OCR_AFTER_MS
+      // Changed-cell bounds are computed on EVERY tick (not only on the
+      // region path) so the pre-shield can also fire when the change
+      // happens to land on a forced-full-scan tick.
+      const changed =
+        sig !== null && this.lastSignature !== null
+          ? changedCellsBounds(
+              sig,
+              this.lastSignature,
+              SIGNATURE_W,
+              SIGNATURE_H,
+              SIGNATURE_TOLERANCE
+            )
+          : null
       let region: { x: number; y: number; width: number; height: number } | null =
         null
       if (!forceFull) {
-        const changed =
-          sig !== null && this.lastSignature !== null
-            ? changedCellsBounds(
-                sig,
-                this.lastSignature,
-                SIGNATURE_W,
-                SIGNATURE_H,
-                SIGNATURE_TOLERANCE
-              )
-            : null
         if (changed === null) {
           debug('frame stable — skipping OCR')
           onStatus?.('idle')
@@ -470,6 +496,22 @@ export class SanitizerLiveEngine {
           this.video.videoWidth,
           this.video.videoHeight
         )
+      }
+      // ---- Pre-shield -----------------------------------------------
+      // Something changed on screen and we're about to spend 100-1500 ms
+      // OCR'ing it. Cover the changed area RIGHT NOW so a secret that
+      // just appeared is never visible in a screen-share while the OCR
+      // decides whether it's sensitive. Big repaints (scroll, window
+      // switch) skip the shield — see PRESHIELD_MAX_AREA_RATIO.
+      if (changed !== null && this.preShield && this.onShield !== null) {
+        const shieldRegion =
+          region ??
+          cellsToRegion(changed, this.video.videoWidth, this.video.videoHeight)
+        const frameArea = this.video.videoWidth * this.video.videoHeight
+        const shieldArea = shieldRegion.width * shieldRegion.height
+        if (shieldArea <= frameArea * PRESHIELD_MAX_AREA_RATIO) {
+          this.onShield(this.regionToCssMask(shieldRegion))
+        }
       }
       // This frame becomes the new baseline once we commit to OCR'ing it.
       if (sig !== null) this.lastSignature = sig
@@ -581,6 +623,31 @@ export class SanitizerLiveEngine {
     }
   }
 
+  /**
+   * Convert a changed-region rectangle (source physical pixels of the
+   * captured display) into a virtual-screen CSS mask for the pre-shield.
+   * Same transform as detectMasks minus the OCR-canvas scale (regions
+   * are already in source pixels).
+   */
+  private regionToCssMask(r: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }): LiveMask {
+    const t = this.target
+    const dpi = t?.scaleFactor ?? 1
+    const offX = t?.bounds.x ?? 0
+    const offY = t?.bounds.y ?? 0
+    return {
+      x: Math.floor(r.x / dpi + offX),
+      y: Math.floor(r.y / dpi + offY),
+      width: Math.ceil(r.width / dpi),
+      height: Math.ceil(r.height / dpi),
+      label: 'analyse…'
+    }
+  }
+
   private captureFrameToDataUrl(
     video: HTMLVideoElement,
     region?: { x: number; y: number; width: number; height: number } | null
@@ -644,16 +711,12 @@ export class SanitizerLiveEngine {
     const offY = t?.bounds.y ?? 0
     const toCssX = (px: number): number => (px * scaleX) / dpi + offX
     const toCssY = (px: number): number => (px * scaleY) / dpi + offY
-    // Right edge of the captured display in virtual-screen CSS space.
-    // Masks become horizontal stripes from the detected x position all
-    // the way to this edge. Two reasons:
-    //   1. OCR's bbox jitter between scans no longer pulls the mask off
-    //      the secret — even if the new bbox shifts a few px right, the
-    //      stripe still covers the original column.
-    //   2. Most secrets sit at the end of a labeled line ("Token: xyz"
-    //      or "Code: *****tuy6") with nothing useful to their right, so
-    //      over-masking the trailing whitespace is harmless.
-    const displayRightCss = offX + (t?.bounds.width ?? 0)
+    // Masks are TIGHT: they cover the matched words' bbox + MASK_PAD only,
+    // never more. The old stripe-to-the-right-edge behaviour over-masked
+    // everything to the right of a secret; scan-to-scan bbox jitter is
+    // absorbed by the slightly larger pad + the sticky pool's overlap
+    // matching on the toolbar side instead.
+    const MASK_PAD = 6
 
     // Build the flat OCR text + a char-range → word index lookup so we can
     // map each regex hit back to the words that produced it.
@@ -701,17 +764,10 @@ export class SanitizerLiveEngine {
           if (match[0].length === 0) pattern.regex.lastIndex += 1
           continue
         }
-        // A small padding so the mask covers the letters fully
-        const PAD = 4
-        const cssX = toCssX(x0) - PAD
-        const cssY = toCssY(y0) - PAD
-        // Stripe to the right edge of the display rather than just
-        // covering the matched word — absorbs OCR x-jitter completely.
-        const cssW = Math.max(
-          (x1 - x0) * scaleX / dpi + PAD * 2,
-          displayRightCss - cssX
-        )
-        const cssH = (y1 - y0) * scaleY / dpi + PAD * 2
+        const cssX = toCssX(x0) - MASK_PAD
+        const cssY = toCssY(y0) - MASK_PAD
+        const cssW = (x1 - x0) * scaleX / dpi + MASK_PAD * 2
+        const cssH = (y1 - y0) * scaleY / dpi + MASK_PAD * 2
         masks.push({
           x: Math.floor(cssX),
           y: Math.floor(cssY),
@@ -766,14 +822,10 @@ export class SanitizerLiveEngine {
             if (match[0].length === 0) pattern.regex.lastIndex += 1
             continue
           }
-          const PAD = 4
-          const cssX = toCssX(x0) - PAD
-          const cssY = toCssY(y0) - PAD
-          const cssW = Math.max(
-            (x1 - x0) * scaleX / dpi + PAD * 2,
-            displayRightCss - cssX
-          )
-          const cssH = (y1 - y0) * scaleY / dpi + PAD * 2
+          const cssX = toCssX(x0) - MASK_PAD
+          const cssY = toCssY(y0) - MASK_PAD
+          const cssW = (x1 - x0) * scaleX / dpi + MASK_PAD * 2
+          const cssH = (y1 - y0) * scaleY / dpi + MASK_PAD * 2
           masks.push({
             x: Math.floor(cssX),
             y: Math.floor(cssY),
@@ -795,15 +847,10 @@ export class SanitizerLiveEngine {
     // next to them screams "this is a secret".
     const contextualMasks = this.contextual ? this.detectContextualSecrets(words) : []
     for (const ctxMask of contextualMasks) {
-      const PAD = 4
-      const cssX = toCssX(ctxMask.x0) - PAD
-      const cssY = toCssY(ctxMask.y0) - PAD
-      // Same stripe-to-right-edge trick as the regex pass above.
-      const cssW = Math.max(
-        (ctxMask.x1 - ctxMask.x0) * scaleX / dpi + PAD * 2,
-        displayRightCss - cssX
-      )
-      const cssH = (ctxMask.y1 - ctxMask.y0) * scaleY / dpi + PAD * 2
+      const cssX = toCssX(ctxMask.x0) - MASK_PAD
+      const cssY = toCssY(ctxMask.y0) - MASK_PAD
+      const cssW = (ctxMask.x1 - ctxMask.x0) * scaleX / dpi + MASK_PAD * 2
+      const cssH = (ctxMask.y1 - ctxMask.y0) * scaleY / dpi + MASK_PAD * 2
       masks.push({
         x: Math.floor(cssX),
         y: Math.floor(cssY),
@@ -825,11 +872,10 @@ export class SanitizerLiveEngine {
       for (const w of words) {
         if (!w || !w.bbox) continue
         if (!looksLikeSecretToken(w.text)) continue
-        const PAD = 4
-        const cssX = toCssX(w.bbox.x0) - PAD
-        const cssY = toCssY(w.bbox.y0) - PAD
-        const cssW = (w.bbox.x1 - w.bbox.x0) * scaleX / dpi + PAD * 2
-        const cssH = (w.bbox.y1 - w.bbox.y0) * scaleY / dpi + PAD * 2
+        const cssX = toCssX(w.bbox.x0) - MASK_PAD
+        const cssY = toCssY(w.bbox.y0) - MASK_PAD
+        const cssW = (w.bbox.x1 - w.bbox.x0) * scaleX / dpi + MASK_PAD * 2
+        const cssH = (w.bbox.y1 - w.bbox.y0) * scaleY / dpi + MASK_PAD * 2
         masks.push({
           x: Math.floor(cssX),
           y: Math.floor(cssY),

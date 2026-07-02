@@ -395,6 +395,13 @@ export function Tools() {
         </div>
 
         <SanitizerToggle
+          label="Bouclier préventif"
+          help="Couvre immédiatement la zone de l'écran qui vient de changer, le temps que l'OCR l'analyse (moins d'une seconde). Garantit qu'un secret fraîchement affiché n'est jamais visible, même une fraction de seconde. Le masque provisoire se retire seul, ou d'un clic sur son ✕."
+          value={sanitizer.preShield}
+          onChange={(v) => setSanitizer({ preShield: v })}
+        />
+
+        <SanitizerToggle
           label="Détection contextuelle"
           help='Masque la valeur 6+ caractères qui suit un libellé comme "secret", "mot de passe", "token", "credential", "key" sur la même ligne (FR + EN). Désactive si tu vois trop de faux positifs.'
           value={sanitizer.contextual}

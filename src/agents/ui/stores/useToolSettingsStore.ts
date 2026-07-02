@@ -66,6 +66,10 @@ export interface SanitizerSettings {
   contextual: boolean
   /** Detection engine(s) to run while LIVE is on. */
   detectionMode: DetectionMode
+  /** Cover a changed screen region the instant the change is noticed,
+   *  while the OCR analyses it. Closes the "screenshot window" between
+   *  a secret appearing and its tight mask landing. */
+  preShield: boolean
 }
 
 export interface EphemeralSettings {
@@ -139,7 +143,11 @@ const FACTORY_SANITIZER: SanitizerSettings = {
   // Contextual detection is on by default — a strict regex-only mode
   // misses too many real-world cases (Cloud Console "Code secret du
   // client", admin dashboards, etc.).
-  contextual: true
+  contextual: true,
+  // Pre-shield on by default: a secret must never be visible during the
+  // OCR latency. The provisional mask lives well under a second and can
+  // be dismissed like any other mask if it covered something harmless.
+  preShield: true
 }
 
 const FACTORY_EPHEMERAL: EphemeralSettings = {

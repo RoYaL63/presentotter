@@ -158,7 +158,7 @@ export function SanitizerPopup({ onClose }: SanitizerPopupProps) {
               <div>
                 <p className="font-semibold">Aucun secret détecté</p>
                 <p className="mt-0.5 text-xs text-emerald-200/70">
-                  Gardien n'a rien matché parmi ses 10 patterns P0. Reste vigilant pour les
+                  Gardien n'a rien matché parmi ses {PATTERNS.length} patterns. Reste vigilant pour les
                   formats personnalisés non reconnus.
                 </p>
               </div>

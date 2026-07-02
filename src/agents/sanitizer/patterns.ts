@@ -79,10 +79,217 @@ export const PATTERNS: SanitizePatternWithType[] = [
     zoneType: 'api-key'
   },
   {
+    // GitHub fine-grained personal access tokens (new format, 2022+).
+    // Distinct prefix from the classic gh?_ tokens above.
+    name: 'github-fine-grained-pat',
+    regex: /\bgithub_pat_[A-Za-z0-9_]{36,}\b/g,
+    replacement: '[REDACTED:github-fine-pat]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'gitlab-token',
+    regex: /\bglpat-[A-Za-z0-9_-]{20,}\b/g,
+    replacement: '[REDACTED:gitlab-pat]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'npm-token',
+    regex: /\bnpm_[A-Za-z0-9]{30,}\b/g,
+    replacement: '[REDACTED:npm-token]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    // xox[abprs]- classic Slack tokens + xapp- app-level tokens.
     name: 'slack-token',
-    regex: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g,
+    regex: /\bx(?:ox[abprs]|app)-[A-Za-z0-9-]{10,}\b/g,
     replacement: '[REDACTED:slack-token]',
     confidence: 0.95,
+    zoneType: 'api-key'
+  },
+  {
+    // Google API keys (Maps, Gemini, Firebase…) all share the AIza prefix.
+    // Official length is 39 total; 30+ body absorbs OCR truncation.
+    name: 'google-api-key',
+    regex: /\bAIza[0-9A-Za-z_-]{30,}\b/g,
+    replacement: '[REDACTED:google-api-key]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'huggingface-token',
+    regex: /\bhf_[A-Za-z0-9]{28,}\b/g,
+    replacement: '[REDACTED:hf-token]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'groq-api-key',
+    regex: /\bgsk_[A-Za-z0-9]{20,}\b/g,
+    replacement: '[REDACTED:groq-key]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'xai-api-key',
+    regex: /\bxai-[A-Za-z0-9]{20,}\b/g,
+    replacement: '[REDACTED:xai-key]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'replicate-token',
+    regex: /\br8_[A-Za-z0-9]{20,}\b/g,
+    replacement: '[REDACTED:replicate-token]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'perplexity-api-key',
+    regex: /\bpplx-[A-Za-z0-9]{20,}\b/g,
+    replacement: '[REDACTED:pplx-key]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'tavily-api-key',
+    regex: /\btvly-[A-Za-z0-9_-]{16,}\b/g,
+    replacement: '[REDACTED:tavly-key]',
+    confidence: 0.95,
+    zoneType: 'api-key'
+  },
+  {
+    // DigitalOcean tokens: dop_v1_ (personal), doo_v1_ (OAuth), dor_v1_
+    // (refresh). Body is 64 hex chars; 40+ absorbs OCR truncation.
+    name: 'digitalocean-token',
+    regex: /\bdo[opr]_v1_[a-f0-9]{40,}\b/g,
+    replacement: '[REDACTED:do-token]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    // Shopify: shpat_ (admin), shpca_ (custom app), shpss_ (shared secret).
+    name: 'shopify-token',
+    regex: /\bshp(?:at|ca|ss)_[a-fA-F0-9]{28,}\b/g,
+    replacement: '[REDACTED:shopify-token]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'stripe-webhook-secret',
+    regex: /\bwhsec_[A-Za-z0-9]{24,}\b/g,
+    replacement: '[REDACTED:stripe-whsec]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    // Twilio API key SID / auth token shapes: SK + 32 lowercase hex.
+    // Case-sensitive body — an all-caps word starting with SK won't match.
+    name: 'twilio-api-key',
+    regex: /\bSK[a-f0-9]{32}\b/g,
+    replacement: '[REDACTED:twilio-key]',
+    confidence: 0.9,
+    zoneType: 'api-key'
+  },
+  {
+    // Airtable personal access tokens: pat + 14 alnum + '.' + hex tail.
+    name: 'airtable-pat',
+    regex: /\bpat[A-Za-z0-9]{14}\.[a-f0-9]{40,}\b/g,
+    replacement: '[REDACTED:airtable-pat]',
+    confidence: 0.95,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'linear-api-key',
+    regex: /\blin_api_[A-Za-z0-9]{20,}\b/g,
+    replacement: '[REDACTED:linear-key]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'figma-token',
+    regex: /\bfigd_[A-Za-z0-9_-]{20,}\b/g,
+    replacement: '[REDACTED:figma-token]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'docker-pat',
+    regex: /\bdckr_pat_[A-Za-z0-9_-]{20,}\b/g,
+    replacement: '[REDACTED:docker-pat]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'pypi-token',
+    regex: /\bpypi-[A-Za-z0-9_-]{40,}\b/g,
+    replacement: '[REDACTED:pypi-token]',
+    confidence: 0.95,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'netlify-token',
+    regex: /\bnfp_[A-Za-z0-9]{30,}\b/g,
+    replacement: '[REDACTED:netlify-token]',
+    confidence: 0.95,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'postman-api-key',
+    regex: /\bPMAK-[a-f0-9]{24}-[a-f0-9]{34}\b/g,
+    replacement: '[REDACTED:postman-key]',
+    confidence: 0.98,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'supabase-token',
+    regex: /\bsbp_[a-f0-9]{30,}\b/g,
+    replacement: '[REDACTED:supabase-token]',
+    confidence: 0.95,
+    zoneType: 'api-key'
+  },
+  {
+    name: 'hubspot-pat',
+    regex: /\bpat-(?:na|eu)\d*-[a-f0-9][a-f0-9-]{20,}\b/g,
+    replacement: '[REDACTED:hubspot-pat]',
+    confidence: 0.95,
+    zoneType: 'api-key'
+  },
+  {
+    // Brevo (ex-Sendinblue) API keys.
+    name: 'brevo-api-key',
+    regex: /\bxkeysib-[a-f0-9-]{30,}\b/g,
+    replacement: '[REDACTED:brevo-key]',
+    confidence: 0.95,
+    zoneType: 'api-key'
+  },
+  {
+    // Mailchimp keys: 32 hex + datacenter suffix (-us1 … -us21).
+    name: 'mailchimp-api-key',
+    regex: /\b[a-f0-9]{32}-us\d{1,2}\b/g,
+    replacement: '[REDACTED:mailchimp-key]',
+    confidence: 0.9,
+    zoneType: 'api-key'
+  },
+  {
+    // Resend keys are re_ + alnum. The lookahead requires at least one
+    // digit in the body so ordinary re_-prefixed code identifiers
+    // (re_compile_pattern…) don't get masked.
+    name: 'resend-api-key',
+    regex: /\bre_(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{20,}\b/g,
+    replacement: '[REDACTED:resend-key]',
+    confidence: 0.9,
+    zoneType: 'api-key'
+  },
+  {
+    // req_-prefixed tokens (various vendors + request-signing secrets).
+    // Same digit-lookahead guard as re_ above.
+    name: 'req-prefixed-token',
+    regex: /\breq_(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{16,}\b/g,
+    replacement: '[REDACTED:req-token]',
+    confidence: 0.85,
     zoneType: 'api-key'
   },
   {
@@ -159,11 +366,56 @@ export const PATTERNS: SanitizePatternWithType[] = [
     zoneType: 'credential'
   },
   {
+    // AKIA = long-term access key, ASIA = temporary (STS), ABIA/ACCA =
+    // less common variants. Same 16-char uppercase body for all.
     name: 'aws-access-key',
-    regex: /AKIA[0-9A-Z]{16}/g,
+    regex: /\b(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}\b/g,
     replacement: '[REDACTED:aws-access-key]',
     confidence: 0.95,
     zoneType: 'api-key'
+  },
+  {
+    // Azure SAS tokens travel as a `sig=` query parameter. Masking the
+    // signature alone is enough to make the URL unusable.
+    name: 'azure-sas-signature',
+    regex: /[?&]sig=[A-Za-z0-9%/+]{20,}={0,2}/g,
+    replacement: '[REDACTED:azure-sas]',
+    confidence: 0.9,
+    zoneType: 'credential'
+  },
+  {
+    // user:password@ in ANY http(s) URL (the database-url pattern above
+    // only covers db schemes). The `:pass@` shape is unambiguous.
+    name: 'url-basic-auth',
+    regex: /\bhttps?:\/\/[^:\s/@]+:[^@\s/]{3,}@[^\s"'<>]+/gi,
+    replacement: '[REDACTED:url-credentials]',
+    confidence: 0.95,
+    zoneType: 'credential'
+  },
+  {
+    // X-API-Key header (curl snippets, Postman, API docs). The user's
+    // exact "XAPI Key" case: `x-api-key: <value>` in any casing, with
+    // or without the dashes.
+    name: 'x-api-key-header',
+    regex: /\bx[-_]?api[-_]?key["'\s:=]+["']?[A-Za-z0-9_\-.+/=]{16,}/gi,
+    replacement: '[REDACTED:x-api-key]',
+    confidence: 0.9,
+    zoneType: 'api-key'
+  },
+  {
+    // Named secret assignments in code/config: client_secret=…,
+    // access_token: "…", refresh_token=…, secret_key=… — catches JSON,
+    // YAML, .env and CLI output alike. Complements env-var (which only
+    // matches UPPER_SNAKE names).
+    name: 'named-secret-assignment',
+    // Digit lookahead on the value: real secrets virtually always mix in
+    // digits; prose words after "access_token " (e.g. "documentation")
+    // don't, and must not be masked.
+    regex:
+      /\b(?:client[_-]?secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|secret[_-]?key|private[_-]?token)["'\s:=]+["']?(?=[A-Za-z0-9_\-./+=]*\d)[A-Za-z0-9_\-./+=]{12,}/gi,
+    replacement: '[REDACTED:named-secret]',
+    confidence: 0.9,
+    zoneType: 'credential'
   },
   {
     // AWS secret access keys are 40-char base64. Naked the pattern

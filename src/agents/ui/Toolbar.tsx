@@ -139,6 +139,12 @@ export function Toolbar() {
   // Regions the user dismissed via the ✕ on a mask. ingestMasks filters
   // against these so a removed mask doesn't reappear on the next scan.
   const dismissedMasksRef = useRef<DismissedRegion[]>([])
+  // Pre-shield: provisional mask raised by the engine the instant a
+  // screen change is detected, BEFORE the OCR has analysed it. Cleared
+  // when the scan completes (real masks known) or after its TTL if the
+  // scan failed. Kept separate from the sticky pool — it must never
+  // gain hysteresis.
+  const shieldMaskRef = useRef<(LiveMask & { until: number }) | null>(null)
 
   // Per-tool defaults persisted via Tools page (auto-synced across windows
   // through the storage event hooked inside useToolSettingsStore).
@@ -317,6 +323,21 @@ export function Toolbar() {
   const handleConsole = () => apiRef.current?.openConsole()
   const handleClose = () => apiRef.current?.toolbarClose()
 
+  // Push the current mask state (sticky pool + live pre-shield) to the
+  // overlays. Single funnel so every source of change goes through the
+  // same union logic.
+  const pushMasks = useCallback(() => {
+    const now = Date.now()
+    if (shieldMaskRef.current !== null && shieldMaskRef.current.until <= now) {
+      shieldMaskRef.current = null
+    }
+    const all =
+      shieldMaskRef.current !== null
+        ? [...stickyMasksRef.current, shieldMaskRef.current]
+        : stickyMasksRef.current
+    apiRef.current?.setLiveMasks(all)
+  }, [])
+
   // Merge a fresh batch of masks (from OCR or UIA) into the sticky pool
   // and push the union to the overlays. Both detection sources call this,
   // so masks from either keep each other's regions alive via the TTL.
@@ -355,8 +376,8 @@ export function Toolbar() {
       newSticky.push({ ...m, expiresAt: refreshedExpiry })
     }
     stickyMasksRef.current = newSticky
-    apiRef.current?.setLiveMasks(newSticky)
-  }, [])
+    pushMasks()
+  }, [pushMasks])
 
   // Overlay → here: the user removed a mask with its ✕. Suppress that
   // region and pull it from the live pool immediately so it vanishes
@@ -370,17 +391,38 @@ export function Toolbar() {
       if (existing) existing.lastSeen = now
       else dismissedMasksRef.current.push({ ...region, lastSeen: now })
 
-      const next = stickyMasksRef.current.filter(
+      stickyMasksRef.current = stickyMasksRef.current.filter(
         (m) => bboxOverlapRatio(m, region) < 0.3
       )
-      stickyMasksRef.current = next
-      apiRef.current?.setLiveMasks(next)
+      // The ✕ may have been clicked on the pre-shield itself.
+      if (
+        shieldMaskRef.current !== null &&
+        bboxOverlapRatio(shieldMaskRef.current, region) >= 0.3
+      ) {
+        shieldMaskRef.current = null
+      }
+      pushMasks()
     })
     return off
-  }, [])
+  }, [pushMasks])
+
+  // Engine noticed a screen change and is about to OCR it — cover the
+  // changed area immediately. TTL is a backstop for failed scans; the
+  // normal path clears it in handleScanResult as soon as the OCR lands.
+  const SHIELD_TTL_MS = 3000
+  const handleShield = useCallback(
+    (mask: LiveMask) => {
+      shieldMaskRef.current = { ...mask, until: Date.now() + SHIELD_TTL_MS }
+      pushMasks()
+    },
+    [pushMasks]
+  )
 
   const handleScanResult = useCallback(
     (result: ScanResult) => {
+      // Scan complete: the tight masks below are the truth for the region
+      // the shield was covering. Lift it.
+      shieldMaskRef.current = null
       ingestMasks(result.masks)
       // Status reflects what the LATEST OCR scan saw (not sticky carryover).
       setLiveStatus({
@@ -421,18 +463,24 @@ export function Toolbar() {
       )
       const before = stickyMasksRef.current.length
       const next = stickyMasksRef.current.filter((m) => m.expiresAt > now)
-      if (next.length !== before) {
+      const shieldExpired =
+        shieldMaskRef.current !== null && shieldMaskRef.current.until <= now
+      if (next.length !== before || shieldExpired) {
         stickyMasksRef.current = next
-        apiRef.current?.setLiveMasks(next)
+        pushMasks()
       }
-    }, 800)
+    }, 400)
     return () => window.clearInterval(id)
-  }, [liveOn])
+  }, [liveOn, pushMasks])
 
-  // Push contextual flag changes to the running engine without restart.
+  // Push contextual / pre-shield flag changes to the running engine
+  // without restart.
   useEffect(() => {
     engineRef.current?.setContextual(sanitizerSettings.contextual)
   }, [sanitizerSettings.contextual])
+  useEffect(() => {
+    engineRef.current?.setPreShield(sanitizerSettings.preShield)
+  }, [sanitizerSettings.preShield])
 
   // Push ephemeral lifetime to overlays whenever the user adjusts it
   // from Tools. Strokes already in flight keep the lifeMs they were
@@ -453,6 +501,7 @@ export function Toolbar() {
       // LIVE in the same session would carry over stale masks.
       stickyMasksRef.current = []
       dismissedMasksRef.current = []
+      shieldMaskRef.current = null
       api.clearLiveMasks()
       api.clearLiveOcrWords()
       api.stopUia()
@@ -477,8 +526,14 @@ export function Toolbar() {
       if (mode !== 'uia') {
         const engine = new SanitizerLiveEngine()
         engine.setContextual(sanitizerSettings.contextual)
+        engine.setPreShield(sanitizerSettings.preShield)
         engineRef.current = engine
-        await engine.start(undefined, handleScanResult, (phase) => setLivePhase(phase))
+        await engine.start(
+          undefined,
+          handleScanResult,
+          (phase) => setLivePhase(phase),
+          handleShield
+        )
       } else {
         setLivePhase('scanning')
       }
@@ -494,7 +549,14 @@ export function Toolbar() {
         engineRef.current = null
       }
     }
-  }, [liveOn, handleScanResult, sanitizerSettings.contextual, sanitizerSettings.detectionMode])
+  }, [
+    liveOn,
+    handleScanResult,
+    handleShield,
+    sanitizerSettings.contextual,
+    sanitizerSettings.preShield,
+    sanitizerSettings.detectionMode
+  ])
 
   // Tear down the engine + native scanner when the toolbar unmounts.
   useEffect(() => {
