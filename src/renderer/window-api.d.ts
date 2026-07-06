@@ -65,6 +65,18 @@ declare global {
     setOverlayInteractive(interactive: boolean): void
     setOverlayVisible(visible: boolean): void
     requestOverlayFocus(): void
+    getOverlayDisplay(): Promise<{
+      id: number
+      bounds: { x: number; y: number; width: number; height: number }
+      scaleFactor: number
+    } | null>
+    onOverlayDisplayChanged(
+      cb: (info: {
+        id: number
+        bounds: { x: number; y: number; width: number; height: number }
+        scaleFactor: number
+      }) => void
+    ): () => void
 
     setLiveMasks(zones: LiveMask[]): void
     clearLiveMasks(): void
@@ -222,6 +234,7 @@ declare global {
     } | null>
     recorderDone(savePath: string | null): void
     recorderSetSize(width: number, height: number): void
+    recorderSetPosition(x: number, y: number): void
     recorderCycleDisplay(): void
     onRecorderStop(cb: () => void): () => void
 

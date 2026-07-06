@@ -216,11 +216,22 @@ function createOverlayWindow(display: Display): BrowserWindow {
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setIgnoreMouseEvents(true, { forward: true })
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  // Force the bounds in screen coordinates. The BrowserWindow constructor
+  // interprets width/height with the PRIMARY display's DPI, so on a
+  // secondary monitor with a different scale the overlay comes out the
+  // wrong size — annotations and cursor effects then only cover part of
+  // that screen (or none of it). setBounds re-applies them in the target
+  // screen's own DPI so the overlay truly covers that display. Same fix
+  // as the capture windows (see capture.ts createCaptureWindow).
+  win.setBounds({ x, y, width, height })
 
   void win.loadURL(rendererUrl('overlay'))
 
   win.once('ready-to-show', () => {
     win.showInactive()
+    // Re-assert the bounds after show — Windows can resize a frameless
+    // window on first paint (the mixed-DPI "micro window" problem).
+    win.setBounds({ x, y, width, height })
     // After the overlay raises, push the toolbar back above it so its
     // buttons stay clickable (see setOverlaysInteractive comment).
     if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
@@ -947,6 +958,22 @@ function registerIpcHandlers(): void {
     setOverlaysVisible(visible)
   )
 
+  /** An overlay asks which display it lives on. Authoritative id + DIP
+   *  bounds from main — window.screenX/Y in the renderer is unreliable on
+   *  mixed-DPI multi-monitor setups, which broke cursor-effect mapping on
+   *  every screen except the primary. */
+  ipcMain.handle('overlay:get-display', (event) => {
+    for (const [displayId, w] of overlayWindows) {
+      if (w.isDestroyed() || w.webContents.id !== event.sender.id) continue
+      const d = screen.getAllDisplays().find((dd) => dd.id === displayId)
+      if (d !== undefined) {
+        return { id: d.id, bounds: d.bounds, scaleFactor: d.scaleFactor }
+      }
+      return { id: displayId, bounds: w.getBounds(), scaleFactor: 1 }
+    }
+    return null
+  })
+
   ipcMain.on('overlay:set-live-masks', (_e, zones: unknown) => {
     forwardToOverlays('overlay:set-live-masks', zones)
   })
@@ -1170,6 +1197,13 @@ function setupDisplayHotPlug(): void {
     if (w !== undefined && !w.isDestroyed()) {
       const { x, y, width, height } = display.bounds
       w.setBounds({ x, y, width, height })
+      // Keep the renderer's screen-space mapping in sync (cursor effects,
+      // OCR masks) after a resolution / scale / arrangement change.
+      w.webContents.send('overlay:display-changed', {
+        id: display.id,
+        bounds: display.bounds,
+        scaleFactor: display.scaleFactor
+      })
     }
   })
 }

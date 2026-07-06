@@ -150,6 +150,11 @@ export function Overlay() {
   const toolRef = useRef<ToolId>('select')
   const closeHoverRef = useRef(false)
   const overlayOriginRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
+  // Authoritative display id of THIS overlay, fetched from main. Cursor
+  // samples carry the id of the display the cursor is on; comparing ids is
+  // the only reliable "is the cursor on my screen?" test on mixed-DPI
+  // multi-monitor setups (window.screenX/Y lies there).
+  const displayIdRef = useRef<number | null>(null)
   const idCounter = useRef(0)
   const animationRef = useRef<number | null>(null)
 
@@ -254,14 +259,34 @@ export function Overlay() {
       // Make sure the rAF pump is running while we have fresh samples
       // to consume — it self-stops when idle, this revives it.
       kickAnimationRef.current()
-      const origin = overlayOriginRef.current
-      // Translate global screen coords → this overlay's local (CSS) frame.
-      const localX = pos.screenX - origin.x
-      const localY = pos.screenY - origin.y
-      const w = window.innerWidth
-      const h = window.innerHeight
-      const onThisDisplay = localX >= 0 && localX <= w && localY >= 0 && localY <= h
+      // "Is the cursor on my screen?" — compare display ids when we know
+      // ours (authoritative, DPI-proof). Fall back to bounds math against
+      // the window origin only if the display id never arrived.
+      const myDisplayId = displayIdRef.current
+      let onThisDisplay: boolean
+      let localX: number
+      let localY: number
+      if (myDisplayId !== null) {
+        onThisDisplay = pos.onDisplayId === myDisplayId
+        // Both the sample and our origin are DIP screen coords from main,
+        // and inside an Electron window CSS px == DIP, so this subtraction
+        // is exact on every display regardless of its scale factor.
+        localX = pos.screenX - pos.displayBounds.x
+        localY = pos.screenY - pos.displayBounds.y
+      } else {
+        const origin = overlayOriginRef.current
+        localX = pos.screenX - origin.x
+        localY = pos.screenY - origin.y
+        const w = window.innerWidth
+        const h = window.innerHeight
+        onThisDisplay = localX >= 0 && localX <= w && localY >= 0 && localY <= h
+      }
       cursorOnThisDisplayRef.current = onThisDisplay
+      if (!onThisDisplay && cursorTrailRef.current.length > 0) {
+        // The cursor left this screen: drop the stale trail so the halo
+        // doesn't freeze mid-screen until the samples time out.
+        cursorTrailRef.current = []
+      }
       if (onThisDisplay) {
         const prev =
           cursorTrailRef.current[cursorTrailRef.current.length - 1] ?? null
@@ -354,15 +379,37 @@ export function Overlay() {
     return () => window.removeEventListener('storage', onStorage)
   }, [])
 
-  // Each overlay needs to know its display origin to translate global cursor
-  // coordinates into its own local frame. We infer that from window.screenX/Y.
+  // Each overlay needs to know which display it covers (id + origin) to
+  // translate global screen coordinates into its own local frame. The
+  // authoritative answer comes from main (overlay:get-display) — inferring
+  // from window.screenX/Y breaks on mixed-DPI multi-monitor setups, where
+  // Chromium reports coordinates in a different space than Electron's DIP
+  // screen. window.screenX/Y stays as a best-effort fallback until (or in
+  // case) the IPC answer never lands.
   useEffect(() => {
-    const update = () => {
+    let hasAuthoritativeOrigin = false
+    const applyDisplayInfo = (info: {
+      id: number
+      bounds: { x: number; y: number; width: number; height: number }
+    }): void => {
+      hasAuthoritativeOrigin = true
+      displayIdRef.current = info.id
+      overlayOriginRef.current = { x: info.bounds.x, y: info.bounds.y }
+    }
+    const fallback = () => {
+      if (hasAuthoritativeOrigin) return
       overlayOriginRef.current = { x: window.screenX, y: window.screenY }
     }
-    update()
-    window.addEventListener('resize', update)
-    return () => window.removeEventListener('resize', update)
+    fallback()
+    window.addEventListener('resize', fallback)
+    const offChanged = window.api?.onOverlayDisplayChanged?.(applyDisplayInfo)
+    void window.api?.getOverlayDisplay?.().then((info) => {
+      if (info !== null && info !== undefined) applyDisplayInfo(info)
+    })
+    return () => {
+      window.removeEventListener('resize', fallback)
+      offChanged?.()
+    }
   }, [])
 
   // Make a mask's ✕ clickable on the otherwise click-through overlay.
@@ -531,8 +578,12 @@ export function Overlay() {
     // from being created underneath the toolbar.
     const toolbarRect = toolbarRectRef.current
     if (toolbarRect !== null) {
-      const screenX = e.clientX + window.screenX
-      const screenY = e.clientY + window.screenY
+      // Screen position of the click in DIP coords: local CSS + this
+      // overlay's display origin (authoritative from main — see the
+      // display-info effect). The toolbar rect is in the same space.
+      const origin = overlayOriginRef.current
+      const screenX = e.clientX + origin.x
+      const screenY = e.clientY + origin.y
       if (
         screenX >= toolbarRect.x &&
         screenX <= toolbarRect.x + toolbarRect.width &&

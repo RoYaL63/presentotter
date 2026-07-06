@@ -240,6 +240,36 @@ const api = {
   setOverlayVisible: (visible: boolean) =>
     ipcRenderer.send('overlay:set-visible', visible),
 
+  /** Overlay-side: which display does this overlay window cover?
+   *  Authoritative id + DIP bounds from main — window.screenX/Y is
+   *  unreliable on mixed-DPI multi-monitor setups. */
+  getOverlayDisplay: (): Promise<{
+    id: number
+    bounds: { x: number; y: number; width: number; height: number }
+    scaleFactor: number
+  } | null> => ipcRenderer.invoke('overlay:get-display'),
+
+  /** Overlay-side: this overlay's display changed (resolution, scale,
+   *  arrangement). Payload mirrors getOverlayDisplay. */
+  onOverlayDisplayChanged: (
+    cb: (info: {
+      id: number
+      bounds: { x: number; y: number; width: number; height: number }
+      scaleFactor: number
+    }) => void
+  ) => {
+    const handler = (
+      _e: unknown,
+      info: {
+        id: number
+        bounds: { x: number; y: number; width: number; height: number }
+        scaleFactor: number
+      }
+    ) => cb(info)
+    ipcRenderer.on('overlay:display-changed', handler)
+    return () => ipcRenderer.off('overlay:display-changed', handler)
+  },
+
   // ---------- Overlay-side listeners ----------
 
   onSetTool: (cb: (tool: ToolName) => void) => {
@@ -448,6 +478,10 @@ const api = {
   /** Recorder window: resize itself (compact pill ↔ full panel). */
   recorderSetSize: (width: number, height: number) =>
     ipcRenderer.send('recorder:set-size', { width, height }),
+
+  /** Recorder window: move itself (manual header drag). */
+  recorderSetPosition: (x: number, y: number) =>
+    ipcRenderer.send('recorder:set-position', { x, y }),
 
   /** Recorder window: hop to the next display (so it never sits on the
    *  screen being filmed). */

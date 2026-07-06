@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Circle,
+  GripVertical,
   Image as ImageIcon,
   Maximize2,
   Mic,
@@ -51,9 +52,19 @@ import { useToolSettingsStore } from './stores/useToolSettingsStore'
 type Phase = 'setup' | 'recording' | 'paused' | 'saving' | 'error'
 
 const PANEL_W = 360
-const PANEL_H = 480
-const COMPACT_W = 214
-const COMPACT_H = 56
+const PANEL_H = 528
+const COMPACT_W = 200
+const COMPACT_H = 52
+
+/** Friendly default file name — the user can edit it before recording.
+ *  Uses 'h' instead of ':' since Windows filenames can't contain a colon. */
+function defaultRecordingName(): string {
+  const d = new Date()
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `Enregistrement ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(
+    d.getDate()
+  )} ${pad(d.getHours())}h${pad(d.getMinutes())}`
+}
 
 interface Config {
   sourceId: string
@@ -104,10 +115,12 @@ function fmt(ms: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-// Inline drag regions for the frameless window. The header drags the whole
-// panel; every control opts back out with `no-drag` so clicks register.
-const DRAG = { WebkitAppRegion: 'drag' } as React.CSSProperties
-const NODRAG = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
+// We drive the window position from pointer events on the header instead of
+// the native `-webkit-app-region: drag`. That CSS trick needed a pixel-precise
+// grab on the thin header and frequently ignored the first click (the window
+// wasn't focused yet), which is exactly the "tricky to drag" behaviour we're
+// fixing here. Manual dragging via IPC (like the toolbar's minimized bubble)
+// grabs on press every time.
 
 export function RegionRecorder(): React.ReactElement {
   const [phase, setPhase] = useState<Phase>('setup')
@@ -117,6 +130,17 @@ export function RegionRecorder(): React.ReactElement {
   const [mic, setMic] = useState(false)
   const [webcam, setWebcam] = useState(false)
   const [compact, setCompact] = useState(false)
+  // Editable file name. The saved WebM lands in Videos\PresentOtter under
+  // this name. nameRef mirrors it so the async save path (which can fire
+  // long after the last render) always reads the freshest value.
+  const [name, setName] = useState<string>(() => defaultRecordingName())
+  const nameRef = useRef<string>(name)
+  useEffect(() => {
+    nameRef.current = name
+  }, [name])
+  // How many clips this session has already written. Lets "Couper" produce
+  // "Name.webm", "Name (2).webm", … instead of silently overwriting.
+  const savedCountRef = useRef(0)
 
   // Webcam background preference comes from the PERSISTENT store, so the
   // user's blur / image / color choice is always there on relaunch and can
@@ -172,6 +196,62 @@ export function RegionRecorder(): React.ReactElement {
   const setPhaseSafe = (p: Phase): void => {
     phaseRef.current = p
     setPhase(p)
+  }
+
+  // ---- Manual window drag (header grab) ----
+  // Same technique as the toolbar's minimized bubble: track the pointer in
+  // absolute screen coords (window origin + client offset), then feed the new
+  // origin back to main. Buttons/inputs inside the handle opt out so their
+  // clicks still register.
+  const dragRef = useRef<{
+    pointerId: number
+    startScreenX: number
+    startScreenY: number
+    startWinX: number
+    startWinY: number
+  } | null>(null)
+
+  const onDragPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (e.button !== 0) return
+    if ((e.target as HTMLElement).closest('button, input, a, [data-no-drag]')) {
+      return
+    }
+    e.currentTarget.setPointerCapture(e.pointerId)
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startScreenX: window.screenX + e.clientX,
+      startScreenY: window.screenY + e.clientY,
+      startWinX: window.screenX,
+      startWinY: window.screenY
+    }
+  }
+
+  const onDragPointerMove = (e: React.PointerEvent<HTMLDivElement>): void => {
+    const s = dragRef.current
+    if (s === null || e.pointerId !== s.pointerId) return
+    const dx = window.screenX + e.clientX - s.startScreenX
+    const dy = window.screenY + e.clientY - s.startScreenY
+    window.api?.recorderSetPosition(s.startWinX + dx, s.startWinY + dy)
+  }
+
+  const onDragPointerUp = (e: React.PointerEvent<HTMLDivElement>): void => {
+    const s = dragRef.current
+    dragRef.current = null
+    if (s === null || e.pointerId !== s.pointerId) return
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {
+      /* pointer already released (Windows cross-window drag quirk) */
+    }
+  }
+
+  const dragHandlers = {
+    onPointerDown: onDragPointerDown,
+    onPointerMove: onDragPointerMove,
+    onPointerUp: onDragPointerUp,
+    onPointerCancel: () => {
+      dragRef.current = null
+    }
   }
 
   // Keep the effect refs in lock-step with the persistent settings, so a
@@ -421,15 +501,25 @@ export function RegionRecorder(): React.ReactElement {
   /** Write a set of recorded chunks to disk. Returns the saved path (or
    *  null on empty/failed save). Does NOT touch streams or window state —
    *  the caller decides whether to finish or restart afterwards. */
+  /** Build the .webm file name from the user's editable name. The 2nd, 3rd,
+   *  … clip of the same session (via "Couper") gets a " (n)" suffix so a
+   *  multi-clip take doesn't overwrite itself. Main sanitizes illegal
+   *  characters, so we only need to strip a redundant extension here. */
+  const buildFileName = (): string => {
+    const raw = nameRef.current.trim().replace(/\.webm$/i, '')
+    const base = raw.length > 0 ? raw : defaultRecordingName()
+    const n = ++savedCountRef.current
+    return n > 1 ? `${base} (${n}).webm` : `${base}.webm`
+  }
+
   const saveChunks = async (chunks: Blob[]): Promise<string | null> => {
     try {
       const blob = new Blob(chunks, { type: 'video/webm' })
       if (blob.size === 0) return null
       const bytes = new Uint8Array(await blob.arrayBuffer())
-      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
       const res = await window.api?.recordingSaveBlob({
         bytes,
-        suggestedName: `PresentOtter-zone ${ts}.webm`
+        suggestedName: buildFileName()
       })
       return res?.path ?? null
     } catch (err) {
@@ -619,8 +709,8 @@ export function RegionRecorder(): React.ReactElement {
   if (compact) {
     return (
       <div
-        style={DRAG}
-        className="flex h-screen w-screen items-center gap-2 rounded-full border border-[#3BE6C033] bg-[#0A1F1Bf2] px-3 text-[#E7F3ED] shadow-[0_12px_32px_rgba(0,0,0,0.55)]"
+        {...dragHandlers}
+        className="flex h-screen w-screen cursor-move touch-none select-none items-center gap-2 rounded-full border border-[#3BE6C033] bg-[#0A1F1Bf2] px-3 text-[#E7F3ED] shadow-[0_12px_32px_rgba(0,0,0,0.55)]"
       >
         <span className="text-sm">🦦</span>
         {recording ? (
@@ -636,7 +726,7 @@ export function RegionRecorder(): React.ReactElement {
         ) : (
           <span className="text-[12px] font-medium opacity-80">Prêt</span>
         )}
-        <div className="ml-auto flex items-center gap-1" style={NODRAG}>
+        <div className="ml-auto flex items-center gap-1">
           {recording && (
             <button
               type="button"
@@ -670,7 +760,11 @@ export function RegionRecorder(): React.ReactElement {
 
   return (
     <div className="flex h-screen w-screen flex-col gap-2.5 rounded-2xl border border-[#3BE6C033] bg-[#0A1F1Bf2] p-3 text-[#E7F3ED] shadow-[0_18px_50px_rgba(0,0,0,0.55)]">
-      <div className="flex items-center gap-2" style={DRAG}>
+      <div
+        {...dragHandlers}
+        className="-mx-1 flex cursor-move touch-none select-none items-center gap-2 rounded-lg px-1 py-1 hover:bg-white/[0.03]"
+      >
+        <GripVertical className="h-4 w-4 flex-shrink-0 text-[#5b8a7e]" strokeWidth={2} />
         <span className="text-sm">🦦</span>
         <span className="text-sm font-semibold tracking-tight">
           Enregistrer une zone
@@ -686,7 +780,7 @@ export function RegionRecorder(): React.ReactElement {
             {fmt(elapsed)}
           </span>
         )}
-        <div className="ml-auto flex items-center gap-1" style={NODRAG}>
+        <div className="ml-auto flex items-center gap-1">
           <button
             type="button"
             onClick={() => window.api?.recorderCycleDisplay()}
@@ -741,6 +835,28 @@ export function RegionRecorder(): React.ReactElement {
         </button>
       ) : phase === 'setup' ? (
         <>
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor="recorder-name"
+              className="px-1 text-[11px] font-semibold uppercase tracking-wide text-[#7fbfb0]"
+            >
+              Nom du fichier
+            </label>
+            <input
+              id="recorder-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              spellCheck={false}
+              placeholder={defaultRecordingName()}
+              title="Nom sous lequel la vidéo sera enregistrée"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-[13px] text-[#E7F3ED] placeholder:text-[#5b8a7e] outline-none transition focus:border-[#3BE6C066] focus:bg-white/[0.09]"
+            />
+            <span className="px-1 text-[10px] text-[#5b8a7e]">
+              Enregistré dans Vidéos\PresentOtter
+            </span>
+          </div>
           <div className="flex flex-col gap-1.5">
             <ToggleRow
               icon={Monitor}

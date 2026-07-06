@@ -105,6 +105,32 @@ const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
+ * Clamp a window's top-left so the window keeps at least MARGIN px visible
+ * inside the union of every display's workArea. Used by the recorder's
+ * manual drag so it can never be parked fully off-screen.
+ */
+function clampToDisplays(
+  x: number,
+  y: number,
+  width: number
+): { x: number; y: number } {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const d of screen.getAllDisplays()) {
+    const a = d.workArea
+    if (a.x < minX) minX = a.x
+    if (a.y < minY) minY = a.y
+    if (a.x + a.width > maxX) maxX = a.x + a.width
+    if (a.y + a.height > maxY) maxY = a.y + a.height
+  }
+  if (!Number.isFinite(minX)) return { x, y }
+  const MARGIN = 32
+  return {
+    x: Math.max(minX - width + MARGIN, Math.min(maxX - MARGIN, x)),
+    y: Math.max(minY, Math.min(maxY - MARGIN, y))
+  }
+}
+
+/**
  * Find the desktopCapturer screen source for a display. display_id matching
  * is unreliable on Windows, so we fall back to index alignment with the
  * getAllDisplays order. thumbW/H controls the thumbnail resolution (full
@@ -473,7 +499,10 @@ function controlPosition(
   scaleFactor: number
 ): { x: number; y: number; width: number; height: number } {
   const W = 360
-  const H = 480
+  // Matches PANEL_H in RegionRecorder.tsx — the setup panel now carries a
+  // file-name field, so it needs the extra height to avoid squeezing the
+  // live preview.
+  const H = 528
   const gap = 12
   const regX = bounds.x + rect.x / scaleFactor
   const regY = bounds.y + rect.y / scaleFactor
@@ -673,6 +702,19 @@ export function registerCaptureIpc(d: CaptureDeps): void {
       })
     }
   )
+
+  /** Recorder window asks to be moved (manual header drag in the renderer).
+   *  We drive the window position ourselves instead of the flaky
+   *  -webkit-app-region: drag, which needed a precise grab on a thin header
+   *  and often missed the first click. Clamp so at least a slice stays
+   *  reachable on some display. */
+  ipcMain.on('recorder:set-position', (_e, point: { x: number; y: number }) => {
+    if (recorderWindow === null || recorderWindow.isDestroyed()) return
+    if (typeof point?.x !== 'number' || typeof point?.y !== 'number') return
+    const b = recorderWindow.getBounds()
+    const { x, y } = clampToDisplays(Math.round(point.x), Math.round(point.y), b.width)
+    recorderWindow.setBounds({ x, y, width: b.width, height: b.height })
+  })
 
   /** Recorder window hops to the next display, centered, so it never sits
    *  on the screen being filmed. */
