@@ -95,7 +95,9 @@ function formatCombo(accel: string): string {
 }
 
 export function Settings() {
-  const [fps, setFps] = useState<CaptureConfig['fps']>(30)
+  // Persisted in main (po-settings.json) so the choice sticks and actually
+  // drives the recorders. Default shown is 60 until the real value loads.
+  const [fps, setFps] = useState<CaptureConfig['fps']>(60)
   const [format, setFormat] = useState<ExportFormat>('mp4')
   const [check, setCheck] = useState<CheckState>({ kind: 'idle' })
   const [download, setDownload] = useState<DownloadState>({ kind: 'idle' })
@@ -123,10 +125,18 @@ export function Settings() {
     return off
   }, [])
 
-  // Load current capture hotkeys + startup setting once.
+  // Load current capture hotkeys + startup setting + fps once.
   useEffect(() => {
     void window.api?.getCaptureHotkeys().then(setHotkeys)
     void window.api?.getOpenAtLogin().then(setOpenAtLoginState)
+    void window.api?.getCaptureFps().then((v) => setFps(v))
+  }, [])
+
+  // Persist the fps choice the moment it changes so it sticks across
+  // sessions and the recorders pick it up.
+  const changeFps = useCallback((value: CaptureConfig['fps']): void => {
+    setFps(value)
+    void window.api?.setCaptureFps(value === 30 ? 30 : 60)
   }, [])
 
   const toggleStartup = useCallback(async () => {
@@ -444,7 +454,7 @@ export function Settings() {
                 <button
                   key={value}
                   type="button"
-                  onClick={() => setFps(value as CaptureConfig['fps'])}
+                  onClick={() => changeFps(value as CaptureConfig['fps'])}
                   className={`relative flex-1 rounded-xl px-4 py-3 text-sm font-medium transition-all duration-200
                     ${active
                       ? 'bg-gradient-to-br from-otter-400 to-otter-600 text-white shadow-glow-otter ring-1 ring-otter-300/40'

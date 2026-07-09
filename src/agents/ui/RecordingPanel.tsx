@@ -13,6 +13,7 @@ import {
   Monitor,
   Palette,
   RotateCcw,
+  Scissors,
   Sparkles,
   Square,
   Squircle,
@@ -29,6 +30,12 @@ import {
   type CamBgMode,
   type WebcamEffectsProcessor
 } from './webcam-effects'
+import {
+  computeVideoBitrate,
+  pickRecorderMime,
+  TARGET_FPS,
+  type RecorderMime
+} from './recording-quality'
 
 /**
  * RecordingPanel — full-screen modal that lets the user:
@@ -238,6 +245,9 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
   const composerRef = useRef<Composer | null>(null)
   const webcamFxRef = useRef<WebcamEffectsProcessor | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
+  // Container/codec chosen for this recording (H.264/MP4 hardware when
+  // available, else VP8/WebM). Drives the file extension + blob type at save.
+  const recorderMimeRef = useRef<RecorderMime>({ mimeType: '', ext: 'webm' })
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<number | null>(null)
   const previewRef = useRef<HTMLVideoElement | null>(null)
@@ -429,9 +439,13 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
     setPhase('preparing')
 
     try {
+      // Persisted user setting (Paramètres → Capture). Drives the source
+      // frame rate + the composed capture rate.
+      const fps = (await window.api?.getCaptureFps()) ?? TARGET_FPS
       const screenStream = await acquireScreenStream(
         selectedId,
-        includeSystemAudio && sources.find((s) => s.id === selectedId)?.kind === 'screen'
+        includeSystemAudio && sources.find((s) => s.id === selectedId)?.kind === 'screen',
+        fps
       )
       screenStreamRef.current = screenStream
 
@@ -501,7 +515,8 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
             bgKindRef,
             bgPresetIdRef,
             bgCustomBitmapRef
-          }
+          },
+          fps
         )
         composerRef.current = composer
         videoStreamForRecorder = composer.stream
@@ -521,15 +536,19 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
         void previewRef.current.play().catch(() => {})
       }
 
-      const candidates = [
-        'video/webm; codecs="vp9,opus"',
-        'video/webm; codecs="vp8,opus"',
-        'video/webm'
-      ]
-      const mime = candidates.find((c) => MediaRecorder.isTypeSupported(c)) ?? ''
+      // Prefer the hardware H.264 path so the encoder keeps up in real time
+      // (the old VP9-first choice is what made captures choppy); size the
+      // bitrate to the source resolution so it also looks sharp.
+      const chosenMime = pickRecorderMime()
+      recorderMimeRef.current = chosenMime
+      const srcSettings = screenStream.getVideoTracks()[0]?.getSettings?.() ?? {}
+      const vw = typeof srcSettings.width === 'number' ? srcSettings.width : 1920
+      const vh = typeof srcSettings.height === 'number' ? srcSettings.height : 1080
+      const vfps =
+        typeof srcSettings.frameRate === 'number' ? srcSettings.frameRate : TARGET_FPS
       const recorder = new MediaRecorder(finalStream, {
-        mimeType: mime,
-        videoBitsPerSecond: 6_000_000
+        ...(chosenMime.mimeType !== '' ? { mimeType: chosenMime.mimeType } : {}),
+        videoBitsPerSecond: computeVideoBitrate(vw, vh, vfps)
       })
       chunksRef.current = []
       recorder.ondataavailable = (e) => {
@@ -589,10 +608,12 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
     if (window.api === undefined) return
     setPhase('saving')
     try {
-      const blob = new Blob(chunksRef.current, { type: 'video/webm' })
+      const { ext } = recorderMimeRef.current
+      const type = ext === 'mp4' ? 'video/mp4' : 'video/webm'
+      const blob = new Blob(chunksRef.current, { type })
       const bytes = new Uint8Array(await blob.arrayBuffer())
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-      const suggested = `PresentOtter ${ts}.webm`
+      const suggested = `PresentOtter ${ts}.${ext}`
       const out = await window.api.recordingSaveBlob({ bytes, suggestedName: suggested })
       setSavedPath(out.path)
       setPhase('saved')
@@ -796,15 +817,23 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
             )}
             {phase === 'saved' && (
               <>
-                {mp4State.kind === 'idle' && (
-                  <button
-                    type="button"
-                    onClick={() => void handleExportMp4()}
-                    className="btn-glass"
-                    title="Convertir le .webm en .mp4 via ffmpeg"
-                  >
-                    <FileVideo className="h-4 w-4" /> MP4
-                  </button>
+                {/* Already recorded as MP4 (hardware H.264) → no conversion
+                    needed; otherwise offer the ffmpeg WebM→MP4 export. */}
+                {recorderMimeRef.current.ext === 'mp4' ? (
+                  <span className="inline-flex items-center gap-2 rounded-full bg-kelp-100 px-4 py-2 text-xs font-semibold text-kelp-700">
+                    <Check className="h-3.5 w-3.5" /> MP4
+                  </span>
+                ) : (
+                  mp4State.kind === 'idle' && (
+                    <button
+                      type="button"
+                      onClick={() => void handleExportMp4()}
+                      className="btn-glass"
+                      title="Convertir le .webm en .mp4 via ffmpeg"
+                    >
+                      <FileVideo className="h-4 w-4" /> MP4
+                    </button>
+                  )
                 )}
                 {mp4State.kind === 'converting' && (
                   <span className="inline-flex items-center gap-2 rounded-full bg-sea-100 px-4 py-2 text-xs font-semibold text-sea-700">
@@ -824,6 +853,16 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
                   >
                     {mp4State.reason === 'ffmpeg-missing' ? 'ffmpeg manquant' : 'Échec'}
                   </span>
+                )}
+                {savedPath !== null && (
+                  <button
+                    type="button"
+                    onClick={() => window.api?.videoEditorOpen(savedPath)}
+                    className="btn-glass"
+                    title="Couper, ajuster la vitesse, éditer"
+                  >
+                    <Scissors className="h-4 w-4" /> Éditer
+                  </button>
                 )}
                 <button type="button" onClick={handleReveal} className="btn-glass">
                   <FolderOpen className="h-4 w-4" /> Ouvrir
@@ -1866,13 +1905,17 @@ function ActiveView({
 // Stream + composer plumbing
 // =====================================================================
 
-async function acquireScreenStream(sourceId: string, withSystemAudio: boolean): Promise<MediaStream> {
+async function acquireScreenStream(
+  sourceId: string,
+  withSystemAudio: boolean,
+  fps: number
+): Promise<MediaStream> {
   const videoConstraints: ElectronDesktopConstraints = {
     mandatory: {
       chromeMediaSource: 'desktop',
       chromeMediaSourceId: sourceId,
-      minFrameRate: 24,
-      maxFrameRate: 60
+      minFrameRate: Math.min(24, fps),
+      maxFrameRate: fps
     }
   }
   const audio: ElectronAudioConstraints | false = withSystemAudio
@@ -1934,7 +1977,8 @@ async function startComposer(
    *  by startWebcamEffects(). Mirrors the video at the source res,
    *  with optional background blur / replace / color applied. */
   webcamCanvas: HTMLCanvasElement | null,
-  opts: ComposerOptions
+  opts: ComposerOptions,
+  fps: number
 ): Promise<Composer> {
   const screenVideo = document.createElement('video')
   screenVideo.srcObject = new MediaStream(screenStream.getVideoTracks())
@@ -1974,9 +2018,19 @@ async function startComposer(
 
   let raf = 0
   let running = true
+  // Throttle composition to the chosen frame rate. rAF fires at the monitor's
+  // refresh (often 120/144 Hz); compositing + encoding every one of those was
+  // pure wasted CPU and helped starve the encoder — cap it at the target fps.
+  const targetFps = fps > 0 ? fps : TARGET_FPS
+  const frameInterval = 1000 / targetFps
+  let lastDrawTs = 0
 
   const draw = (): void => {
     if (!running) return
+    raf = requestAnimationFrame(draw)
+    const now = performance.now()
+    if (now - lastDrawTs < frameInterval - 1) return
+    lastDrawTs = now
     const w = canvas.width
     const h = canvas.height
     const bgKind = opts.bgKindRef.current
@@ -2109,16 +2163,16 @@ async function startComposer(
         ctx.restore()
       }
     }
-
-    raf = requestAnimationFrame(draw)
   }
 
   // Draw a single frame BEFORE captureStream() so the very first
-  // recorded sample already contains real pixels. Then start the rAF
-  // loop. Without this, MediaRecorder grabs the empty canvas and the
-  // saved WebM opens on a black flash.
+  // recorded sample already contains real pixels. draw() also schedules the
+  // rAF loop (via the requestAnimationFrame at its top). Without this priming
+  // pass, MediaRecorder grabs the empty canvas and the file opens on a flash.
   draw()
-  const stream = canvas.captureStream()
+  // Cap the captured stream at the target fps so the encoder gets a steady
+  // rate instead of whatever (high) rate a fast monitor produces.
+  const stream = canvas.captureStream(targetFps)
   // The first draw() also schedules the next frame, so we don't need
   // to call requestAnimationFrame again here.
 

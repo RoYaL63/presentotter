@@ -134,6 +134,18 @@ declare global {
       suggestedName: string
     }): Promise<{ path: string; dir: string }>
     recordingRevealInFolder(filePath: string): Promise<void>
+    recordingsList(): Promise<
+      Array<{
+        path: string
+        name: string
+        ext: string
+        sizeBytes: number
+        mtimeMs: number
+        folder: 'recordings' | 'edits'
+      }>
+    >
+    recordingsDelete(filePath: string): Promise<boolean>
+    recordingsRename(filePath: string, newBase: string): Promise<string | null>
     recordingChooseSavePath(defaultName: string): Promise<string | null>
     recordingExportMp4(
       webmPath: string
@@ -254,6 +266,39 @@ declare global {
       ) => void
     ): () => void
 
+    // ---------- Video editor (post-prod: trim / speed / crop) ----------
+    videoEditorOpen(filePath: string): void
+    videoEditorGetInput(): Promise<{
+      path: string
+      name: string
+    } | null>
+    videoEditorPickFile(): Promise<{ path: string; name: string } | null>
+    videoEditorExport(req: {
+      inputPath: string
+      segments: Array<{ start: number; end: number }>
+      speed: number
+      crop: { x: number; y: number; width: number; height: number } | null
+      transition: { duration: number } | null
+      volume: number
+      volumeZones: Array<{ start: number; end: number; gain: number }>
+      texts: Array<{ dataUrl: string; start: number; end: number }>
+      zoom: {
+        cx: number
+        cy: number
+        zoom: number
+        start: number
+        end: number
+        ramp: number
+        outW: number
+        outH: number
+        fps: number
+      } | null
+      outputName: string
+    }): Promise<{ ok: true; path: string } | { ok: false; reason: string }>
+    videoEditorReveal(filePath: string): Promise<void>
+    onVideoEditorProgress(cb: (p: { ratio: number }) => void): () => void
+    onVideoEditorLoad(cb: (info: { path: string }) => void): () => void
+
     // ---------- Capture hotkeys (Settings) ----------
     getCaptureHotkeys(): Promise<{ capturePhoto: string; captureVideo: string }>
     defaultCaptureHotkeys(): Promise<{
@@ -270,6 +315,8 @@ declare global {
     }>
     getOpenAtLogin(): Promise<boolean>
     setOpenAtLogin(enabled: boolean): Promise<boolean>
+    getCaptureFps(): Promise<30 | 60>
+    setCaptureFps(fps: 30 | 60): Promise<30 | 60>
   }
 
   interface Window {

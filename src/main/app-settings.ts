@@ -17,14 +17,20 @@ export interface CaptureHotkeys {
   captureVideo: string
 }
 
+/** Recording frame rate. 60 by default so motion is smooth out of the box. */
+export type CaptureFps = 30 | 60
+
 interface SettingsShape {
   captureHotkeys: CaptureHotkeys
+  captureFps: CaptureFps
 }
 
 const DEFAULTS: CaptureHotkeys = {
   capturePhoto: 'Alt+Shift+S',
   captureVideo: 'Alt+Shift+R'
 }
+
+const DEFAULT_FPS: CaptureFps = 60
 
 let cache: SettingsShape | null = null
 
@@ -38,10 +44,13 @@ function load(): SettingsShape {
     const raw = readFileSync(settingsFile(), 'utf8')
     const parsed = JSON.parse(raw) as Partial<SettingsShape>
     cache = {
-      captureHotkeys: { ...DEFAULTS, ...(parsed.captureHotkeys ?? {}) }
+      captureHotkeys: { ...DEFAULTS, ...(parsed.captureHotkeys ?? {}) },
+      captureFps: parsed.captureFps === 30 || parsed.captureFps === 60
+        ? parsed.captureFps
+        : DEFAULT_FPS
     }
   } catch {
-    cache = { captureHotkeys: { ...DEFAULTS } }
+    cache = { captureHotkeys: { ...DEFAULTS }, captureFps: DEFAULT_FPS }
   }
   return cache
 }
@@ -68,4 +77,15 @@ export function setCaptureHotkeys(next: Partial<CaptureHotkeys>): CaptureHotkeys
 
 export function getDefaultCaptureHotkeys(): CaptureHotkeys {
   return { ...DEFAULTS }
+}
+
+export function getCaptureFps(): CaptureFps {
+  return load().captureFps
+}
+
+export function setCaptureFps(fps: CaptureFps): CaptureFps {
+  const c = load()
+  c.captureFps = fps === 30 ? 30 : 60
+  persist()
+  return c.captureFps
 }

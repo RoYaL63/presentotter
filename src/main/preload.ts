@@ -145,6 +145,26 @@ const api = {
     ipcRenderer.invoke('recording:save-blob', payload),
   recordingRevealInFolder: (filePath: string): Promise<void> =>
     ipcRenderer.invoke('recording:reveal-in-folder', filePath),
+
+  /** Library: list saved recordings on disk (newest first). */
+  recordingsList: (): Promise<
+    Array<{
+      path: string
+      name: string
+      ext: string
+      sizeBytes: number
+      mtimeMs: number
+      folder: 'recordings' | 'edits'
+    }>
+  > => ipcRenderer.invoke('recordings:list'),
+
+  /** Library: send a recording to the Recycle Bin. */
+  recordingsDelete: (filePath: string): Promise<boolean> =>
+    ipcRenderer.invoke('recordings:delete', filePath),
+
+  /** Library: rename a recording on disk. Returns the new path or null. */
+  recordingsRename: (filePath: string, newBase: string): Promise<string | null> =>
+    ipcRenderer.invoke('recordings:rename', filePath, newBase),
   recordingChooseSavePath: (defaultName: string): Promise<string | null> =>
     ipcRenderer.invoke('recording:choose-save-path', defaultName),
   recordingExportMp4: (
@@ -531,6 +551,66 @@ const api = {
     return () => ipcRenderer.off('editor:load-image', handler)
   },
 
+  // ---------- Video editor (post-prod: trim / speed / crop) ----------
+
+  /** Open the video editor on a given file (from anywhere). */
+  videoEditorOpen: (filePath: string) =>
+    ipcRenderer.send('video-editor:open', filePath),
+
+  /** Editor window: fetch its input file (path + name; pixels stream via
+   *  the po-media:// protocol). */
+  videoEditorGetInput: (): Promise<{
+    path: string
+    name: string
+  } | null> => ipcRenderer.invoke('video-editor:get-input'),
+
+  /** Editor window: pick a different file to edit. */
+  videoEditorPickFile: (): Promise<{ path: string; name: string } | null> =>
+    ipcRenderer.invoke('video-editor:pick-file'),
+
+  /** Editor window: render the edit via ffmpeg. */
+  videoEditorExport: (req: {
+    inputPath: string
+    segments: Array<{ start: number; end: number }>
+    speed: number
+    crop: { x: number; y: number; width: number; height: number } | null
+    transition: { duration: number } | null
+    volume: number
+    volumeZones: Array<{ start: number; end: number; gain: number }>
+    texts: Array<{ dataUrl: string; start: number; end: number }>
+    zoom: {
+      cx: number
+      cy: number
+      zoom: number
+      start: number
+      end: number
+      ramp: number
+      outW: number
+      outH: number
+      fps: number
+    } | null
+    outputName: string
+  }): Promise<{ ok: true; path: string } | { ok: false; reason: string }> =>
+    ipcRenderer.invoke('video-editor:export', req),
+
+  /** Editor window: reveal an exported file in Explorer. */
+  videoEditorReveal: (filePath: string): Promise<void> =>
+    ipcRenderer.invoke('video-editor:reveal', filePath),
+
+  /** Editor window: export progress (0..1). */
+  onVideoEditorProgress: (cb: (p: { ratio: number }) => void) => {
+    const handler = (_e: unknown, p: { ratio: number }) => cb(p)
+    ipcRenderer.on('video-editor:progress', handler)
+    return () => ipcRenderer.off('video-editor:progress', handler)
+  },
+
+  /** Editor window: main pushes a new file to load (window reused). */
+  onVideoEditorLoad: (cb: (info: { path: string }) => void) => {
+    const handler = (_e: unknown, info: { path: string }) => cb(info)
+    ipcRenderer.on('video-editor:load', handler)
+    return () => ipcRenderer.off('video-editor:load', handler)
+  },
+
   // ---------- Capture hotkeys (Settings) ----------
 
   getCaptureHotkeys: (): Promise<{
@@ -549,6 +629,12 @@ const api = {
     capturePhotoOk: boolean
     captureVideoOk: boolean
   }> => ipcRenderer.invoke('settings:set-capture-hotkeys', next),
+
+  /** Recording frame rate (persisted). */
+  getCaptureFps: (): Promise<30 | 60> =>
+    ipcRenderer.invoke('settings:get-capture-fps'),
+  setCaptureFps: (fps: 30 | 60): Promise<30 | 60> =>
+    ipcRenderer.invoke('settings:set-capture-fps', fps),
 
   /** Run at Windows startup (in tray) so capture works any time. */
   getOpenAtLogin: (): Promise<boolean> =>

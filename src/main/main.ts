@@ -8,6 +8,7 @@ import {
   Menu,
   nativeImage,
   Notification,
+  protocol,
   screen,
   session,
   shell,
@@ -15,7 +16,14 @@ import {
   type Display,
   type WebContents
 } from 'electron'
-import { promises as fsp, accessSync, writeFileSync, constants as fsConstants } from 'node:fs'
+import {
+  promises as fsp,
+  accessSync,
+  createReadStream,
+  writeFileSync,
+  constants as fsConstants
+} from 'node:fs'
+import { Readable } from 'node:stream'
 import { deflateSync } from 'node:zlib'
 import path from 'path'
 import {
@@ -40,9 +48,13 @@ import {
   getCaptureHotkeys,
   setCaptureHotkeys,
   getDefaultCaptureHotkeys,
-  type CaptureHotkeys
+  getCaptureFps,
+  setCaptureFps,
+  type CaptureHotkeys,
+  type CaptureFps
 } from './app-settings'
 import { startUia, stopUia } from './uia-scanner'
+import { registerVideoEditorIpc } from './video-editor'
 
 /**
  * PresentOtter main process.
@@ -86,8 +98,117 @@ const isDev = !app.isPackaged
 const DEV_URL = 'http://localhost:5173'
 const CURSOR_POLL_MS = 16
 
+// Custom scheme the video editor uses to STREAM a local recording into a
+// <video> element (Range-request seekable) instead of copying the whole file
+// over IPC. Must be declared before app 'ready', hence top-level.
+const MEDIA_SCHEME = 'po-media'
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: MEDIA_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      stream: true,
+      supportFetchAPI: true,
+      bypassCSP: true,
+      // The editor's <video crossOrigin="anonymous"> + WebAudio graph need
+      // real CORS semantics on this scheme (see registerMediaProtocol).
+      corsEnabled: true
+    }
+  }
+])
+
+const MEDIA_MIME: Record<string, string> = {
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.mkv': 'video/x-matroska'
+}
+
+/**
+ * Serve files under Videos\PresentOtter over `po-media://`, with REAL HTTP
+ * Range support (206 + Content-Range). Chromium's media stack seeks by
+ * requesting "bytes=N-"; answering with the whole file from 0 (what
+ * net.fetch(file://) does — it ignores the Range header) makes every seek
+ * snap back to the start of the video. So we stream the requested byte
+ * window ourselves with fs.createReadStream.
+ *
+ * Access-Control-Allow-Origin is required because the editor pipes the
+ * <video crossOrigin="anonymous"> through WebAudio (gain + VU meter):
+ * without CORS approval, createMediaElementSource outputs pure silence.
+ *
+ * The path is clamped to the recordings root so a renderer can't read
+ * arbitrary files through this scheme.
+ */
+function registerMediaProtocol(): void {
+  protocol.handle(MEDIA_SCHEME, async (request) => {
+    try {
+      const p = new URL(request.url).searchParams.get('p')
+      if (p === null) return new Response('missing path', { status: 400 })
+      const full = path.resolve(decodeURIComponent(p))
+      const root = path.resolve(path.join(app.getPath('videos'), 'PresentOtter'))
+      if (full !== root && !full.startsWith(root + path.sep)) {
+        return new Response('forbidden', { status: 403 })
+      }
+      const stat = await fsp.stat(full)
+      const total = stat.size
+      const baseHeaders: Record<string, string> = {
+        'Content-Type': MEDIA_MIME[path.extname(full).toLowerCase()] ?? 'application/octet-stream',
+        'Accept-Ranges': 'bytes',
+        'Access-Control-Allow-Origin': '*'
+      }
+
+      const range = request.headers.get('range')
+      const m = range !== null ? /bytes=(\d*)-(\d*)/.exec(range) : null
+      if (m !== null && (m[1] !== '' || m[2] !== '')) {
+        // "bytes=a-b" | "bytes=a-" | "bytes=-suffix" (last N bytes).
+        let start: number
+        let end: number
+        if (m[1] === '') {
+          const suffix = Number(m[2])
+          start = Math.max(0, total - suffix)
+          end = total - 1
+        } else {
+          start = Number(m[1])
+          end = m[2] === '' ? total - 1 : Math.min(Number(m[2]), total - 1)
+        }
+        if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= total) {
+          return new Response(null, {
+            status: 416,
+            headers: { ...baseHeaders, 'Content-Range': `bytes */${total}` }
+          })
+        }
+        const stream = createReadStream(full, { start, end })
+        return new Response(Readable.toWeb(stream) as unknown as ReadableStream, {
+          status: 206,
+          headers: {
+            ...baseHeaders,
+            'Content-Range': `bytes ${start}-${end}/${total}`,
+            'Content-Length': String(end - start + 1)
+          }
+        })
+      }
+
+      const stream = createReadStream(full)
+      return new Response(Readable.toWeb(stream) as unknown as ReadableStream, {
+        status: 200,
+        headers: { ...baseHeaders, 'Content-Length': String(total) }
+      })
+    } catch {
+      return new Response('error', { status: 500 })
+    }
+  })
+}
+
 function rendererUrl(
-  hash: 'home' | 'toolbar' | 'overlay' | 'capture' | 'editor' | 'recorder'
+  hash:
+    | 'home'
+    | 'toolbar'
+    | 'overlay'
+    | 'capture'
+    | 'editor'
+    | 'recorder'
+    | 'video-editor'
 ): string {
   if (isDev) {
     return `${DEV_URL}/#${hash}`
@@ -433,12 +554,15 @@ function hideOwnUiForCapture(): OwnUiState {
   for (const w of overlays) w.hide()
   for (const w of others) w.hide()
   if (home !== null) home.hide()
+  // showInactive everywhere: restoring our windows must NOT steal focus
+  // from whatever app the user is capturing — the "retour Windows" jolt
+  // after every screenshot was exactly this.
   const restoreNonHome = (): void => {
     for (const w of overlays) if (!w.isDestroyed()) w.showInactive()
-    for (const w of others) if (!w.isDestroyed()) w.show()
+    for (const w of others) if (!w.isDestroyed()) w.showInactive()
   }
   const restoreHome = (): void => {
-    if (home !== null && !home.isDestroyed()) home.show()
+    if (home !== null && !home.isDestroyed()) home.showInactive()
   }
   return {
     restoreNonHome,
@@ -619,6 +743,13 @@ function registerIpcHandlers(): void {
     }
   )
 
+  // Recording frame rate — persisted so the user's choice sticks across
+  // sessions and actually drives the recorders (region + full screen).
+  ipcMain.handle('settings:get-capture-fps', () => getCaptureFps())
+  ipcMain.handle('settings:set-capture-fps', (_e, fps: CaptureFps) =>
+    setCaptureFps(fps === 30 ? 30 : 60)
+  )
+
   // Run in background + start with Windows so capture works any time.
   ipcMain.handle('settings:get-open-at-login', () => getOpenAtLogin())
   ipcMain.handle('settings:set-open-at-login', (_e, enabled: boolean) => {
@@ -692,6 +823,88 @@ function registerIpcHandlers(): void {
       const full = path.join(dir, safeName)
       await fsp.writeFile(full, Buffer.from(payload.bytes))
       return { path: full, dir }
+    }
+  )
+
+  /** Library: list every saved recording on disk (Videos\PresentOtter and its
+   *  Edits subfolder), newest first. This is the real source of truth the
+   *  library UI reads — recordings are written straight to disk, not to a DB. */
+  ipcMain.handle('recordings:list', async () => {
+    const root = path.join(app.getPath('videos'), 'PresentOtter')
+    const targets: Array<{ dir: string; folder: 'recordings' | 'edits' }> = [
+      { dir: root, folder: 'recordings' },
+      { dir: path.join(root, 'Edits'), folder: 'edits' }
+    ]
+    const exts = new Set(['.mp4', '.webm', '.mov', '.mkv'])
+    const out: Array<{
+      path: string
+      name: string
+      ext: string
+      sizeBytes: number
+      mtimeMs: number
+      folder: 'recordings' | 'edits'
+    }> = []
+    for (const { dir, folder } of targets) {
+      let entries: import('node:fs').Dirent[]
+      try {
+        entries = await fsp.readdir(dir, { withFileTypes: true })
+      } catch {
+        continue // folder doesn't exist yet
+      }
+      for (const e of entries) {
+        if (!e.isFile()) continue
+        const ext = path.extname(e.name).toLowerCase()
+        if (!exts.has(ext)) continue
+        const full = path.join(dir, e.name)
+        try {
+          const st = await fsp.stat(full)
+          out.push({
+            path: full,
+            name: e.name,
+            ext: ext.replace('.', ''),
+            sizeBytes: st.size,
+            mtimeMs: st.mtimeMs,
+            folder
+          })
+        } catch {
+          /* file vanished between readdir and stat — skip */
+        }
+      }
+    }
+    out.sort((a, b) => b.mtimeMs - a.mtimeMs)
+    return out
+  })
+
+  /** Library: send a recording to the Recycle Bin (reversible). */
+  ipcMain.handle('recordings:delete', async (_e, filePath: string) => {
+    try {
+      await shell.trashItem(filePath)
+      return true
+    } catch {
+      return false
+    }
+  })
+
+  /** Library: rename a recording on disk, keeping its extension. Returns the
+   *  new absolute path, or null on failure. */
+  ipcMain.handle(
+    'recordings:rename',
+    async (_e, filePath: string, newBase: string) => {
+      try {
+        const dir = path.dirname(filePath)
+        const ext = path.extname(filePath)
+        const safe = newBase
+          .trim()
+          .replace(/[\\/:*?"<>|\x00-\x1F]/g, '_')
+          .replace(/\.(mp4|webm|mov|mkv)$/i, '')
+          .slice(0, 180)
+        if (safe.length === 0) return null
+        const target = path.join(dir, `${safe}${ext}`)
+        await fsp.rename(filePath, target)
+        return target
+      } catch {
+        return null
+      }
     }
   )
 
@@ -1430,14 +1643,19 @@ app
     // fire. The capture flow relies on the "click to edit" notification.
     app.setAppUserModelId('com.otterwise.presentotter')
     configureDisplayMedia()
+    registerMediaProtocol()
     registerIpcHandlers()
     createTray()
     registerCaptureIpc({
       rendererUrl,
       preloadPath: path.join(__dirname, 'preload.js'),
       hideOwnUi: hideOwnUiForCapture,
-      isDev,
       showNotification: showCaptureNotification
+    })
+    registerVideoEditorIpc({
+      rendererUrl,
+      preloadPath: path.join(__dirname, 'preload.js'),
+      locateFfmpeg
     })
     // When launched at login (or with --hidden) we start straight into the
     // tray so capture shortcuts are armed without popping a window.

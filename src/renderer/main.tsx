@@ -6,6 +6,7 @@ import { Overlay } from '../agents/ui/Overlay'
 import { CaptureOverlay } from '../agents/ui/CaptureOverlay'
 import { CaptureEditor } from '../agents/ui/CaptureEditor'
 import { RegionRecorder } from '../agents/ui/RegionRecorder'
+import { VideoEditor } from '../agents/ui/VideoEditor'
 import mascotUrl from './assets/mascot.webp'
 import './index.css'
 
@@ -24,7 +25,14 @@ import './index.css'
  * shares the Home window in Meet (mode "Une fenêtre") with the Mirror
  * section displayed.
  */
-type Mode = 'home' | 'toolbar' | 'overlay' | 'capture' | 'editor' | 'recorder'
+type Mode =
+  | 'home'
+  | 'toolbar'
+  | 'overlay'
+  | 'capture'
+  | 'editor'
+  | 'recorder'
+  | 'video-editor'
 
 function detectMode(): Mode {
   const hash = window.location.hash.replace('#', '').trim()
@@ -33,6 +41,7 @@ function detectMode(): Mode {
   if (hash === 'capture') return 'capture'
   if (hash === 'editor') return 'editor'
   if (hash === 'recorder') return 'recorder'
+  if (hash === 'video-editor') return 'video-editor'
   return 'home'
 }
 
@@ -80,6 +89,7 @@ const Root: () => React.ReactElement = () => {
   if (mode === 'capture') return <CaptureOverlay />
   if (mode === 'editor') return <CaptureEditor />
   if (mode === 'recorder') return <RegionRecorder />
+  if (mode === 'video-editor') return <VideoEditor />
   return <Home />
 }
 

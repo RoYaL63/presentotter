@@ -28,6 +28,11 @@ import {
   type WebcamEffectsRefs
 } from './webcam-effects'
 import { useToolSettingsStore } from './stores/useToolSettingsStore'
+import {
+  computeVideoBitrate,
+  pickRecorderMime,
+  type RecorderMime
+} from './recording-quality'
 
 /**
  * RegionRecorder — the always-on-top panel that records a single screen
@@ -139,8 +144,12 @@ export function RegionRecorder(): React.ReactElement {
     nameRef.current = name
   }, [name])
   // How many clips this session has already written. Lets "Couper" produce
-  // "Name.webm", "Name (2).webm", … instead of silently overwriting.
+  // "Name.mp4", "Name (2).mp4", … instead of silently overwriting.
   const savedCountRef = useRef(0)
+  // Best-supported container/codec, chosen once. H.264/MP4 (hardware) when
+  // available, else VP8, else VP9 — see recording-quality.ts. Drives both the
+  // MediaRecorder MIME and the saved file extension.
+  const mimeRef = useRef<RecorderMime>(pickRecorderMime())
 
   // Webcam background preference comes from the PERSISTENT store, so the
   // user's blur / image / color choice is always there on relaunch and can
@@ -501,20 +510,23 @@ export function RegionRecorder(): React.ReactElement {
   /** Write a set of recorded chunks to disk. Returns the saved path (or
    *  null on empty/failed save). Does NOT touch streams or window state —
    *  the caller decides whether to finish or restart afterwards. */
-  /** Build the .webm file name from the user's editable name. The 2nd, 3rd,
-   *  … clip of the same session (via "Couper") gets a " (n)" suffix so a
-   *  multi-clip take doesn't overwrite itself. Main sanitizes illegal
-   *  characters, so we only need to strip a redundant extension here. */
+  /** Build the file name from the user's editable name, with the extension
+   *  matching the chosen container (.mp4 or .webm). The 2nd, 3rd, … clip of
+   *  the same session (via "Couper") gets a " (n)" suffix so a multi-clip take
+   *  doesn't overwrite itself. Main sanitizes illegal characters, so we only
+   *  need to strip a redundant extension here. */
   const buildFileName = (): string => {
-    const raw = nameRef.current.trim().replace(/\.webm$/i, '')
+    const ext = mimeRef.current.ext
+    const raw = nameRef.current.trim().replace(/\.(webm|mp4)$/i, '')
     const base = raw.length > 0 ? raw : defaultRecordingName()
     const n = ++savedCountRef.current
-    return n > 1 ? `${base} (${n}).webm` : `${base}.webm`
+    return n > 1 ? `${base} (${n}).${ext}` : `${base}.${ext}`
   }
 
   const saveChunks = async (chunks: Blob[]): Promise<string | null> => {
     try {
-      const blob = new Blob(chunks, { type: 'video/webm' })
+      const type = mimeRef.current.ext === 'mp4' ? 'video/mp4' : 'video/webm'
+      const blob = new Blob(chunks, { type })
       if (blob.size === 0) return null
       const bytes = new Uint8Array(await blob.arrayBuffer())
       const res = await window.api?.recordingSaveBlob({
@@ -532,15 +544,20 @@ export function RegionRecorder(): React.ReactElement {
    *  begin a new segment. The screen/audio/webcam streams stay untouched,
    *  so this is the engine behind "recommencer" and "couper". */
   const beginSegment = (out: MediaStream): void => {
-    const candidates = [
-      'video/webm; codecs="vp9,opus"',
-      'video/webm; codecs="vp8,opus"',
-      'video/webm'
-    ]
-    const mime = candidates.find((c) => MediaRecorder.isTypeSupported(c)) ?? ''
+    const { mimeType } = mimeRef.current
+    const canvas = canvasRef.current
+    const cfg = cfgRef.current
+    // Bitrate scaled to the actual cropped region size + frame rate, so the
+    // capture stays crisp instead of the old 6 Mbit/s that looked mushy past
+    // 1080p.
+    const bitrate = computeVideoBitrate(
+      canvas?.width ?? cfg?.rect.width ?? 1920,
+      canvas?.height ?? cfg?.rect.height ?? 1080,
+      cfg?.fps ?? 60
+    )
     const rec = new MediaRecorder(out, {
-      mimeType: mime,
-      videoBitsPerSecond: 6_000_000
+      ...(mimeType !== '' ? { mimeType } : {}),
+      videoBitsPerSecond: bitrate
     })
     chunksRef.current = []
     rec.ondataavailable = (e) => {

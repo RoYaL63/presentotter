@@ -13,6 +13,8 @@ import {
 } from 'electron'
 import { promises as fsp } from 'node:fs'
 import path from 'node:path'
+import { openVideoEditor } from './video-editor'
+import { getCaptureFps } from './app-settings'
 
 /**
  * Capture module — the "Snipping Tool" replacement.
@@ -43,11 +45,6 @@ export interface CaptureDeps {
   /** Hide every PresentOtter-owned window that would otherwise appear in
    *  the screenshot. Returns a token whose restore() re-shows them. */
   hideOwnUi: () => OwnUiState
-  /** Dev builds: auto-open the editor after a capture, because Windows
-   *  toast notifications don't render reliably for an unpackaged app
-   *  (they need an installed Start-menu shortcut matching the AUMID). In
-   *  production we stay non-intrusive and only notify. */
-  isDev: boolean
   /** Post-capture notification, implemented in main.ts (tray balloon,
    *  falling back to a native Notification) so it keeps working even when
    *  PresentOtter has no visible window. */
@@ -347,18 +344,6 @@ async function saveScreenshot(buf: Buffer): Promise<string | null> {
   }
 }
 
-function notifyCaptured(savePath: string | null): void {
-  if (deps === null) return
-  deps.showNotification({
-    title: 'Capture copiée 🦦',
-    body: 'Cliquez pour annoter, recadrer ou enregistrer.',
-    onClick: () => openEditor()
-  })
-  // Keep a reference to the save path is implicit via lastCapture; the
-  // click handler reads lastCapture directly.
-  void savePath
-}
-
 /**
  * Handle a finished photo selection. The selector is transparent (no frozen
  * frame), so main does the actual grab HERE: close the overlay, let it
@@ -404,10 +389,10 @@ async function handlePhotoSelected(
   const savePath = await saveScreenshot(buf)
   const cs = cropped.getSize()
   lastCapture = { path: savePath, bytes: buf, width: cs.width, height: cs.height }
-  notifyCaptured(savePath)
-  // Dev convenience: open the editor straight away so the full loop is
-  // testable without a working OS toast (see CaptureDeps.isDev).
-  if (deps?.isDev === true) openEditor()
+  // Open the editor RIGHT AWAY, floating over the app being captured and on
+  // the same display — no toast to hunt for, no jump through the taskbar.
+  // The PNG is already in the clipboard + saved either way.
+  openEditor(display.workArea)
 }
 
 /**
@@ -436,21 +421,35 @@ async function handleVideoSelected(
 // Editor window (phase 2 wires the renderer; the window plumbing lives here)
 // ============================================================================
 
-export function openEditor(): void {
+export function openEditor(
+  onDisplay?: { x: number; y: number; width: number; height: number }
+): void {
   if (deps === null || lastCapture === null) return
   if (editorWindow !== null && !editorWindow.isDestroyed()) {
+    editorWindow.moveTop()
     editorWindow.focus()
     editorWindow.webContents.send('editor:load-image', editorImagePayload())
     return
   }
+  // Size clamped to the target display, centered on it — the editor pops
+  // over whatever the user was capturing instead of wherever the last
+  // window happened to be.
+  const wa = onDisplay ?? screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
+  const width = Math.min(1100, wa.width - 60)
+  const height = Math.min(760, wa.height - 60)
   const win = new BrowserWindow({
-    width: 1100,
-    height: 760,
+    x: Math.round(wa.x + (wa.width - width) / 2),
+    y: Math.round(wa.y + (wa.height - height) / 2),
+    width,
+    height,
     minWidth: 720,
     minHeight: 520,
     title: 'PresentOtter — Éditeur de capture',
     backgroundColor: '#0A1F1B',
     show: false,
+    // Floats above the app being captured — "ouvre par-dessus la fenêtre
+    // actuelle" — instead of a background window buried in the taskbar.
+    alwaysOnTop: true,
     webPreferences: {
       preload: deps.preloadPath,
       contextIsolation: true,
@@ -486,7 +485,10 @@ function editorImagePayload(): {
 // Region video recording (ShareX-style)
 // ============================================================================
 
-const REGION_FPS = 30
+// The capture frame rate is a persisted user setting (Paramètres → Capture),
+// defaulting to 60 so motion is smooth out of the box. The renderer encodes
+// with a hardware H.264 path when available (see recording-quality.ts), so 60
+// no longer buries the CPU the way the old VP9 path did at 30.
 
 /**
  * Place the recorder PANEL (setup + controls + preview) OUTSIDE the recorded
@@ -589,7 +591,7 @@ function startRegionRecording(
   recorderConfigByWebContents.set(wcId, {
     sourceId,
     rect,
-    fps: REGION_FPS
+    fps: getCaptureFps()
   })
   void win.loadURL(deps.rendererUrl('recorder'))
   win.once('ready-to-show', () => {
@@ -625,10 +627,11 @@ function notifyRecorded(savePath: string | null): void {
     title: 'Zone enregistrée 🦦',
     body:
       savePath !== null
-        ? 'Vidéo sauvegardée. Cliquez pour ouvrir le dossier.'
+        ? 'Vidéo sauvegardée. Cliquez pour couper et éditer.'
         : 'Enregistrement terminé.',
     onClick: () => {
-      if (savePath !== null) shell.showItemInFolder(savePath)
+      // Straight into post-prod: the "I just recorded, now trim it" flow.
+      if (savePath !== null) openVideoEditor(savePath)
     }
   })
 }
