@@ -33,6 +33,12 @@ import {
   pickRecorderMime,
   type RecorderMime
 } from './recording-quality'
+import {
+  AudioLevelMeter,
+  CountdownOverlay,
+  formatBytes,
+  useMicPreviewStream
+} from './recording-hud'
 
 /**
  * RegionRecorder — the always-on-top panel that records a single screen
@@ -54,7 +60,7 @@ import {
  * the screen being filmed.
  */
 
-type Phase = 'setup' | 'recording' | 'paused' | 'saving' | 'error'
+type Phase = 'setup' | 'countdown' | 'recording' | 'paused' | 'saving' | 'error'
 
 const PANEL_W = 360
 const PANEL_H = 528
@@ -130,11 +136,16 @@ function fmt(ms: number): string {
 export function RegionRecorder(): React.ReactElement {
   const [phase, setPhase] = useState<Phase>('setup')
   const [elapsed, setElapsed] = useState(0)
+  // Bytes captured so far — updated on the same 250 ms tick as the timer.
+  const [recBytes, setRecBytes] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [sysAudio, setSysAudio] = useState(true)
   const [mic, setMic] = useState(false)
   const [webcam, setWebcam] = useState(false)
   const [compact, setCompact] = useState(false)
+
+  // Mic check in setup: open the mic only while its meter is on screen.
+  const micPreviewStream = useMicPreviewStream(phase === 'setup' && mic)
   // Editable file name. The saved WebM lands in Videos\PresentOtter under
   // this name. nameRef mirrors it so the async save path (which can fire
   // long after the last render) always reads the freshest value.
@@ -504,6 +515,9 @@ export function RegionRecorder(): React.ReactElement {
     if (timerRef.current !== null) window.clearInterval(timerRef.current)
     timerRef.current = window.setInterval(() => {
       setElapsed(accRef.current + (performance.now() - segStartRef.current))
+      let total = 0
+      for (const c of chunksRef.current) total += c.size
+      setRecBytes(total)
     }, 250)
   }
 
@@ -590,6 +604,7 @@ export function RegionRecorder(): React.ReactElement {
     accRef.current = 0
     segStartRef.current = performance.now()
     setElapsed(0)
+    setRecBytes(0)
     startTimer()
     setPhaseSafe('recording')
   }
@@ -645,7 +660,34 @@ export function RegionRecorder(): React.ReactElement {
       }
       outStreamRef.current = out
     }
-    beginSegment(outStreamRef.current)
+    // Streams are live — give the user a 3-2-1 before the recorder rolls.
+    // The countdown overlay's onDone calls beginSegment; cancelCountdown
+    // releases the audio mix so setup toggles are re-read on the next start.
+    setPhaseSafe('countdown')
+  }
+
+  /** Countdown reached zero — actually begin the armed segment. */
+  const beginCountedSegment = (): void => {
+    const out = outStreamRef.current
+    if (out !== null) beginSegment(out)
+    else setPhaseSafe('setup')
+  }
+
+  /** Countdown cancelled — back to setup. Release the merged stream and
+   *  the audio sources so the next start re-reads the mic/system toggles
+   *  (they can be flipped in setup) and the mic LED goes off. */
+  const cancelCountdown = (): void => {
+    outStreamRef.current?.getTracks().forEach((t) => t.stop())
+    outStreamRef.current = null
+    sysAudioStreamRef.current?.getTracks().forEach((t) => t.stop())
+    sysAudioStreamRef.current = null
+    micStreamRef.current?.getTracks().forEach((t) => t.stop())
+    micStreamRef.current = null
+    if (audioCtxRef.current !== null) {
+      void audioCtxRef.current.close().catch(() => {})
+      audioCtxRef.current = null
+    }
+    setPhaseSafe('setup')
   }
 
   const togglePause = (): void => {
@@ -712,6 +754,9 @@ export function RegionRecorder(): React.ReactElement {
   }
 
   const toggleCompact = (): void => {
+    // The countdown overlay lives in the full panel — collapsing during the
+    // 3-2-1 would unmount it and strand the phase. Ignore for those 3 s.
+    if (phase === 'countdown') return
     const next = !compact
     setCompact(next)
     window.api?.recorderSetSize(
@@ -795,6 +840,11 @@ export function RegionRecorder(): React.ReactElement {
               <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#ff5a5a]" />
             </span>
             {fmt(elapsed)}
+            {recBytes > 0 && (
+              <span className="font-sans text-[10px] font-medium text-[#9fd6c9]">
+                ≈ {formatBytes(recBytes)}
+              </span>
+            )}
           </span>
         )}
         <div className="ml-auto flex items-center gap-1">
@@ -840,7 +890,20 @@ export function RegionRecorder(): React.ReactElement {
             EN PAUSE
           </span>
         )}
+        {phase === 'countdown' && (
+          <CountdownOverlay onDone={beginCountedSegment} onCancel={cancelCountdown} />
+        )}
       </div>
+
+      {/* Live level of the mix actually recorded — proof the sound is in. */}
+      {(phase === 'countdown' || recording) && (
+        <AudioLevelMeter
+          stream={outStreamRef.current}
+          label="Son"
+          tone="dark"
+          className="px-1"
+        />
+      )}
 
       {phase === 'error' ? (
         <button
@@ -887,6 +950,14 @@ export function RegionRecorder(): React.ReactElement {
               on={mic}
               onClick={() => setMic((v) => !v)}
             />
+            {mic && (
+              <AudioLevelMeter
+                stream={micPreviewStream}
+                label="Test micro"
+                tone="dark"
+                className="px-2"
+              />
+            )}
             <ToggleRow
               icon={Video}
               label="Webcam (incrustée)"
@@ -915,6 +986,11 @@ export function RegionRecorder(): React.ReactElement {
             Démarrer l&apos;enregistrement
           </button>
         </>
+      ) : phase === 'countdown' ? (
+        <p className="px-1 text-center text-[11px] text-[#9fd6c9]">
+          Prépare ton écran… Échap pour annuler, clic sur le chiffre pour
+          démarrer tout de suite.
+        </p>
       ) : (
         <>
           {webcam && (

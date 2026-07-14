@@ -167,7 +167,8 @@ export default {
         'fade-in-up': 'fadeInUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
         bubble: 'bubble 4s ease-in-out infinite',
         'bubble-slow': 'bubble 6s ease-in-out infinite',
-        sheen: 'sheen 6s ease-in-out infinite'
+        sheen: 'sheen 6s ease-in-out infinite',
+        'countdown-pop': 'countdownPop 1s cubic-bezier(0.34, 1.56, 0.64, 1) both'
       },
       keyframes: {
         orbFloat1: {
@@ -199,6 +200,11 @@ export default {
         sheen: {
           '0%, 100%': { backgroundPosition: '0% 0%' },
           '50%': { backgroundPosition: '100% 100%' }
+        },
+        countdownPop: {
+          '0%': { opacity: '0', transform: 'scale(1.7)' },
+          '25%': { opacity: '1', transform: 'scale(1)' },
+          '100%': { opacity: '0.85', transform: 'scale(0.94)' }
         }
       }
     }

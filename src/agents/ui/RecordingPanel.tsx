@@ -12,6 +12,8 @@ import {
   MicOff,
   Monitor,
   Palette,
+  Pause as PauseIcon,
+  Play,
   RotateCcw,
   Scissors,
   Sparkles,
@@ -36,6 +38,12 @@ import {
   TARGET_FPS,
   type RecorderMime
 } from './recording-quality'
+import {
+  AudioLevelMeter,
+  CountdownOverlay,
+  formatBytes,
+  useMicPreviewStream
+} from './recording-hud'
 
 /**
  * RecordingPanel — full-screen modal that lets the user:
@@ -71,7 +79,14 @@ interface SourceItem {
   appIcon: string | null
 }
 
-type Phase = 'picking' | 'preparing' | 'recording' | 'stopped' | 'saving' | 'saved'
+type Phase =
+  | 'picking'
+  | 'preparing'
+  | 'countdown'
+  | 'recording'
+  | 'stopped'
+  | 'saving'
+  | 'saved'
 
 type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 type WebcamShape = 'circle' | 'rounded' | 'square' | 'glass'
@@ -208,6 +223,10 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
   const [phase, setPhase] = useState<Phase>('picking')
   const [error, setError] = useState<string | null>(null)
   const [elapsedMs, setElapsedMs] = useState(0)
+  const [isPaused, setIsPaused] = useState(false)
+  // Bytes captured so far (sum of the recorder's chunks) — live readout
+  // during recording so the user sees the file actually growing.
+  const [recBytes, setRecBytes] = useState(0)
   const [savedPath, setSavedPath] = useState<string | null>(null)
   const [mp4State, setMp4State] = useState<
     | { kind: 'idle' }
@@ -250,9 +269,17 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
   const recorderMimeRef = useRef<RecorderMime>({ mimeType: '', ext: 'webm' })
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<number | null>(null)
+  // Pause-aware elapsed time: accumulated ms of past segments + start of
+  // the current one. Frozen while paused.
+  const recAccRef = useRef(0)
+  const recSegStartRef = useRef(0)
   const previewRef = useRef<HTMLVideoElement | null>(null)
   const webcamPreviewRef = useRef<HTMLVideoElement | null>(null)
   const pickerWebcamStreamRef = useRef<MediaStream | null>(null)
+
+  // Mic check in the picker: open the mic only while its meter is visible
+  // so the user can SEE the level move before committing to a recording.
+  const micPreviewStream = useMicPreviewStream(includeMic && phase === 'picking')
 
   // -----------------------------------------------------------------
   // Custom background — turn user-supplied image into an ImageBitmap
@@ -406,6 +433,13 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
       composerRef.current = null
     }
     if (streamRef.current !== null) {
+      // The mixer's AudioContext (see mixIntoFinalStream) keeps an audio
+      // rendering thread alive — close it so a finished/cancelled recording
+      // drops to zero audio CPU.
+      const mixerCtx = (
+        streamRef.current as MediaStream & { __audioContext?: AudioContext }
+      ).__audioContext
+      if (mixerCtx !== undefined) void mixerCtx.close().catch(() => {})
       for (const t of streamRef.current.getTracks()) t.stop()
       streamRef.current = null
     }
@@ -555,15 +589,12 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
         if (e.data.size > 0) chunksRef.current.push(e.data)
       }
       recorder.onstop = () => setPhase('stopped')
-      recorder.start(1000)
       recorderRef.current = recorder
 
-      setPhase('recording')
-      const startedAt = performance.now()
-      setElapsedMs(0)
-      timerRef.current = window.setInterval(() => {
-        setElapsedMs(performance.now() - startedAt)
-      }, 250)
+      // Everything is armed (streams live, recorder built but NOT started).
+      // Hand over to the 3-2-1 countdown — beginRecording fires when it
+      // reaches zero, cancelCountdown tears down if the user bails.
+      setPhase('countdown')
 
       const videoTrack = screenStream.getVideoTracks()[0]
       if (videoTrack !== undefined) {
@@ -593,11 +624,74 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
     sources
   ])
 
+  /** 250 ms UI tick while recording: elapsed time + captured size. */
+  const startElapsedTimer = useCallback(() => {
+    if (timerRef.current !== null) window.clearInterval(timerRef.current)
+    timerRef.current = window.setInterval(() => {
+      setElapsedMs(recAccRef.current + (performance.now() - recSegStartRef.current))
+      let total = 0
+      for (const c of chunksRef.current) total += c.size
+      setRecBytes(total)
+    }, 250)
+  }, [])
+
+  /** Countdown reached zero — actually start the armed recorder. */
+  const beginRecording = useCallback(() => {
+    const recorder = recorderRef.current
+    if (recorder === null || recorder.state !== 'inactive') return
+    try {
+      recorder.start(1000)
+    } catch (err) {
+      // Source died during the countdown (captured window closed…).
+      console.error('[recording] start after countdown failed:', err)
+      setError(err instanceof Error ? err.message : String(err))
+      stopAllTracks()
+      recorderRef.current = null
+      setPhase('picking')
+      return
+    }
+    setIsPaused(false)
+    setRecBytes(0)
+    setElapsedMs(0)
+    recAccRef.current = 0
+    recSegStartRef.current = performance.now()
+    startElapsedTimer()
+    setPhase('recording')
+  }, [startElapsedTimer])
+
+  /** User bailed during the countdown — release everything, back to picker. */
+  const cancelCountdown = useCallback(() => {
+    stopAllTracks()
+    recorderRef.current = null
+    setPhase('picking')
+    void refreshSources()
+  }, [refreshSources])
+
+  const handleTogglePause = useCallback(() => {
+    const rec = recorderRef.current
+    if (rec === null) return
+    if (rec.state === 'recording') {
+      rec.pause()
+      recAccRef.current += performance.now() - recSegStartRef.current
+      if (timerRef.current !== null) {
+        window.clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+      setIsPaused(true)
+    } else if (rec.state === 'paused') {
+      rec.resume()
+      recSegStartRef.current = performance.now()
+      startElapsedTimer()
+      setIsPaused(false)
+    }
+  }, [startElapsedTimer])
+
   const handleStop = useCallback(() => {
-    if (recorderRef.current !== null && recorderRef.current.state === 'recording') {
+    if (recorderRef.current !== null && recorderRef.current.state !== 'inactive') {
       recorderRef.current.stop()
     }
     stopAllTracks()
+    setIsPaused(false)
     if (timerRef.current !== null) {
       window.clearInterval(timerRef.current)
       timerRef.current = null
@@ -628,6 +722,8 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
     setPhase('picking')
     setSavedPath(null)
     setElapsedMs(0)
+    setRecBytes(0)
+    setIsPaused(false)
     setMp4State({ kind: 'idle' })
     void refreshSources()
   }, [refreshSources])
@@ -705,6 +801,7 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
               onRefresh={refreshSources}
               includeMic={includeMic}
               onToggleMic={setIncludeMic}
+              micPreviewStream={micPreviewStream}
               includeSystemAudio={includeSystemAudio}
               onToggleSystemAudio={setIncludeSystemAudio}
               includeWebcam={includeWebcam}
@@ -737,6 +834,7 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
           )}
 
           {(phase === 'preparing' ||
+            phase === 'countdown' ||
             phase === 'recording' ||
             phase === 'stopped' ||
             phase === 'saving' ||
@@ -747,6 +845,11 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
               formatTime={formatTime}
               previewRef={previewRef}
               savedPath={savedPath}
+              isPaused={isPaused}
+              recBytes={recBytes}
+              audioStream={streamRef.current}
+              onCountdownDone={beginRecording}
+              onCountdownCancel={cancelCountdown}
               webcamActive={includeWebcam}
               webcamCorner={webcamCorner}
               onCornerChange={setWebcamCorner}
@@ -766,13 +869,25 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
           <span className="text-[11px] text-cream-800/60">
             {phase === 'picking' && '🦦 Les vidéos atterrissent dans Vidéos\\PresentOtter\\'}
             {phase === 'preparing' && 'Acquisition de la source en cours…'}
+            {phase === 'countdown' && 'Décompte en cours — Échap pour annuler.'}
             {phase === 'recording' && (
-              <span className="inline-flex items-center gap-2 text-coral-500">
-                <span className="relative inline-flex h-2 w-2">
-                  <span className="absolute inset-0 animate-glow-pulse rounded-full bg-coral-400" />
-                  <span className="relative h-2 w-2 rounded-full bg-coral-500" />
-                </span>
-                Enregistrement en cours · {formatTime(elapsedMs)}
+              <span
+                className={`inline-flex items-center gap-2 ${
+                  isPaused ? 'text-sea-700/70' : 'text-coral-500'
+                }`}
+              >
+                {isPaused ? (
+                  <span className="relative inline-flex h-2 w-2">
+                    <span className="relative h-2 w-2 rounded-full bg-sea-700/50" />
+                  </span>
+                ) : (
+                  <span className="relative inline-flex h-2 w-2">
+                    <span className="absolute inset-0 animate-glow-pulse rounded-full bg-coral-400" />
+                    <span className="relative h-2 w-2 rounded-full bg-coral-500" />
+                  </span>
+                )}
+                {isPaused ? 'En pause' : 'Enregistrement en cours'} ·{' '}
+                {formatTime(elapsedMs)} · ≈ {formatBytes(recBytes)}
               </span>
             )}
             {phase === 'stopped' && 'Aperçu prêt. Sauvegarder ou recommencer ?'}
@@ -800,10 +915,28 @@ export function RecordingPanel({ onClose }: RecordingPanelProps) {
                 </button>
               </>
             )}
-            {phase === 'recording' && (
-              <button type="button" onClick={handleStop} className="btn-otter">
-                <Square className="h-4 w-4 fill-current" /> Arrêter
+            {phase === 'countdown' && (
+              <button type="button" onClick={cancelCountdown} className="btn-glass">
+                Annuler
               </button>
+            )}
+            {phase === 'recording' && (
+              <>
+                <button type="button" onClick={handleTogglePause} className="btn-glass">
+                  {isPaused ? (
+                    <>
+                      <Play className="h-4 w-4" /> Reprendre
+                    </>
+                  ) : (
+                    <>
+                      <PauseIcon className="h-4 w-4" /> Pause
+                    </>
+                  )}
+                </button>
+                <button type="button" onClick={handleStop} className="btn-otter">
+                  <Square className="h-4 w-4 fill-current" /> Arrêter
+                </button>
+              </>
             )}
             {phase === 'stopped' && (
               <>
@@ -890,6 +1023,7 @@ interface PickerViewProps {
   onRefresh(): void | Promise<void>
   includeMic: boolean
   onToggleMic(v: boolean): void
+  micPreviewStream: MediaStream | null
   includeSystemAudio: boolean
   onToggleSystemAudio(v: boolean): void
   includeWebcam: boolean
@@ -938,6 +1072,7 @@ function PickerView(props: PickerViewProps) {
         <AudioConfig
           includeMic={props.includeMic}
           onToggleMic={props.onToggleMic}
+          micPreviewStream={props.micPreviewStream}
           includeSystemAudio={props.includeSystemAudio}
           onToggleSystemAudio={props.onToggleSystemAudio}
         />
@@ -1101,6 +1236,7 @@ function SourceGroup({ title, items, selectedId, onSelect, emptyHint }: SourceGr
 interface AudioConfigProps {
   includeMic: boolean
   onToggleMic(v: boolean): void
+  micPreviewStream: MediaStream | null
   includeSystemAudio: boolean
   onToggleSystemAudio(v: boolean): void
 }
@@ -1108,6 +1244,7 @@ interface AudioConfigProps {
 function AudioConfig({
   includeMic,
   onToggleMic,
+  micPreviewStream,
   includeSystemAudio,
   onToggleSystemAudio
 }: AudioConfigProps) {
@@ -1134,6 +1271,14 @@ function AudioConfig({
           labelOff="Audio système"
         />
       </div>
+      {/* Mic check: parle et regarde la barre bouger AVANT d'enregistrer. */}
+      {includeMic && (
+        <AudioLevelMeter
+          stream={micPreviewStream}
+          label="Test micro"
+          className="px-1 pt-1"
+        />
+      )}
     </section>
   )
 }
@@ -1759,6 +1904,12 @@ interface ActiveViewProps {
   formatTime(ms: number): string
   previewRef: React.RefObject<HTMLVideoElement>
   savedPath: string | null
+  isPaused: boolean
+  recBytes: number
+  /** Final (recorded) stream — its audio track feeds the live meter. */
+  audioStream: MediaStream | null
+  onCountdownDone(): void
+  onCountdownCancel(): void
   webcamActive: boolean
   webcamCorner: Corner
   onCornerChange(c: Corner): void
@@ -1778,6 +1929,11 @@ function ActiveView({
   formatTime,
   previewRef,
   savedPath,
+  isPaused,
+  recBytes,
+  audioStream,
+  onCountdownDone,
+  onCountdownCancel,
   webcamActive,
   webcamCorner,
   onCornerChange,
@@ -1803,13 +1959,30 @@ function ActiveView({
           className="block h-full w-full bg-deep-900 object-contain"
         />
         {phase === 'recording' && (
-          <div className="absolute left-3 top-3 inline-flex items-center gap-2 rounded-full bg-coral-500 px-3 py-1 text-xs font-bold text-white shadow-glow-coral">
+          <div
+            className={`absolute left-3 top-3 inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold text-white ${
+              isPaused ? 'bg-sea-700/80' : 'bg-coral-500 shadow-glow-coral'
+            }`}
+          >
             <span className="relative inline-flex h-2 w-2">
-              <span className="absolute inset-0 animate-glow-pulse rounded-full bg-white" />
+              {!isPaused && (
+                <span className="absolute inset-0 animate-glow-pulse rounded-full bg-white" />
+              )}
               <span className="relative h-2 w-2 rounded-full bg-white" />
             </span>
-            REC · {formatTime(elapsedMs)}
+            {isPaused ? 'PAUSE' : 'REC'} · {formatTime(elapsedMs)}
+            {recBytes > 0 && (
+              <span className="font-medium text-white/85">≈ {formatBytes(recBytes)}</span>
+            )}
           </div>
+        )}
+        {(phase === 'countdown' || phase === 'recording') && (
+          <div className="absolute right-3 top-3 w-44 rounded-full bg-deep-900/70 px-3 py-1.5 backdrop-blur-sm">
+            <AudioLevelMeter stream={audioStream} label="Son" tone="dark" />
+          </div>
+        )}
+        {phase === 'countdown' && (
+          <CountdownOverlay onDone={onCountdownDone} onCancel={onCountdownCancel} />
         )}
       </div>
 
