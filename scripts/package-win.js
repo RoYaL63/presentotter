@@ -96,7 +96,6 @@ const IGNORE_PATTERNS = [
   /^\/node_modules\/esbuild($|\/)/,
   /^\/node_modules\/@esbuild($|\/)/,
   /^\/node_modules\/@babel($|\/)/,
-  /^\/node_modules\/electron-store($|\/)/,
   /^\/node_modules\/electron\/dist($|\/)/,
 
   // Source maps + markdown bloat

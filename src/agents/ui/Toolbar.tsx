@@ -505,6 +505,9 @@ export function Toolbar() {
       api.clearLiveMasks()
       api.clearLiveOcrWords()
       api.stopUia()
+      // Main keeps overlays alive while LIVE runs — release that hold so
+      // the idle teardown can reclaim their renderers.
+      api.setLiveActive(false)
       if (engineRef.current) {
         await engineRef.current.stop()
         engineRef.current = null
@@ -516,6 +519,7 @@ export function Toolbar() {
       setLiveError(null)
       setLiveOn(true)
       setLivePhase('acquiring')
+      api.setLiveActive(true)
       const mode = sanitizerSettings.detectionMode
       // Fast path: native Windows UI-Automation field scanner (instant,
       // light). Detected fields stream back via onUiaElements.
@@ -544,6 +548,7 @@ export function Toolbar() {
       setLiveOn(false)
       setLivePhase(null)
       api.stopUia()
+      api.setLiveActive(false)
       if (engineRef.current) {
         void engineRef.current.stop()
         engineRef.current = null
@@ -559,6 +564,8 @@ export function Toolbar() {
   ])
 
   // Tear down the engine + native scanner when the toolbar unmounts.
+  // (Main also stops UIA on toolbar-window close — this cleanup only runs
+  // for React unmounts, not when the window is destroyed.)
   useEffect(() => {
     return () => {
       if (engineRef.current !== null) {
@@ -566,6 +573,7 @@ export function Toolbar() {
         engineRef.current = null
       }
       apiRef.current?.stopUia()
+      apiRef.current?.setLiveActive(false)
     }
   }, [])
 

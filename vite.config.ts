@@ -44,8 +44,7 @@ export default defineConfig({
         'electron',
         'better-sqlite3',
         'fluent-ffmpeg',
-        'uiohook-napi',
-        'electron-store'
+        'uiohook-napi'
       ]
     }
   }

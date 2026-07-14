@@ -114,6 +114,9 @@ const api = {
    *  scanner; masks (virtual-screen DIP) arrive via onUiaMasks. */
   startUia: () => ipcRenderer.send('live:uia-start'),
   stopUia: () => ipcRenderer.send('live:uia-stop'),
+  /** Tell main whether the LIVE sanitizer runs — overlays are kept alive
+   *  (exempt from the idle teardown) while it does. */
+  setLiveActive: (active: boolean) => ipcRenderer.send('live:set-active', active),
   onUiaElements: (
     cb: (
       els: Array<{ text: string; x: number; y: number; width: number; height: number }>

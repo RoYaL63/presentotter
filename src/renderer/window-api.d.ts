@@ -113,6 +113,7 @@ declare global {
     } | null>
     startUia(): void
     stopUia(): void
+    setLiveActive(active: boolean): void
     onUiaElements(
       cb: (
         els: Array<{ text: string; x: number; y: number; width: number; height: number }>

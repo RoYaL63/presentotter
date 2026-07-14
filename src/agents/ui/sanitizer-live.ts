@@ -1,4 +1,7 @@
-import { createWorker, type Worker as TesseractWorker } from 'tesseract.js'
+// Type-only import — tesseract.js itself is dynamic-imported in
+// ensureWorker() so its JS only loads when the user turns LIVE on,
+// not in every toolbar session.
+import type { Worker as TesseractWorker } from 'tesseract.js'
 import { PATTERNS } from '../sanitizer'
 
 /**
@@ -388,6 +391,7 @@ export class SanitizerLiveEngine {
 
   private async ensureWorker(): Promise<void> {
     if (this.worker !== null) return
+    const { createWorker } = await import('tesseract.js')
     // Default to English; users can add 'fra' later via settings. Tesseract
     // downloads traineddata on first init (~3-5 MB cached after that).
     this.worker = await createWorker('eng')

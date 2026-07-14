@@ -1,14 +1,34 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { Home } from '../agents/ui/Home'
-import { Toolbar } from '../agents/ui/Toolbar'
-import { Overlay } from '../agents/ui/Overlay'
-import { CaptureOverlay } from '../agents/ui/CaptureOverlay'
-import { CaptureEditor } from '../agents/ui/CaptureEditor'
-import { RegionRecorder } from '../agents/ui/RegionRecorder'
-import { VideoEditor } from '../agents/ui/VideoEditor'
 import mascotUrl from './assets/mascot.webp'
 import './index.css'
+
+// One lazy chunk per window kind. Every BrowserWindow (each overlay, the
+// toolbar, capture windows...) boots this same entry, so static imports
+// here would make every renderer process parse the WHOLE app — editor,
+// recorders, OCR pipeline included. Lazy imports keep each window's JS
+// down to what it actually renders.
+const Home = React.lazy(async () => ({
+  default: (await import('../agents/ui/Home')).Home
+}))
+const Toolbar = React.lazy(async () => ({
+  default: (await import('../agents/ui/Toolbar')).Toolbar
+}))
+const Overlay = React.lazy(async () => ({
+  default: (await import('../agents/ui/Overlay')).Overlay
+}))
+const CaptureOverlay = React.lazy(async () => ({
+  default: (await import('../agents/ui/CaptureOverlay')).CaptureOverlay
+}))
+const CaptureEditor = React.lazy(async () => ({
+  default: (await import('../agents/ui/CaptureEditor')).CaptureEditor
+}))
+const RegionRecorder = React.lazy(async () => ({
+  default: (await import('../agents/ui/RegionRecorder')).RegionRecorder
+}))
+const VideoEditor = React.lazy(async () => ({
+  default: (await import('../agents/ui/VideoEditor')).VideoEditor
+}))
 
 /**
  * Window-mode dispatcher.
@@ -95,6 +115,10 @@ const Root: () => React.ReactElement = () => {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <Root />
+    {/* fallback null: transparent windows (overlay, toolbar) must not
+        flash any placeholder while their chunk loads from disk. */}
+    <React.Suspense fallback={null}>
+      <Root />
+    </React.Suspense>
   </React.StrictMode>
 )

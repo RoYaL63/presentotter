@@ -93,6 +93,20 @@ let cursorHighlightOn = false
  *  poll as `cursorHighlightOn` so the overlay can draw a dark wash
  *  with a clear circle that follows the mouse, no drag required. */
 let spotlightActive = false
+/** True while the toolbar's LIVE sanitizer runs. Overlays must stay alive
+ *  the whole time — they are what draws the shield masks over secrets. */
+let liveSanitizerActive = false
+
+/** Last payload pushed on each sticky overlay channel (tool, color, cursor
+ *  settings…). Replayed into freshly created overlay windows so overlays
+ *  respawned after an idle teardown come back with the user's state. */
+const overlayStickyState = new Map<string, unknown>()
+
+let overlayIdleTimer: ReturnType<typeof setTimeout> | null = null
+/** Grace before unused overlays are torn down. Must outlive the longest
+ *  ephemeral-stroke fade (clamped to 20 s in useToolSettingsStore) so a
+ *  freshly drawn stroke never vanishes early with its window. */
+const OVERLAY_IDLE_MS = 30_000
 
 const isDev = !app.isPackaged
 const DEV_URL = 'http://localhost:5173'
@@ -346,6 +360,16 @@ function createOverlayWindow(display: Display): BrowserWindow {
   // as the capture windows (see capture.ts createCaptureWindow).
   win.setBounds({ x, y, width, height })
 
+  // Replay the sticky overlay state (tool, color, stroke, cursor settings…)
+  // once the renderer is ready to receive IPC. Without this, an overlay
+  // respawned after an idle teardown (see syncOverlayLifecycle) would boot
+  // with defaults while the toolbar still shows the user's selections.
+  win.webContents.on('did-finish-load', () => {
+    for (const [channel, payload] of overlayStickyState) {
+      win.webContents.send(channel, payload)
+    }
+  })
+
   void win.loadURL(rendererUrl('overlay'))
 
   win.once('ready-to-show', () => {
@@ -465,6 +489,17 @@ function createToolbarWindow(): BrowserWindow {
     stopCursorTracking()
     stopToolbarHolePoll()
     overlaysInteractive = false
+    // The LIVE sanitizer lived in this renderer: its React cleanup never
+    // runs when the window is destroyed, so the native UIA scanner (a
+    // PowerShell child scanning every 500 ms) would keep running forever.
+    // Kill it from here, and drop the session's overlay state with it.
+    stopUia()
+    liveSanitizerActive = false
+    if (overlayIdleTimer !== null) {
+      clearTimeout(overlayIdleTimer)
+      overlayIdleTimer = null
+    }
+    overlayStickyState.clear()
     notifyHomeStatus()
   })
 
@@ -478,8 +513,12 @@ function enableToolbar(): void {
     notifyHomeStatus()
     return
   }
+  // Warm start: overlays come up with the toolbar so the first tool click
+  // draws instantly. If the user doesn't touch a tool, syncOverlayLifecycle
+  // tears them down after OVERLAY_IDLE_MS and respawns on demand.
   spawnOverlayForAllDisplays()
   toolbarWindow = createToolbarWindow()
+  syncOverlayLifecycle()
   notifyHomeStatus()
 }
 
@@ -499,6 +538,13 @@ function closeToolbarAndOverlays(): void {
   stopCursorTracking()
   stopToolbarHolePoll()
   overlaysInteractive = false
+  stopUia()
+  liveSanitizerActive = false
+  if (overlayIdleTimer !== null) {
+    clearTimeout(overlayIdleTimer)
+    overlayIdleTimer = null
+  }
+  overlayStickyState.clear()
 }
 
 /**
@@ -584,6 +630,51 @@ function forwardToOverlays<T>(channel: string, payload?: T): void {
   }
 }
 
+/** forwardToOverlays + remember the payload so overlays created later
+ *  (respawn after idle teardown) receive it on did-finish-load. Use for
+ *  STATE channels only — never for one-shot commands like undo/clear. */
+function forwardToOverlaysSticky<T>(channel: string, payload?: T): void {
+  overlayStickyState.set(channel, payload)
+  forwardToOverlays(channel, payload)
+}
+
+/** Something currently requires a live overlay window. */
+function overlaysNeeded(): boolean {
+  return (
+    overlaysInteractive || cursorHighlightOn || spotlightActive || liveSanitizerActive
+  )
+}
+
+/**
+ * Overlay windows are one full renderer process PER DISPLAY — the biggest
+ * idle RAM cost of the app while the toolbar is on. Annotations are
+ * short-lived by design (ephemeral strokes cap at 20 s), so when nothing
+ * has needed an overlay for OVERLAY_IDLE_MS we close the windows and
+ * recreate them on the next activation (tool selected, cursor highlight,
+ * spotlight, LIVE sanitizer). Fresh windows get the sticky state replayed
+ * so the teardown is invisible to the user — apart from the freed RAM.
+ */
+function syncOverlayLifecycle(): void {
+  if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
+  if (overlaysNeeded()) {
+    if (overlayIdleTimer !== null) {
+      clearTimeout(overlayIdleTimer)
+      overlayIdleTimer = null
+    }
+    spawnOverlayForAllDisplays()
+    return
+  }
+  if (overlayWindows.size === 0 || overlayIdleTimer !== null) return
+  overlayIdleTimer = setTimeout(() => {
+    overlayIdleTimer = null
+    if (overlaysNeeded()) return
+    for (const w of overlayWindows.values()) {
+      if (!w.isDestroyed()) w.close()
+    }
+    overlayWindows.clear()
+  }, OVERLAY_IDLE_MS)
+}
+
 /**
  * Apply a single click-through state to every overlay.
  *   interactive=true  → overlay captures the pointer (drawing)
@@ -648,6 +739,9 @@ function stopToolbarHolePoll(): void {
 
 function setOverlaysInteractive(interactive: boolean): void {
   overlaysInteractive = interactive
+  // Spawn missing overlays before touching their click-through state, or
+  // arm the idle teardown when the tool was just deselected.
+  syncOverlayLifecycle()
   if (interactive) {
     // Start in the interactive state, then let the hole poll punch a
     // click-through hole whenever the cursor is over the toolbar.
@@ -762,7 +856,13 @@ function registerIpcHandlers(): void {
   // toolbar, which feeds them into the same sticky-mask pool as OCR.
   ipcMain.on('live:uia-start', (e) => {
     startUia((elements) => {
-      if (!e.sender.isDestroyed()) e.sender.send('live:uia-elements', elements)
+      // The subscribing renderer is gone (window closed mid-LIVE) — kill
+      // the PowerShell scanner instead of letting it poll for nobody.
+      if (e.sender.isDestroyed()) {
+        stopUia()
+        return
+      }
+      e.sender.send('live:uia-elements', elements)
     })
   })
   ipcMain.on('live:uia-stop', () => stopUia())
@@ -1129,21 +1229,22 @@ function registerIpcHandlers(): void {
     return { workArea: d.workArea, scaleFactor: d.scaleFactor }
   })
 
-  // Toolbar → Overlay(s)
+  // Toolbar → Overlay(s). Sticky: replayed into overlays respawned after
+  // an idle teardown (see syncOverlayLifecycle).
   ipcMain.on('overlay:set-tool', (_e, tool: string) =>
-    forwardToOverlays('overlay:set-tool', tool)
+    forwardToOverlaysSticky('overlay:set-tool', tool)
   )
   ipcMain.on('overlay:set-color', (_e, hex: string) =>
-    forwardToOverlays('overlay:set-color', hex)
+    forwardToOverlaysSticky('overlay:set-color', hex)
   )
   ipcMain.on('overlay:set-opacity', (_e, value: number) =>
-    forwardToOverlays('overlay:set-opacity', value)
+    forwardToOverlaysSticky('overlay:set-opacity', value)
   )
   ipcMain.on('overlay:set-stroke', (_e, width: number) =>
-    forwardToOverlays('overlay:set-stroke', width)
+    forwardToOverlaysSticky('overlay:set-stroke', width)
   )
   ipcMain.on('overlay:set-ephemeral-life', (_e, ms: number) =>
-    forwardToOverlays('overlay:set-ephemeral-life', ms)
+    forwardToOverlaysSticky('overlay:set-ephemeral-life', ms)
   )
   ipcMain.on('overlay:clear', () => forwardToOverlays('overlay:clear'))
   ipcMain.on('overlay:undo', () => forwardToOverlays('overlay:undo'))
@@ -1209,7 +1310,8 @@ function registerIpcHandlers(): void {
 
   ipcMain.on('cursor:set-highlight', (_e, enabled: boolean) => {
     cursorHighlightOn = enabled
-    forwardToOverlays('cursor:set-highlight', enabled)
+    syncOverlayLifecycle()
+    forwardToOverlaysSticky('cursor:set-highlight', enabled)
     if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
       toolbarWindow.webContents.send('toolbar:cursor-highlight-changed', enabled)
     }
@@ -1218,14 +1320,22 @@ function registerIpcHandlers(): void {
 
   ipcMain.on('spotlight:set-active', (_e, active: boolean) => {
     spotlightActive = active
-    forwardToOverlays('spotlight:set-active', active)
+    syncOverlayLifecycle()
+    forwardToOverlaysSticky('spotlight:set-active', active)
     syncCursorTracking()
   })
   ipcMain.on('cursor:set-color', (_e, hex: string) => {
-    forwardToOverlays('cursor:set-color', hex)
+    forwardToOverlaysSticky('cursor:set-color', hex)
   })
   ipcMain.on('cursor:set-settings', (_e, settings: unknown) => {
-    forwardToOverlays('cursor:set-settings', settings)
+    forwardToOverlaysSticky('cursor:set-settings', settings)
+  })
+
+  // Toolbar LIVE sanitizer on/off. Overlays draw the shield masks, so they
+  // must stay alive (exempt from the idle teardown) while LIVE runs.
+  ipcMain.on('live:set-active', (_e, active: boolean) => {
+    liveSanitizerActive = active === true
+    syncOverlayLifecycle()
   })
 
   // Console launcher → bring the Home window to front instead of opening a
@@ -1263,8 +1373,10 @@ function registerIpcHandlers(): void {
 
 function selectToolFromShortcut(tool: string): void {
   if (toolbarWindow === null || toolbarWindow.isDestroyed()) return
-  forwardToOverlays('overlay:set-tool', tool)
+  // setOverlaysInteractive first: it respawns idle-closed overlays, which
+  // then pick the sticky set-tool up on did-finish-load.
   setOverlaysInteractive(tool !== 'select')
+  forwardToOverlaysSticky('overlay:set-tool', tool)
   toolbarWindow.webContents.send('toolbar:tool-changed', tool)
 }
 
@@ -1335,7 +1447,8 @@ function handleTripleAlt(): void {
     enableToolbar()
   }
   cursorHighlightOn = !cursorHighlightOn
-  forwardToOverlays('cursor:set-highlight', cursorHighlightOn)
+  syncOverlayLifecycle()
+  forwardToOverlaysSticky('cursor:set-highlight', cursorHighlightOn)
   if (toolbarWindow !== null && !toolbarWindow.isDestroyed()) {
     toolbarWindow.webContents.send('toolbar:cursor-highlight-changed', cursorHighlightOn)
   }

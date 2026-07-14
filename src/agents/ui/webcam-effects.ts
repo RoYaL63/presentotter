@@ -1,4 +1,7 @@
-import { FilesetResolver, ImageSegmenter, type MPMask } from '@mediapipe/tasks-vision'
+// Type-only import — the actual MediaPipe module (~ hundreds of kB of JS
+// plus the WASM fetch) is dynamic-imported inside getSegmenter() so it
+// only loads when the user actually enables a background effect.
+import type { ImageSegmenter, MPMask } from '@mediapipe/tasks-vision'
 
 /**
  * Webcam background effects — blur, image replacement, solid color.
@@ -51,8 +54,11 @@ async function getSegmenter(): Promise<ImageSegmenter> {
   if (cachedSegmenter !== null) return cachedSegmenter
   if (segmenterLoading !== null) return segmenterLoading
   segmenterLoading = (async () => {
+    const { FilesetResolver, ImageSegmenter: Segmenter } = await import(
+      '@mediapipe/tasks-vision'
+    )
     const vision = await FilesetResolver.forVisionTasks('mediapipe')
-    const seg = await ImageSegmenter.createFromOptions(vision, {
+    const seg = await Segmenter.createFromOptions(vision, {
       baseOptions: {
         modelAssetPath: 'mediapipe/selfie_segmenter.tflite',
         delegate: 'GPU'
